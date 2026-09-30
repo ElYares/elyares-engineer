@@ -6,6 +6,10 @@ sesión más importante y decide el modo de la isla:
     hidden  nada que mostrar
     peek    asomado, solo la mascota (Claude trabajando, o esperando hace rato)
     open    con texto (pide permiso, recién terminó, se quedó esperando)
+
+Si el permiso llegó por el hook `ask`, la sesión guarda el Request del hook y
+la isla muestra Permitir / Denegar. El Request se suelta en cuanto la sesión
+sigue por otro lado (se contestó en la terminal, terminó el turno, etc.).
 """
 
 import os
@@ -18,6 +22,9 @@ WAITING_OPEN_SECS = 6     # abierta al quedarse esperando; luego se asoma
 WAITING_PEEK_SECS = 600   # tras 10 min esperando deja de asomarse
 WORKING_STALE_SECS = 1200 # 20 min sin eventos trabajando = se colgó o se cerró
 FORGET_SECS = 6 * 3600
+ASK_TIMEOUT = 600         # timeout del hook PermissionRequest en settings.json
+
+DENY_MESSAGE = 'El usuario lo denegó desde la mascota ElYares.'
 
 PRIORITY = {'permission': 4, 'waiting': 3, 'done': 2, 'working': 1}
 
@@ -103,6 +110,9 @@ class Session:
     detail: str = ''
     last_tool: str = ''
     started: float = 0.0
+    ask: object = None        # ipc.Request del hook PermissionRequest
+    ask_tool: str = ''
+    ask_agent: str = ''
     changed: float = field(default_factory=time.monotonic)
     updated: float = field(default_factory=time.monotonic)
 
@@ -118,6 +128,12 @@ class Session:
             self.detail = detail
         self.updated = now
 
+    def release(self):
+        """Suelta el hook que espera respuesta, sin decidir."""
+        if self.ask is not None:
+            self.ask.reply(None)
+            self.ask = None
+
 
 @dataclass
 class View:
@@ -126,6 +142,7 @@ class View:
     title: str = ''
     detail: str = ''
     count: int = 0
+    ask: bool = False         # mostrar Permitir / Denegar
     session: Session | None = None
     key: tuple = ()
 
@@ -134,12 +151,17 @@ class Model:
     def __init__(self):
         self.sessions = {}
 
-    def handle(self, msg, now=None):
+    def handle(self, msg, req=None, now=None):
         now = now or time.monotonic()
         ev = msg.get('event', '')
         sid = str(msg.get('session_id') or 'unknown')
+        agent = msg.get('agent_id') or ''
         if ev == 'session-end':
-            self.sessions.pop(sid, None)
+            s = self.sessions.pop(sid, None)
+            if s:
+                s.release()
+            if req:
+                req.reply(None)
             return
         s = self.sessions.get(sid)
         if s is None:
@@ -149,7 +171,20 @@ class Model:
         s.tmux = msg.get('tmux') or s.tmux
         root = project_root(s.cwd)
 
-        if ev == 'start':
+        if s.ask is not None and agent == s.ask_agent and (
+                ev in ('start', 'stop', 'failure')
+                or (ev == 'tool-done' and msg.get('tool_name') == s.ask_tool)):
+            # Se contestó en la terminal, o el turno siguió sin esperar.
+            s.release()
+
+        if ev == 'ask':
+            s.release()
+            if req is None or req.done:
+                return
+            s.ask, s.ask_tool, s.ask_agent = req, msg.get('tool_name', ''), agent
+            s.last_tool = describe_tool(s.ask_tool, msg.get('tool_input'), root)
+            s.set('permission', s.last_tool, now)
+        elif ev == 'start':
             s.started = now
             s.last_tool = ''
             s.set('working', 'Pensando…', now)
@@ -176,9 +211,31 @@ class Model:
             reason = msg.get('error_type') or msg.get('reason') or ''
             s.set('waiting', f'Se cayó{": " + reason if reason else ""}', now)
 
+    def decide(self, s, allow, now=None):
+        """Contesta el permiso pendiente de la sesión desde la isla."""
+        if s is None or s.ask is None:
+            return False
+        answer = {'behavior': 'allow'} if allow else {'behavior': 'deny', 'message': DENY_MESSAGE}
+        s.ask.reply(answer)
+        s.ask = None
+        s.set('working', s.last_tool if allow else 'Pensando…', now)
+        return True
+
+    def gone(self, req, now=None):
+        """El hook se fue sin respuesta: Claude lo mató o se le acabó el tiempo."""
+        for s in self.sessions.values():
+            if s.ask is req:
+                s.ask = None
+                # Claude lo mata al contestar No en la terminal y el turno se
+                # corta; si fue timeout, el aviso de la terminal sigue ahí.
+                if s.state == 'permission' and time.time() - req.born < ASK_TIMEOUT - 5:
+                    s.set('waiting', 'Esperando tu respuesta', now)
+                return
+
     def _expire(self, now):
         for sid, s in list(self.sessions.items()):
             if now - s.updated > FORGET_SECS:
+                s.release()
                 del self.sessions[sid]
             elif s.state == 'working' and now - s.updated > WORKING_STALE_SECS:
                 s.set('idle', '', now)
@@ -213,4 +270,5 @@ class Model:
         else:
             mode, title = 'peek', best.proj
         pet = {'waiting': 'confused'}.get(st, st)
-        return View(mode, pet, title, best.detail, count, best, (best.sid, st))
+        ask = st == 'permission' and best.ask is not None
+        return View(mode, pet, title, best.detail, count, ask, best, (best.sid, st, ask))

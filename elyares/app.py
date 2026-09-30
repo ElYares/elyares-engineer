@@ -24,7 +24,7 @@ from . import actions, hypr, ipc, mascot  # noqa: E402
 from .state import Model  # noqa: E402
 
 WIN_W, WIN_H = 480, 112
-SIZES = {'hidden': (120, 6), 'peek': (92, 80), 'open': (440, 88)}
+SIZES = {'hidden': (120, 6), 'peek': (92, 80), 'open': (440, 88), 'ask': (440, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
@@ -34,6 +34,10 @@ DETAIL_COLOR = (.66, .71, .84, 1)
 MUTED_COLOR = (.44, .49, .63, 1)
 FONT_TITLE = 'Sans Semi-Bold 11'
 FONT_DETAIL = 'JetBrainsMono Nerd Font 9'
+FONT_BUTTON = 'Sans Semi-Bold 10'
+BUTTON_H, BUTTON_W, BUTTON_GAP = 26, 84, 8
+ALLOW_BG, ALLOW_FG = (.95, .96, 1), (5 / 255, 6 / 255, 8 / 255)
+DENY_BG, DENY_FG = (1, 1, 1), (.95, .96, 1)
 SPRING_K, SPRING_C = 220.0, 22.0   # rigidez y amortiguación: rebota un poquito
 LOOK_EVERY = 1 / 15                # frecuencia con la que se pregunta el cursor
 IDLE_FPS = 12                      # asomada y quieta: ~3% de CPU en vez de ~8% a 30
@@ -64,6 +68,8 @@ class Island:
         self.slow_id = 0
         self.last_frame = None
         self.region = None
+        self.buttons = {}               # 'allow'/'deny' -> (x, y, w, h), del último dibujo
+        self.pointer = None
         self.monitor = hypr.focused_monitor()
 
         win = Gtk.ApplicationWindow(application=app)
@@ -86,6 +92,7 @@ class Island:
         motion = Gtk.EventControllerMotion()
         motion.connect('enter', lambda *_: self.set_hover(True))
         motion.connect('leave', lambda *_: self.set_hover(False))
+        motion.connect('motion', self.on_motion)
         da.add_controller(motion)
         click = Gtk.GestureClick()
         click.connect('pressed', self.on_click)
@@ -101,7 +108,8 @@ class Island:
         win.present()
         self.update_region()
 
-        ipc.serve(lambda msg: GLib.idle_add(self.on_message, msg))
+        ipc.serve(lambda msg, req: GLib.idle_add(self.on_message, msg, req),
+                  lambda req: GLib.idle_add(self.on_gone, req))
         hypr.listen(lambda name: GLib.idle_add(self.on_focused_monitor, name))
         GLib.timeout_add_seconds(3, self.poll_dnd)
         # "Terminó" y "esperando" caducan solos aunque no lleguen más eventos.
@@ -109,8 +117,13 @@ class Island:
 
     # ── estado ───────────────────────────────────────────────────────────────
 
-    def on_message(self, msg):
-        self.model.handle(msg)
+    def on_message(self, msg, req):
+        self.model.handle(msg, req)
+        self.refresh()
+        return GLib.SOURCE_REMOVE
+
+    def on_gone(self, req):
+        self.model.gone(req)
         self.refresh()
         return GLib.SOURCE_REMOVE
 
@@ -141,6 +154,8 @@ class Island:
 
     def target(self):
         mode = self.view.mode
+        if mode == 'open' and self.view.ask:
+            return 'ask'
         if self.hover:
             if mode == 'hidden':
                 mode = 'peek'
@@ -150,7 +165,12 @@ class Island:
 
     def set_hover(self, value):
         self.hover = value
+        if not value:
+            self.pointer = None
         self.ensure_tick()
+
+    def on_motion(self, _ctrl, x, y):
+        self.pointer = (x, y)
 
     def pet(self, now):
         if self.override:
@@ -316,6 +336,9 @@ class Island:
             else:
                 cr.restore()
 
+        # Con botones, el texto sube y deja la fila de abajo para ellos.
+        ask_alpha = clamp((h - SIZES['open'][1]) / 16) if self.view.ask else 0.0
+        mid = h / 2 - (h / 2 - 37) * ask_alpha
         text_alpha = clamp((w - 220) / 160) * clamp((h - 50) / 30)
         if text_alpha > 0 and self.title:
             tx = x0 + 12 + PET + 10
@@ -323,21 +346,46 @@ class Island:
             if self.view.count > 1:
                 badge = self._layout(cr, f'{self.view.count} sesiones', FONT_DETAIL)
                 bw = badge.get_pixel_size()[0]
-                cr.move_to(right - bw, h / 2 - 17)
+                cr.move_to(right - bw, mid - 17)
                 cr.set_source_rgba(*MUTED_COLOR[:3], text_alpha)
                 PangoCairo.show_layout(cr, badge)
                 title_right = right - bw - 12
             else:
                 title_right = right
             title = self._layout(cr, self.title, FONT_TITLE, title_right - tx)
-            cr.move_to(tx, h / 2 - 21)
+            cr.move_to(tx, mid - 21)
             cr.set_source_rgba(*TITLE_COLOR[:3], text_alpha)
             PangoCairo.show_layout(cr, title)
             detail = self._layout(cr, self.detail, FONT_DETAIL, right - tx)
-            cr.move_to(tx, h / 2 + 3)
+            cr.move_to(tx, mid + 3)
             cr.set_source_rgba(*DETAIL_COLOR[:3], text_alpha)
             PangoCairo.show_layout(cr, detail)
+        self.buttons = {}
+        if ask_alpha > 0 and text_alpha > 0:
+            self.draw_buttons(cr, x0 + w - 18, h - 14, ask_alpha * text_alpha)
         cr.restore()
+
+    def draw_buttons(self, cr, right, bottom, alpha):
+        y = bottom - BUTTON_H
+        for key, label, x, bg, fg, fill in (
+                ('allow', 'Permitir', right - BUTTON_W, ALLOW_BG, ALLOW_FG, .92),
+                ('deny', 'Denegar', right - 2 * BUTTON_W - BUTTON_GAP, DENY_BG, DENY_FG, .10)):
+            rect = (x, y, BUTTON_W, BUTTON_H)
+            self.buttons[key] = rect
+            px, py = self.pointer or (-1, -1)
+            over = x <= px <= x + BUTTON_W and y <= py <= y + BUTTON_H
+            r = BUTTON_H / 2
+            cr.new_sub_path()
+            cr.arc(x + r, y + r, r, math.pi / 2, 3 * math.pi / 2)
+            cr.arc(x + BUTTON_W - r, y + r, r, -math.pi / 2, math.pi / 2)
+            cr.close_path()
+            cr.set_source_rgba(*bg, min(1, fill + (.08 if over else 0)) * alpha)
+            cr.fill()
+            layout = self._layout(cr, label, FONT_BUTTON)
+            lw, lh = layout.get_pixel_size()
+            cr.move_to(x + (BUTTON_W - lw) / 2, y + (BUTTON_H - lh) / 2)
+            cr.set_source_rgba(*fg, alpha)
+            PangoCairo.show_layout(cr, layout)
 
     @staticmethod
     def _layout(cr, text, font, width=None):
@@ -355,6 +403,11 @@ class Island:
         x0, w, h = self.island_rect(self.da.get_width())
         if not (x0 <= x <= x0 + w and y <= max(h, HOVER_STRIP)):
             return
+        for key, (bx, by, bw, bh) in self.buttons.items():
+            if self.view.ask and bx <= x <= bx + bw and by <= y <= by + bh:
+                self.model.decide(self.view.session, key == 'allow')
+                self.refresh()
+                return
         if x < x0 + 12 + PET + 4:
             self.poke()
         elif self.view.session:

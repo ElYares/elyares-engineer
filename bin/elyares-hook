@@ -2,10 +2,15 @@
 """Manda un evento de Claude Code a la mascota.
 
 Uso (desde settings.json):  elyares-hook <evento>   con el payload del hook por stdin
-Eventos: start tool tool-done permission idle stop failure session-end
+Eventos: start tool tool-done permission idle stop failure session-end ask
 
-Nunca bloquea ni falla: si la mascota no está corriendo, sale en silencio.
-No escribe nada en stdout, porque Claude Code lo interpretaría como respuesta.
+Nunca falla: si la mascota no está corriendo, sale en silencio.
+
+Todos los eventos son de una sola vía menos `ask` (hook PermissionRequest), que
+espera a que se pulse Permitir o Denegar en la isla y lo imprime en stdout. En
+modo interactivo Claude Code corre este hook a la par del prompt de la
+terminal: gana el primero que conteste, así que esperar no bloquea nada. En
+modo headless (`claude -p`, SDK) sí bloquea, y ahí sale sin decidir.
 """
 import json
 import os
@@ -17,6 +22,24 @@ KEEP = ('tool_name', 'tool_input', 'message', 'notification_type', 'reason',
         'error_type', 'agent_id')
 KEEP_INPUT = ('file_path', 'notebook_path', 'command', 'pattern', 'path', 'url',
               'query', 'description', 'subagent_type')
+# Piden respuesta del usuario, no permiso: un "allow" sin respuesta no sirve.
+NO_ASK = ('AskUserQuestion', 'ExitPlanMode')
+
+
+def interactive():
+    """¿El proceso de Claude que nos lanzó tiene una terminal?"""
+    pid = os.getppid()
+    for _ in range(4):
+        try:
+            with open(f'/proc/{pid}/comm') as f:
+                comm = f.read().strip()
+            if comm == 'claude':
+                return os.readlink(f'/proc/{pid}/fd/0').startswith(('/dev/pts/', '/dev/tty'))
+            with open(f'/proc/{pid}/stat') as f:
+                pid = int(f.read().rsplit(')', 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            return False
+    return False
 
 
 def main():
@@ -29,6 +52,9 @@ def main():
         payload = json.load(sys.stdin)
     except ValueError:
         payload = {}
+    ask = event == 'ask'
+    if ask and (payload.get('tool_name') in NO_ASK or not interactive()):
+        return
     msg = {
         'event': event,
         'ts': time.time(),
@@ -43,10 +69,27 @@ def main():
         # Solo lo que se muestra; un Write puede traer megas de contenido.
         msg['tool_input'] = {k: v[:300] if isinstance(v, str) else v
                              for k, v in ti.items() if k in KEEP_INPUT}
+    if ask:
+        msg['reply'] = True
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.settimeout(0.3)
         s.connect(path)
         s.sendall((json.dumps(msg) + '\n').encode())
+        if not ask:
+            return
+        # Sin límite propio: el timeout del hook en settings.json manda.
+        s.settimeout(None)
+        data = b''
+        while not data.endswith(b'\n'):
+            b = s.recv(4096)
+            if not b:
+                return
+            data += b
+    decision = json.loads(data)
+    if decision.get('behavior') in ('allow', 'deny'):
+        # Solo stdout decide; lo demás lo interpretaría Claude como respuesta.
+        print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PermissionRequest',
+                                                 'decision': decision}}))
 
 
 try:

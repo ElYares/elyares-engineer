@@ -3,7 +3,8 @@
 Mascota que vive en el borde de arriba del monitor, debajo de Waybar, y vigila
 las sesiones de Claude Code. Se asoma mientras Claude trabaja, se abre cuando
 pide permiso, termina o se queda esperando, y un clic en el texto te lleva al
-pane de tmux de esa sesión.
+pane de tmux de esa sesión. Los permisos se pueden contestar ahí mismo con
+Permitir o Denegar.
 
 Está hecha para omarchy (Hyprland + Waybar + tmux + ghostty), pero no toca
 nada de `~/.local/share/omarchy/`: es una capa de Wayland propia.
@@ -32,6 +33,8 @@ Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyar
 - **`bin/elyares-hook <evento>`** lee el payload del hook, se queda con lo que
   hace falta y lo manda al socket. Si la mascota no está corriendo sale en
   silencio. Los hooks van con `async: true`: nunca frenan a Claude.
+- **`elyares-hook ask`** es la excepción: es síncrono y se queda esperando en
+  el socket a que pulses Permitir o Denegar (ver abajo).
 - **`elyares/`** es el daemon: una ventana GTK4 con gtk4-layer-shell anclada
   arriba y sin foco de teclado. La región de entrada sigue a la isla, así que
   fuera de ella los clics pasan a las ventanas de abajo.
@@ -43,6 +46,7 @@ Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyar
 | `UserPromptSubmit` | `start` | se asoma trabajando ("Pensando…") |
 | `PreToolUse` | `tool` | teclea y dice qué archivo o comando toca |
 | `PostToolUse` | `tool-done` | baja la antena roja tras aprobar un permiso |
+| `PermissionRequest` | `ask` | antena roja con botones Permitir / Denegar |
 | `Notification` · `permission_prompt` | `permission` | antena roja, isla abierta |
 | `Notification` · `idle_prompt` | `idle` | confundida: lleva un rato esperándote |
 | `Stop` | `stop` | saltito y "Listo en 3 min 12 s" |
@@ -53,6 +57,23 @@ Con varias sesiones muestra la más urgente (permiso > esperando > terminó >
 trabajando) y cuántas hay. Con el No molestar de swaync se duerme.
 
 Un clic en la mascota la enoja; tres rápidos la marean.
+
+### Permitir / Denegar
+
+En modo interactivo Claude Code corre el hook `PermissionRequest` **a la par**
+del prompt de la terminal y se queda con la primera respuesta. Por eso el hook
+puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
+
+- **Permitir o Denegar en la isla:** el hook imprime la decisión y el prompt de
+  la terminal se cierra solo. Al denegar, Claude recibe "El usuario lo denegó
+  desde la mascota ElYares." y sigue el turno (no lo corta como el No de la
+  terminal).
+- **Contestas en la terminal:** con Sí llega `tool-done` y la isla suelta el
+  hook; con No, Claude mata el hook y la isla pasa a "Esperando tu respuesta".
+- **Headless (`claude -p`, SDK):** ahí el hook sí bloquearía, así que sale sin
+  decidir si el proceso de Claude no tiene terminal.
+- `AskUserQuestion` y `ExitPlanMode` no llevan botones: piden una respuesta, no
+  un permiso.
 
 ## Notas
 
@@ -66,6 +87,5 @@ Un clic en la mascota la enoja; tres rápidos la marean.
 
 ## Pendiente
 
-- Permitir / Denegar desde la isla (hook `PermissionRequest`).
 - Sonidos con `pw-play`, color de acento del tema de omarchy, atajo de teclado
   para esconderla.
