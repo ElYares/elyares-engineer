@@ -17,7 +17,7 @@ done
   || { echo "Falta python-gobject, python-cairo o gtk4-layer-shell" >&2; exit 1; }
 
 mkdir -p "$bin_dir" "$unit_dir"
-for f in elyares-mascota elyares-hook elyares-demo; do
+for f in elyares-mascota elyares-hook elyares-ctl elyares-demo; do
   ln -sfn "$here/bin/$f" "$bin_dir/$f"
 done
 # Copia y no enlace: systemctl enable trata distinto a las units enlazadas.

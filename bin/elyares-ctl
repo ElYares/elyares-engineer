@@ -1,0 +1,36 @@
+#!/usr/bin/python3
+"""Manda una orden a la mascota. Pensado para atajos de Hyprland.
+
+Uso: elyares-ctl <orden>
+
+    open      abre la isla con lo que hace la sesión; otra vez, la cierra
+    hide      esconde la mascota del todo; otra vez, la vuelve a mostrar
+    compact   prende o apaga el modo compacto
+"""
+import json
+import os
+import socket
+import sys
+
+ORDERS = ('open', 'hide', 'compact')
+
+
+def main():
+    order = sys.argv[1] if len(sys.argv) > 1 else ''
+    if order not in ORDERS:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    path = os.path.join(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'),
+                        'elyares.sock')
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(0.3)
+            s.connect(path)
+            s.sendall((json.dumps({'control': order}) + '\n').encode())
+    except OSError:
+        print('elyares-ctl: la mascota no está corriendo', file=sys.stderr)
+        return 1
+    return 0
+
+
+sys.exit(main())

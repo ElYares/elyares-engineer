@@ -8,7 +8,7 @@ settings="$HOME/.claude/settings.json"
 systemctl --user disable --now elyares-mascota.service 2>/dev/null || true
 rm -f "$HOME/.config/systemd/user/elyares-mascota.service"
 systemctl --user daemon-reload
-for f in elyares-mascota elyares-hook elyares-demo; do rm -f "$HOME/.local/bin/$f"; done
+for f in elyares-mascota elyares-hook elyares-ctl elyares-demo; do rm -f "$HOME/.local/bin/$f"; done
 
 if [ -f "$settings" ]; then
   cp "$settings" "$settings.elyares-bak-$(date +%F-%H%M%S)"

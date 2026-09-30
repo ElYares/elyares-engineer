@@ -7,6 +7,9 @@ fuera de la isla, los clics pasan a las ventanas de abajo.
 En modo compacto (clic derecho en la isla lo prende y lo apaga) la isla se
 queda en una pastilla con la mascota en miniatura, y solo se abre con un clic
 o cuando hay que contestar un permiso.
+
+`elyares-ctl` manda órdenes por el mismo socket (para atajos de Hyprland):
+abrir la isla, esconderla del todo o cambiar de modo.
 """
 
 import math
@@ -28,8 +31,8 @@ from . import actions, hypr, ipc, mascot, settings  # noqa: E402
 from .state import Model  # noqa: E402
 
 WIN_W, WIN_H = 480, 112
-SIZES = {'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80), 'open': (440, 88),
-         'ask': (440, 108)}
+SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
+         'open': (440, 88), 'ask': (440, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
@@ -46,6 +49,7 @@ DENY_BG, DENY_FG = (1, 1, 1), (.95, .96, 1)
 SPRING_K, SPRING_C = 220.0, 22.0   # rigidez y amortiguación: rebota un poquito
 LOOK_EVERY = 1 / 15                # frecuencia con la que se pregunta el cursor
 IDLE_FPS = 12                      # asomada y quieta: ~3% de CPU en vez de ~8% a 30
+KEY_OPEN_SECS = 6                  # abierta con el teclado: se cierra sola
 
 
 def clamp(x, lo=0.0, hi=1.0):
@@ -60,7 +64,9 @@ class Island:
         self.dnd = False
         self.hover = False
         self.settings = settings.load()
-        self.expanded = False           # modo compacto: abierta a mano con un clic
+        self.expanded = False           # abierta a mano, con un clic o con elyares-ctl
+        self.collapse_id = 0
+        self.off = False                # escondida del todo con elyares-ctl hide
         self.w, self.h = SIZES['hidden']
         self.vw = self.vh = 0.0
         self.pet_state, self.pet_since = 'idle', time.monotonic()
@@ -128,6 +134,9 @@ class Island:
     # ── estado ───────────────────────────────────────────────────────────────
 
     def on_message(self, msg, req):
+        if 'control' in msg:
+            self.on_control(msg['control'])
+            return GLib.SOURCE_REMOVE
         self.model.handle(msg, req)
         self.refresh()
         return GLib.SOURCE_REMOVE
@@ -162,14 +171,58 @@ class Island:
         if changed or v.mode != 'hidden':
             self.ensure_tick()
 
+    def on_control(self, order):
+        if order == 'hide':
+            self.off = not self.off
+            self.collapse()
+        elif order == 'compact':
+            self.toggle_compact()
+        elif order == 'open':
+            if self.expanded and not self.off:
+                self.collapse()
+            else:
+                self.off = False
+                self.expand(KEY_OPEN_SECS)
+
+    def expand(self, secs=None):
+        """Abre la isla a mano. Con secs se cierra sola si el ratón no está encima."""
+        if self.collapse_id:
+            GLib.source_remove(self.collapse_id)
+            self.collapse_id = 0
+        self.expanded = True
+        if secs:
+            self.collapse_id = GLib.timeout_add_seconds(secs, self.on_collapse)
+        self.ensure_tick()
+
+    def collapse(self):
+        if self.collapse_id:
+            GLib.source_remove(self.collapse_id)
+            self.collapse_id = 0
+        self.expanded = False
+        self.ensure_tick()
+
+    def on_collapse(self):
+        self.collapse_id = 0
+        # Con el ratón encima se queda abierta; la cierra el 'leave'.
+        if not self.hover:
+            self.collapse()
+        return GLib.SOURCE_REMOVE
+
+    def toggle_compact(self):
+        self.settings['compact'] = not self.settings['compact']
+        settings.save(self.settings)
+        self.collapse()
+
     def target(self):
+        if self.off:
+            return 'off'
         mode = self.view.mode
         if mode == 'open' and self.view.ask:
             return 'ask'
+        if self.expanded:
+            return 'open' if self.view.session else 'peek'
         # Un permiso se abre solo aunque esté compacta: hay que contestarlo.
         if self.settings['compact'] and self.view.pet != 'permission':
-            if self.expanded:
-                return 'open' if self.view.session else 'peek'
             return 'petit' if mode != 'hidden' or self.hover else 'hidden'
         if self.hover:
             if mode == 'hidden':
@@ -182,7 +235,7 @@ class Island:
         self.hover = value
         if not value:
             self.pointer = None
-            self.expanded = False
+            self.collapse()
         self.ensure_tick()
 
     def on_motion(self, _ctrl, x, y):
@@ -265,7 +318,7 @@ class Island:
             # reloj de GTK despierta al proceso 60 veces por segundo aunque no
             # haya nada que redibujar.
             self.ticking = False
-            if self.target() != 'hidden':
+            if self.target() not in ('hidden', 'off'):
                 self.slow_id = GLib.timeout_add(1000 // IDLE_FPS, self.on_slow)
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
@@ -297,7 +350,8 @@ class Island:
     def update_region(self):
         w = int(max(self.w, SIZES['hidden'][0]))
         h = int(max(self.h, HOVER_STRIP))
-        region = ((WIN_W - w) // 2, 0, w, h)
+        # Escondida del todo no recibe nada: ni la franja que la hace asomarse.
+        region = (0, 0, 0, 0) if self.off else ((WIN_W - w) // 2, 0, w, h)
         surface = self.win.get_surface()
         if surface and region != self.region:
             surface.set_input_region(cairo.Region(cairo.RectangleInt(*region)))
@@ -423,8 +477,7 @@ class Island:
         if not (x0 <= x <= x0 + w and y <= max(h, HOVER_STRIP)):
             return
         if self.settings['compact'] and self.target() == 'petit':
-            self.expanded = True
-            self.ensure_tick()
+            self.expand()
             return
         for key, (bx, by, bw, bh) in self.buttons.items():
             if self.view.ask and bx <= x <= bx + bw and by <= y <= by + bh:
@@ -434,17 +487,14 @@ class Island:
         if x < x0 + 12 + PET + 4:
             self.poke()
         elif self.view.session:
-            self.expanded = False
+            self.collapse()
             threading.Thread(target=actions.jump, args=(self.view.session,), daemon=True).start()
 
     def on_right_click(self, _gesture, _n, x, y):
         x0, w, h = self.island_rect(self.da.get_width())
         if not (x0 <= x <= x0 + w and y <= max(h, HOVER_STRIP)):
             return
-        self.settings['compact'] = not self.settings['compact']
-        self.expanded = False
-        settings.save(self.settings)
-        self.ensure_tick()
+        self.toggle_compact()
 
 
 def main(argv):

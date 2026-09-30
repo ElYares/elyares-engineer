@@ -70,6 +70,27 @@ Clic derecho en la isla prende o apaga el modo compacto. Sin él, se asoma con
 la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 `~/.config/elyares-mascota/settings.json`.
 
+### Atajos de teclado
+
+`elyares-ctl` manda órdenes a la mascota por el mismo socket:
+
+| Orden | Qué hace |
+|---|---|
+| `elyares-ctl open` | abre la isla con lo que hace Claude; se cierra sola a los 6 s o al repetir |
+| `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
+| `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |
+
+Escondida no muestra ni los permisos: se contestan en la terminal. El estado
+de escondida no se guarda; al reiniciar el servicio vuelve a aparecer.
+
+En Hyprland (`~/.config/hypr/bindings.conf`):
+
+```
+bindd = SUPER ALT, Y, Mascota: abrir la isla, exec, elyares-ctl open
+bindd = SUPER SHIFT ALT, Y, Mascota: esconder o mostrar, exec, elyares-ctl hide
+bindd = SUPER CTRL ALT, Y, Mascota: modo compacto, exec, elyares-ctl compact
+```
+
 ### Permitir / Denegar
 
 En modo interactivo Claude Code corre el hook `PermissionRequest` **a la par**
@@ -99,5 +120,4 @@ puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
 
 ## Pendiente
 
-- Sonidos con `pw-play`, color de acento del tema de omarchy, atajo de teclado
-  para esconderla.
+- Sonidos con `pw-play` y color de acento del tema de omarchy.
