@@ -1,0 +1,10 @@
+#!/bin/sh
+# Lanza el daemon de la mascota.
+#
+# gtk4-layer-shell tiene que cargarse antes que libwayland-client, y desde
+# Python eso solo se consigue con LD_PRELOAD. Se usa el python3 del sistema a
+# propósito: el de mise no trae PyGObject.
+here=$(dirname "$(readlink -f "$0")")
+export LD_PRELOAD="/usr/lib/libgtk4-layer-shell.so${LD_PRELOAD:+:$LD_PRELOAD}"
+export PYTHONPATH="$here/..${PYTHONPATH:+:$PYTHONPATH}"
+exec /usr/bin/python3 -m elyares "$@"

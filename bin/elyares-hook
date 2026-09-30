@@ -1,0 +1,56 @@
+#!/usr/bin/python3
+"""Manda un evento de Claude Code a la mascota.
+
+Uso (desde settings.json):  elyares-hook <evento>   con el payload del hook por stdin
+Eventos: start tool tool-done permission idle stop failure session-end
+
+Nunca bloquea ni falla: si la mascota no está corriendo, sale en silencio.
+No escribe nada en stdout, porque Claude Code lo interpretaría como respuesta.
+"""
+import json
+import os
+import socket
+import sys
+import time
+
+KEEP = ('tool_name', 'tool_input', 'message', 'notification_type', 'reason',
+        'error_type', 'agent_id')
+KEEP_INPUT = ('file_path', 'notebook_path', 'command', 'pattern', 'path', 'url',
+              'query', 'description', 'subagent_type')
+
+
+def main():
+    event = sys.argv[1] if len(sys.argv) > 1 else ''
+    path = os.path.join(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'),
+                        'elyares.sock')
+    if not event or not os.path.exists(path):
+        return
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        payload = {}
+    msg = {
+        'event': event,
+        'ts': time.time(),
+        'session_id': payload.get('session_id') or 'unknown',
+        'cwd': payload.get('cwd') or os.getcwd(),
+        'tmux': os.environ.get('TMUX', ''),
+        'pane': os.environ.get('TMUX_PANE', ''),
+    }
+    msg.update({k: payload[k] for k in KEEP if k in payload})
+    ti = msg.get('tool_input')
+    if isinstance(ti, dict):
+        # Solo lo que se muestra; un Write puede traer megas de contenido.
+        msg['tool_input'] = {k: v[:300] if isinstance(v, str) else v
+                             for k, v in ti.items() if k in KEEP_INPUT}
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        s.connect(path)
+        s.sendall((json.dumps(msg) + '\n').encode())
+
+
+try:
+    main()
+except Exception:
+    pass
+sys.exit(0)

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Recorre los estados de la mascota con eventos falsos, sin Claude Code.
+# Uso: elyares-demo [proyecto]
+proj="${1:-devherd}"
+cwd="$HOME/develop/personal/$proj"
+[ -d "$cwd" ] || cwd="$HOME"
+hook="$(dirname "$(readlink -f "$0")")/elyares-hook"
+
+send() {  # send <evento> [json extra]
+  printf '{"session_id":"demo","cwd":"%s"%s}' "$cwd" "${2:+,$2}" | "$hook" "$1"
+}
+
+send start;                                                      sleep 2
+send tool '"tool_name":"Read","tool_input":{"file_path":"'"$cwd"'/app/Http/Middleware/Auth.php"}'; sleep 2.5
+send tool '"tool_name":"Edit","tool_input":{"file_path":"'"$cwd"'/app/Http/Middleware/Auth.php"}'; sleep 2.5
+send tool '"tool_name":"Bash","tool_input":{"command":"npm run build"}';                          sleep 0.5
+send permission '"message":"Claude needs your permission to use Bash"';                          sleep 5
+send tool-done;                                                  sleep 2.5
+send stop;                                                       sleep 7
+send idle;                                                       sleep 8
+send session-end
