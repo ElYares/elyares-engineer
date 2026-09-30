@@ -3,6 +3,10 @@
 La ventana mide siempre WIN_W x WIN_H y es transparente. Lo que crece y se
 encoge es la isla negra que se dibuja dentro, y la región de entrada la sigue:
 fuera de la isla, los clics pasan a las ventanas de abajo.
+
+En modo compacto (clic derecho en la isla lo prende y lo apaga) la isla se
+queda en una pastilla con la mascota en miniatura, y solo se abre con un clic
+o cuando hay que contestar un permiso.
 """
 
 import math
@@ -20,11 +24,12 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import actions, hypr, ipc, mascot  # noqa: E402
+from . import actions, hypr, ipc, mascot, settings  # noqa: E402
 from .state import Model  # noqa: E402
 
 WIN_W, WIN_H = 480, 112
-SIZES = {'hidden': (120, 6), 'peek': (92, 80), 'open': (440, 88), 'ask': (440, 108)}
+SIZES = {'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80), 'open': (440, 88),
+         'ask': (440, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
@@ -54,6 +59,8 @@ class Island:
         self.title, self.detail = '', ''
         self.dnd = False
         self.hover = False
+        self.settings = settings.load()
+        self.expanded = False           # modo compacto: abierta a mano con un clic
         self.w, self.h = SIZES['hidden']
         self.vw = self.vh = 0.0
         self.pet_state, self.pet_since = 'idle', time.monotonic()
@@ -97,6 +104,9 @@ class Island:
         click = Gtk.GestureClick()
         click.connect('pressed', self.on_click)
         da.add_controller(click)
+        right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        right.connect('pressed', self.on_right_click)
+        da.add_controller(right)
         win.set_child(da)
         self.da = da
 
@@ -156,6 +166,11 @@ class Island:
         mode = self.view.mode
         if mode == 'open' and self.view.ask:
             return 'ask'
+        # Un permiso se abre solo aunque esté compacta: hay que contestarlo.
+        if self.settings['compact'] and self.view.pet != 'permission':
+            if self.expanded:
+                return 'open' if self.view.session else 'peek'
+            return 'petit' if mode != 'hidden' or self.hover else 'hidden'
         if self.hover:
             if mode == 'hidden':
                 mode = 'peek'
@@ -167,6 +182,7 @@ class Island:
         self.hover = value
         if not value:
             self.pointer = None
+            self.expanded = False
         self.ensure_tick()
 
     def on_motion(self, _ctrl, x, y):
@@ -317,8 +333,11 @@ class Island:
         cr.clip()
 
         now = time.monotonic()
-        pet_alpha = clamp((h - 14) / 40)
-        if pet_alpha > 0:
+        # La mascota crece con la isla: en miniatura en la pastilla compacta,
+        # completa desde que la isla está asomada.
+        pet_size = clamp((h - 6) / (SIZES['peek'][1] - 6))
+        pet_alpha = clamp((h - 10) / 16)
+        if pet_alpha > 0 and pet_size > 0.1:
             state, age = self.pet(now)
             cx = x0 + min(w / 2, 12 + PET / 2)
             # La capa intermedia solo hace falta mientras aparece o desaparece.
@@ -327,8 +346,8 @@ class Island:
                 cr.push_group()
             else:
                 cr.save()
-            cr.translate(cx, h / 2 + 5)
-            cr.scale(PET_SCALE, PET_SCALE)
+            cr.translate(cx, h / 2 + 5 * pet_size)
+            cr.scale(PET_SCALE * pet_size, PET_SCALE * pet_size)
             mascot.draw(cr, state, age, now, tuple(self.look), now < self.blink_until)
             if fading:
                 cr.pop_group_to_source()
@@ -403,6 +422,10 @@ class Island:
         x0, w, h = self.island_rect(self.da.get_width())
         if not (x0 <= x <= x0 + w and y <= max(h, HOVER_STRIP)):
             return
+        if self.settings['compact'] and self.target() == 'petit':
+            self.expanded = True
+            self.ensure_tick()
+            return
         for key, (bx, by, bw, bh) in self.buttons.items():
             if self.view.ask and bx <= x <= bx + bw and by <= y <= by + bh:
                 self.model.decide(self.view.session, key == 'allow')
@@ -411,7 +434,17 @@ class Island:
         if x < x0 + 12 + PET + 4:
             self.poke()
         elif self.view.session:
+            self.expanded = False
             threading.Thread(target=actions.jump, args=(self.view.session,), daemon=True).start()
+
+    def on_right_click(self, _gesture, _n, x, y):
+        x0, w, h = self.island_rect(self.da.get_width())
+        if not (x0 <= x <= x0 + w and y <= max(h, HOVER_STRIP)):
+            return
+        self.settings['compact'] = not self.settings['compact']
+        self.expanded = False
+        settings.save(self.settings)
+        self.ensure_tick()
 
 
 def main(argv):

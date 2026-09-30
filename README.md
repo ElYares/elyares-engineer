@@ -58,6 +58,18 @@ trabajando) y cuántas hay. Con el No molestar de swaync se duerme.
 
 Un clic en la mascota la enoja; tres rápidos la marean.
 
+### Modo compacto
+
+Viene prendido. La isla se queda en una pastilla chiquita con la mascota en
+miniatura, que sigue animada (teclea, salta al terminar, se confunde si
+esperas). Un clic en la pastilla la abre con lo que está haciendo esa sesión, y
+se vuelve a cerrar cuando el ratón sale. Un permiso sí se abre solo, porque hay
+que contestarlo.
+
+Clic derecho en la isla prende o apaga el modo compacto. Sin él, se asoma con
+la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
+`~/.config/elyares-mascota/settings.json`.
+
 ### Permitir / Denegar
 
 En modo interactivo Claude Code corre el hook `PermissionRequest` **a la par**
