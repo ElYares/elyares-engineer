@@ -249,10 +249,18 @@ class Model:
         """Contesta el permiso pendiente de la sesión desde la isla."""
         if s is None or s.ask is None:
             return False
-        answer = {'behavior': 'allow'} if allow else {'behavior': 'deny', 'message': DENY_MESSAGE}
+        if allow:
+            answer = {'behavior': 'allow'}
+        else:
+            # interrupt corta el turno, como el No de la terminal.
+            answer = {'behavior': 'deny', 'message': DENY_MESSAGE, 'interrupt': True}
         s.ask.reply(answer)
         s.ask = None
-        s.set('working', s.last_tool if allow else 'Pensando…', now)
+        if allow:
+            s.set('working', s.last_tool, now)
+        else:
+            # Un turno cortado no manda stop: Claude se queda en el prompt.
+            s.set('waiting', 'Esperando tu respuesta', now)
         return True
 
     def gone(self, req, now=None):

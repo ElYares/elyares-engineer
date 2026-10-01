@@ -117,8 +117,9 @@ puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
 
 - **Permitir o Denegar en la isla:** el hook imprime la decisión y el prompt de
   la terminal se cierra solo. Al denegar, Claude recibe "El usuario lo denegó
-  desde la mascota ElYares." y sigue el turno (no lo corta como el No de la
-  terminal).
+  desde la mascota ElYares." y el turno se corta, como con el No de la
+  terminal: la decisión lleva `interrupt: true` y la isla pasa a "Esperando tu
+  respuesta".
 - **Contestas en la terminal:** con Sí llega `tool-done` y la isla suelta el
   hook; con No, Claude mata el hook y la isla pasa a "Esperando tu respuesta".
 - **Headless (`claude -p`, SDK):** ahí el hook sí bloquearía, así que sale sin
