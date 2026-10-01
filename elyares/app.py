@@ -12,7 +12,8 @@ o cuando hay que contestar un permiso.
 abrir la isla, esconderla del todo o cambiar de modo.
 
 Abierta a mano y con varias sesiones, debajo de la más urgente sale una fila
-por cada una de las demás; un clic en la fila lleva a su pane de tmux.
+por cada una de las demás, también las que están en reposo; un clic en la fila
+lleva a su pane de tmux.
 """
 
 import math
@@ -59,6 +60,13 @@ SPRING_K, SPRING_C = 220.0, 22.0   # rigidez y amortiguación: rebota un poquito
 LOOK_EVERY = 1 / 15                # frecuencia con la que se pregunta el cursor
 IDLE_FPS = 12                      # asomada y quieta: ~3% de CPU en vez de ~8% a 30
 KEY_OPEN_SECS = 6                  # abierta con el teclado: se cierra sola
+
+
+def ago(secs):
+    mins = int(secs // 60)
+    if mins < 1:
+        return 'hace un momento'
+    return f'hace {mins} min' if mins < 60 else f'hace {mins // 60} h'
 
 
 def clamp(x, lo=0.0, hi=1.0):
@@ -177,6 +185,10 @@ class Island:
             self.pet_state, self.pet_since = v.pet, time.monotonic()
         if v.title:
             self.title, self.detail = v.title, v.detail
+        elif self.expanded and v.others:
+            # Abierta a mano sin nada corriendo: la cabecera lo dice y la lista
+            # trae las sesiones en reposo.
+            self.title, self.detail = 'Sin sesiones activas', f'{len(v.others)} en reposo'
         changed = v.mode != self.view.mode or v.key != self.view.key
         self.view = v
         if changed or v.mode != 'hidden':
@@ -203,7 +215,19 @@ class Island:
         self.expanded = True
         if secs:
             self.collapse_id = GLib.timeout_add_seconds(secs, self.on_collapse)
+        self.refresh()
         self.ensure_tick()
+        # Una sesión cuyo pane se cerró sin avisar se quedaría en la lista.
+        socks = {(s.tmux or '').split(',')[0] for s in self.model.sessions.values() if s.pane}
+        if socks:
+            threading.Thread(
+                target=lambda: GLib.idle_add(self.on_panes, actions.live_panes(socks)),
+                daemon=True).start()
+
+    def on_panes(self, panes):
+        if panes is not None and self.model.prune(panes):
+            self.refresh()
+        return GLib.SOURCE_REMOVE
 
     def collapse(self):
         if self.collapse_id:
@@ -231,9 +255,9 @@ class Island:
         if mode == 'open' and self.view.ask:
             return 'ask'
         if self.expanded:
-            if not self.view.session:
-                return 'peek'
-            return 'list' if self.view.others else 'open'
+            if self.view.others:
+                return 'list'
+            return 'open' if self.view.session else 'peek'
         # Un permiso se abre solo aunque esté compacta: hay que contestarlo.
         if self.settings['compact'] and self.view.pet != 'permission':
             return 'petit' if mode != 'hidden' or self.hover else 'hidden'
@@ -505,7 +529,8 @@ class Island:
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, name)
             dx = left + 28 + ROW_NAME_W + 10
-            detail = self._layout(cr, s.detail, FONT_DETAIL, right - 10 - dx)
+            text = s.detail or f'En reposo {ago(time.monotonic() - s.updated)}'
+            detail = self._layout(cr, text, FONT_DETAIL, right - 10 - dx)
             cr.move_to(dx, y + (ROW_H - detail.get_pixel_size()[1]) / 2)
             cr.set_source_rgba(*DETAIL_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, detail)

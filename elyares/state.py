@@ -145,7 +145,7 @@ class View:
     ask: bool = False         # mostrar Permitir / Denegar
     session: Session | None = None
     key: tuple = ()
-    others: list = field(default_factory=list)   # las demás sesiones activas, por urgencia
+    others: list = field(default_factory=list)   # las demás sesiones, por urgencia; al final las en reposo
 
 
 class Model:
@@ -245,6 +245,13 @@ class Model:
             elif s.state == 'waiting' and now - s.changed > WAITING_PEEK_SECS:
                 s.set('idle', '', now)
 
+    def prune(self, panes):
+        """Olvida las sesiones cuyo pane de tmux ya no existe. True si quitó alguna."""
+        dead = [sid for sid, s in self.sessions.items() if s.pane and s.pane not in panes]
+        for sid in dead:
+            self.sessions.pop(sid).release()
+        return bool(dead)
+
     def active(self):
         return [s for s in self.sessions.values() if s.state != 'idle']
 
@@ -252,11 +259,13 @@ class Model:
         now = now or time.monotonic()
         self._expire(now)
         # La más urgente primero; entre iguales, la que se movió al último.
-        ranked = sorted((s for s in self.sessions.values() if PRIORITY.get(s.state, 0)),
-                        key=lambda s: (-PRIORITY[s.state], -s.updated))
-        count = len(self.active())
-        if not ranked:
-            return View(count=0)
+        # Las que están en reposo (prioridad 0) quedan al final: no asoman la
+        # isla, pero salen en la lista.
+        ranked = sorted(self.sessions.values(),
+                        key=lambda s: (-PRIORITY.get(s.state, 0), -s.updated))
+        count = len(ranked)
+        if not ranked or not PRIORITY.get(ranked[0].state, 0):
+            return View(count=count, others=ranked)
         best = ranked[0]
 
         st = best.state

@@ -62,6 +62,12 @@ el color del estado, el proyecto y lo que está haciendo. Un clic en la fila
 lleva a su pane de tmux. Caben cuatro filas; si hay más, la última dice
 cuántas faltan. Con los botones de Permitir / Denegar no hay lista.
 
+La lista incluye las sesiones en reposo (punto gris, "En reposo hace 12 min"):
+las que terminaron su turno y están en el prompt. Si no hay ninguna activa, la
+cabecera dice "Sin sesiones activas". La mascota solo conoce las sesiones que
+le han mandado algún evento desde que arrancó el servicio; al abrir la lista
+olvida las que tenían un pane de tmux que ya no existe.
+
 Un clic en la mascota la enoja; tres rápidos la marean.
 
 ### Modo compacto

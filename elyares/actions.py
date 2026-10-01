@@ -38,6 +38,20 @@ def jump(session):
     _run(*tmux, 'select-pane', '-t', pane)
 
 
+def live_panes(socks):
+    """Ids de los panes de tmux que existen, o None si no se pudo preguntar."""
+    if not shutil.which('tmux'):
+        return None
+    panes = set()
+    for sock in socks:
+        tmux = ['tmux', '-S', sock] if sock else ['tmux']
+        out = _run(*tmux, 'list-panes', '-a', '-F', '#{pane_id}')
+        if not out:
+            return None
+        panes.update(out.split())
+    return panes
+
+
 def do_not_disturb():
     if not shutil.which('swaync-client'):
         return False
