@@ -19,6 +19,8 @@ RETRY_SECS = 5
 NOTICE_SECS = 20          # lo que dura en la isla el aviso de cambio de fase
 FOCUS = ('focus', 'overlearning')
 BREAK = ('break', 'break-long')
+PHASE_TEXT = {'idle': 'parado', 'focus': 'en foco', 'overlearning': 'en foco',
+              'break': 'descanso', 'break-long': 'descanso largo'}
 
 
 def _notice(message):
@@ -40,7 +42,8 @@ class Tracker:
         if not phase or phase == self.phase:
             return []
         before, self.phase = self.phase, phase
-        msgs = []
+        msgs = [{'event': 'source', 'name': 'coffe', 'ok': phase != 'off',
+                 'note': PHASE_TEXT.get(phase, '')}]
         if (phase in FOCUS) != (before in FOCUS):
             msgs.append({'event': 'focus', 'on': phase in FOCUS})
         # La primera línea solo dice cómo estaba: no es un cambio que anunciar.
@@ -57,6 +60,7 @@ class Tracker:
 def watch(emit):
     """Lee `coffe bar --watch` en un hilo y llama a emit(mensaje) en cada cambio."""
     if not shutil.which('coffe'):
+        emit({'event': 'source', 'name': 'coffe', 'ok': False, 'note': 'falta coffe'})
         return
 
     def loop():

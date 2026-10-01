@@ -24,6 +24,26 @@ KEEP = ('tool_name', 'tool_input', 'message', 'notification_type', 'reason',
         'error_type', 'agent_id', 'context_pct', 'limit_pct', 'command', 'exit_code', 'seconds')
 KEEP_INPUT = ('file_path', 'notebook_path', 'command', 'pattern', 'path', 'url',
               'query', 'description', 'subagent_type')
+# El fragmento que se edita, para la vista previa de la isla. Va más largo que
+# lo demás, pero con tope: un Write puede traer megas de contenido.
+EDIT_INPUT = ('old_string', 'new_string', 'content', 'new_source')
+EDIT_CHARS, MAX_EDITS = 6000, 3
+
+
+def trim(ti):
+    """Lo que se manda de tool_input: solo lo que la isla muestra, y recortado."""
+    out = {}
+    for k, v in ti.items():
+        if k in KEEP_INPUT:
+            out[k] = v[:300] if isinstance(v, str) else v
+        elif k in EDIT_INPUT and isinstance(v, str):
+            out[k] = v[:EDIT_CHARS]
+        elif k == 'edits' and isinstance(v, list):
+            out[k] = [{kk: vv[:EDIT_CHARS] for kk, vv in e.items()
+                       if kk in EDIT_INPUT and isinstance(vv, str)}
+                      for e in v[:MAX_EDITS] if isinstance(e, dict)]
+    return out
+
 # Piden respuesta del usuario, no permiso: un "allow" sin respuesta no sirve.
 NO_ASK = ('AskUserQuestion', 'ExitPlanMode')
 
@@ -68,9 +88,7 @@ def main():
     msg.update({k: payload[k] for k in KEEP if k in payload})
     ti = msg.get('tool_input')
     if isinstance(ti, dict):
-        # Solo lo que se muestra; un Write puede traer megas de contenido.
-        msg['tool_input'] = {k: v[:300] if isinstance(v, str) else v
-                             for k, v in ti.items() if k in KEEP_INPUT}
+        msg['tool_input'] = trim(ti)
     if ask:
         msg['reply'] = True
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:

@@ -28,6 +28,8 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 
+from . import preview
+
 DONE_OPEN_SECS = 5        # cuánto se queda abierta la isla al terminar
 WAITING_OPEN_SECS = 6     # abierta al quedarse esperando; luego se asoma
 WAITING_PEEK_SECS = 600   # tras 10 min esperando deja de asomarse
@@ -143,6 +145,7 @@ class Session:
     tone: str = ''            # solo en alertas: '' problema, 'ok' buena noticia, 'info' aviso
     ttl: float = 0            # solo en alertas: segundos que dura sin novedades (0 = ALERT_SECS)
     context: float = 0        # % de la ventana de contexto que lleva usada la sesión
+    preview: object = None    # preview.Preview de lo que está editando; no se guarda
     changed: float = field(default_factory=time.monotonic)
     updated: float = field(default_factory=time.monotonic)
 
@@ -277,13 +280,17 @@ class Model:
                 return
             s.ask, s.ask_tool, s.ask_agent = req, msg.get('tool_name', ''), agent
             s.last_tool = describe_tool(s.ask_tool, msg.get('tool_input'), root)
+            s.preview = preview.build(s.ask_tool, msg.get('tool_input'))
             s.set('permission', s.last_tool, now)
         elif ev == 'start':
             s.started = now
             s.last_tool = ''
+            s.preview = None
             s.set('working', 'Pensando…', now)
         elif ev == 'tool':
             s.last_tool = describe_tool(msg.get('tool_name', ''), msg.get('tool_input'), root)
+            # La vista previa dura lo que dura la edición: otra herramienta la quita.
+            s.preview = preview.build(msg.get('tool_name', ''), msg.get('tool_input'))
             s.set('working', s.last_tool, now)
         elif ev == 'tool-done':
             # Tras aprobar un permiso no llega otro aviso hasta la siguiente
@@ -304,6 +311,7 @@ class Model:
             if msg.get('agent_id'):
                 return
             took = f' en {elapsed(now - s.started)}' if s.started else ''
+            s.preview = None
             s.set('done', f'Listo{took}', now)
         elif ev == 'failure':
             reason = msg.get('error_type') or msg.get('reason') or ''

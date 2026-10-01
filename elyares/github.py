@@ -7,7 +7,7 @@ compara con la vez anterior:
     revisión te pidieron revisar un PR
 
 La primera consulta solo toma la foto. `gh` puede tener varias cuentas: se
-consultan todas, o las que diga la preferencia `github` (una lista de nombres).
+consultan todas, o las que diga la preferencia `github_accounts`.
 El token de cada una se le pide a `gh` y nunca se guarda ni se muestra.
 """
 
@@ -117,24 +117,43 @@ class Watcher:
         return msgs
 
 
-def watch(emit, only=None):
+def watch(emit, enabled=lambda: True, only=lambda: None):
     """Consulta GitHub en un hilo y llama a emit(mensaje) por cada aviso.
 
-    only: lista de cuentas a consultar; sin ella, todas las de `gh`.
+    only() da la lista de cuentas a consultar; sin ella, todas las de `gh`.
+    Mientras enabled() sea falso no consulta, y al volver empieza de cero.
     """
     if not shutil.which('gh'):
+        emit({'event': 'source', 'name': 'github', 'ok': False, 'note': 'falta gh'})
         return
 
     def loop():
-        watcher = Watcher()
+        watcher, state = None, None
         while True:
+            if not enabled():
+                watcher, state = None, None
+                time.sleep(5)
+                continue
+            if watcher is None:
+                watcher = Watcher()
             try:
-                for account in only or accounts():
-                    for msg in watcher.step(account, snapshot(account)):
+                good = 0
+                for account in only() or accounts():
+                    snap = snapshot(account)
+                    good += snap is not None
+                    for msg in watcher.step(account, snap):
                         emit(msg)
+                now = (good > 0, f'{good} cuenta' + ('' if good == 1 else 's'))
+                if now != state:
+                    state = now
+                    emit({'event': 'source', 'name': 'github', 'ok': now[0], 'note': now[1]})
             except Exception:
                 # Una respuesta con otra forma no debe matar al vigilante.
                 pass
-            time.sleep(POLL_SECS)
+            # En trozos cortos, para notar pronto si la apagan o la prenden.
+            for _ in range(POLL_SECS // 5):
+                if not enabled():
+                    break
+                time.sleep(5)
 
     threading.Thread(target=loop, daemon=True, name='github').start()

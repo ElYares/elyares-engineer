@@ -7,7 +7,8 @@ está roto se usan los valores por defecto.
 import json
 import os
 
-DEFAULTS = {'compact': True, 'glass': False, 'devherd': True, 'coffe': True, 'github': True}
+DEFAULTS = {'compact': True, 'glass': False, 'devherd': True, 'coffe': True, 'github': True,
+            'terminal': True, 'usage': True, 'github_accounts': []}
 
 
 def path():

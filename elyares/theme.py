@@ -1,8 +1,9 @@
-"""El color de acento del tema de omarchy.
+"""Los colores del tema de omarchy.
 
-Sale de `accent` en `~/.config/omarchy/current/theme/colors.toml`. Sin omarchy,
-sin ese archivo o con un valor que no sea `#rrggbb` no hay acento, y la mascota
-se queda con su azul.
+Salen de `~/.config/omarchy/current/theme/colors.toml`: `accent` para la
+mascota y el resto de la paleta para el texto (`paint.py`). Sin omarchy, sin
+ese archivo o con un valor que no sea `#rrggbb` no hay color del tema, y la
+mascota se queda con los suyos.
 """
 
 import os
@@ -15,12 +16,16 @@ def path():
     return os.path.join(base, 'omarchy', 'current', 'theme', 'colors.toml')
 
 
-def accent():
+def palette():
+    """Los colores del tema que sean `#rrggbb`: accent, foreground, color0..15."""
     try:
         with open(path(), 'rb') as f:
-            value = tomllib.load(f).get('accent')
+            data = tomllib.load(f)
     except (OSError, ValueError):
-        return None
-    if isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value):
-        return value
-    return None
+        return {}
+    return {k: v for k, v in data.items()
+            if isinstance(v, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', v)}
+
+
+def accent():
+    return palette().get('accent')

@@ -166,14 +166,27 @@ class Watcher:
         return msgs
 
 
-def watch(emit):
-    """Consulta Observe en un hilo y llama a emit(mensaje) por cada aviso."""
-    watcher = Watcher(expected_up=unit_enabled())
+def watch(emit, enabled=lambda: True):
+    """Consulta Observe en un hilo y llama a emit(mensaje) por cada aviso.
 
+    Mientras enabled() sea falso no pregunta, y al volver empieza de cero: lo
+    que cambió con la fuente apagada no se anuncia.
+    """
     def loop():
+        watcher, up = None, None
         while True:
+            if not enabled():
+                watcher, up = None, None
+                time.sleep(POLL_SECS)
+                continue
+            if watcher is None:
+                watcher = Watcher(expected_up=unit_enabled())
             try:
-                for msg in watcher.step(snapshot(), time.monotonic()):
+                snap = snapshot()
+                if (snap is not None) != up:
+                    up = snap is not None
+                    emit({'event': 'source', 'name': 'devherd', 'ok': up})
+                for msg in watcher.step(snap, time.monotonic()):
                     emit(msg)
             except Exception:
                 # Una respuesta con otra forma no debe matar al vigilante.

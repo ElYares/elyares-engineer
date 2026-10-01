@@ -84,6 +84,40 @@ completo antes de contestar. Las filas de la lista siguen en una línea.
 
 Un clic en la mascota la enoja; tres rápidos la marean.
 
+### Fuentes
+
+Abierta a mano (con el atajo, un clic en la pastilla compacta o el ratón
+encima), la isla lleva al pie una pastilla por fuente: Claude, devherd, coffe,
+GitHub, terminal y uso. El punto dice cómo está:
+
+| Punto | Significa |
+|---|---|
+| verde | conectada: responde, o su enganche está instalado |
+| rojo | prendida pero con problemas: no responde o falta instalarla |
+| gris | prendida, todavía sin datos |
+| aro hueco | apagada |
+
+Un clic en la pastilla prende o apaga la fuente, sin reiniciar nada; al
+apagarla se van sus alertas y deja de consultarse. Claude no se apaga desde
+ahí. La preferencia se guarda en `settings.json` con la clave de la fuente
+(`devherd`, `coffe`, `github`, `terminal`, `usage`).
+
+Lo mismo desde la terminal:
+
+```
+$ elyares-ctl status
+Claude    conectada      3 sesiones
+devherd   conectada
+coffe     conectada      parado
+GitHub    conectada      2 cuentas
+terminal  conectada
+uso       conectada
+$ elyares-ctl toggle github
+```
+
+Con el atajo, la isla se abre aunque no haya ninguna sesión: es donde están
+las fuentes.
+
 ### Alertas de DevHerd
 
 Si corre [DevHerd](https://github.com/ElYares/devherd) Observe, la mascota le
@@ -105,8 +139,7 @@ vuelve a salir en 15 min. El contador "N sesiones" no cuenta las alertas.
 Al arrancar solo toma la foto: lo que ya estaba roto no se anuncia. Un
 contenedor parado a mano (`docker stop`, `devherd down`) no avisa: solo cuenta
 como caída una salida con código de error. Observe vigila únicamente los
-proyectos conectados con `devherd observe attach`. Para apagar las alertas,
-`"devherd": false` en `~/.config/elyares-mascota/settings.json`.
+proyectos conectados con `devherd observe attach`.
 
 Las alertas son un evento más del socket (`alert` y `alert-clear`, con `name`,
 `message` y `url`), así que cualquier otro programa puede mandar las suyas.
@@ -130,8 +163,8 @@ corre la que ya tenías y guarda su comando en
 `~/.config/elyares-mascota/statusline.cmd`). Es el único sitio donde Claude
 dice cuánto contexto lleva una sesión y cuánto del límite de 5 h. Con eso:
 
-- Junto a cada sesión sale su contexto desde el 50 %, en amarillo desde el
-  70 % y en rojo desde el 90 %.
+- Junto a cada sesión sale el porcentaje de contexto que lleva usado: gris,
+  en amarillo desde el 70 % y en rojo desde el 90 %.
 - Avisa cuando una sesión pasa del 90 % ("se va a compactar pronto"; el clic
   lleva a su pane) y cuando el límite de 5 h pasa del 80 % y del 95 %.
 - Mientras Claude compacta, la sesión dice "Compactando el contexto…".
@@ -157,8 +190,53 @@ bash tendría que avisar al empezar cada comando.
 Con `gh` instalado, cada 2 min pregunta por tus pull requests abiertos y
 avisa cuando los checks de uno pasan a verde o a rojo, y cuando te piden
 revisar un PR. El clic abre el PR. Consulta todas las cuentas de `gh`; para
-elegir, `"github": ["Cuenta"]` en `settings.json`, o `false` para apagarlo.
-El token se le pide a `gh` en cada consulta y no se guarda.
+elegir, `"github_accounts": ["Cuenta"]` en `settings.json`. El token se le
+pide a `gh` en cada consulta y no se guarda.
+
+### Vista previa del código
+
+Cuando la sesión principal edita un archivo (`Edit`, `MultiEdit`, `Write`,
+`NotebookEdit`), la isla puede mostrar el fragmento que cambia: se ensancha y
+enseña un diff de hasta 12 líneas, con lo quitado en rojo y lo agregado en
+verde, el nombre del archivo, la línea donde cae el cambio y cuántas líneas
+suben y bajan.
+
+- **Abierta a mano** (atajo, clic en la pastilla compacta o ratón encima)
+  sale mientras dura esa edición; la siguiente herramienta la quita. Con el
+  atajo se queda 20 s en vez de 6, para dar tiempo a leer.
+- **Al pedir permiso** para editar o escribir un archivo sale siempre, encima
+  de Permitir / Denegar: se ve el cambio antes de contestar.
+
+Es solo para mirar: no se puede editar ni aceptar por trozos. De un
+`MultiEdit` enseña el primer cambio y dice cuántos son. El fragmento viaja por
+el socket local y vive en memoria: no se guarda entre reinicios. Solo se ve el
+de la sesión principal, no el de las filas de la lista.
+
+### Colores del texto
+
+El detalle de una sesión casi siempre es código, así que va resaltado
+(`elyares/paint.py`): el verbo ("Ejecutando", "Leyendo") apagado, y después
+cada trozo con su color.
+
+| Trozo | Ejemplo | Color del tema |
+|---|---|---|
+| programa | `docker`, `make` | `accent` |
+| opción | `-f`, `--force-recreate` | `color13` |
+| cadena o patrón | `"salida final.log"` | `color10` |
+| ruta o archivo | `/tmp/out.txt`, `Auth.php` | `color14` |
+| variable | `FOO=1`, `$HOME` | `color11` |
+| número | `30` | `color9` |
+| lo demás | `compose`, `up` | `foreground` |
+
+En una ruta, la carpeta va apagada y el nombre del archivo a color. Un detalle
+que no es código ("Pensando…", "Listo en 3 min") va en un gris del tema.
+
+El porcentaje de contexto tiene su propia escala: verde hasta el 50 %, arena
+hasta el 70 %, ámbar hasta el 90 % y rojo desde ahí. El ámbar y el rojo son
+fijos y no salen del tema, para que un aviso parezca un aviso con cualquiera.
+
+Los colores salen de `colors.toml` del tema de omarchy, un poco aclarados para
+que se lean sobre la isla, y cambian con él. Sin omarchy hay una paleta fija.
 
 ### Color de acento
 
@@ -197,8 +275,7 @@ que contestarlo.
 
 Clic derecho en la isla prende o apaga el modo compacto. Sin él, se asoma con
 la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
-`~/.config/elyares-mascota/settings.json`. Ahí mismo se apagan las fuentes de
-alertas: `"devherd"`, `"coffe"` y `"github"` en `false`.
+`~/.config/elyares-mascota/settings.json`.
 
 ### Atajos de teclado
 
@@ -211,6 +288,8 @@ alertas: `"devherd"`, `"coffe"` y `"github"` en `false`.
 | `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |
 | `elyares-ctl theme` | vuelve a leer el color de acento del tema (lo llama el hook de omarchy) |
 | `elyares-ctl glass` | prende o apaga el modo vidrio |
+| `elyares-ctl status` | lista las fuentes y cómo está cada una |
+| `elyares-ctl toggle <fuente>` | prende o apaga una fuente |
 
 Escondida no muestra ni los permisos: se contestan en la terminal. El estado
 de escondida no se guarda; al reiniciar el servicio vuelve a aparecer.
