@@ -3,6 +3,8 @@
 
 Uso (desde settings.json):  elyares-hook <evento>   con el payload del hook por stdin
 Eventos: start tool tool-done permission idle stop failure session-end ask
+         compact (hook PreCompact), status (barra de estado: uso de contexto y
+         del límite de 5 h) y cmd-done (un comando largo de la terminal terminó)
 
 Nunca falla: si la mascota no está corriendo, sale en silencio.
 
@@ -19,7 +21,7 @@ import sys
 import time
 
 KEEP = ('tool_name', 'tool_input', 'message', 'notification_type', 'reason',
-        'error_type', 'agent_id')
+        'error_type', 'agent_id', 'context_pct', 'limit_pct', 'command', 'exit_code', 'seconds')
 KEEP_INPUT = ('file_path', 'notebook_path', 'command', 'pattern', 'path', 'url',
               'query', 'description', 'subagent_type')
 # Piden respuesta del usuario, no permiso: un "allow" sin respuesta no sirve.

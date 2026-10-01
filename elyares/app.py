@@ -13,8 +13,10 @@ abrir la isla, esconderla del todo o cambiar de modo. Con `theme` vuelve a leer
 el color de acento del tema de omarchy y con `glass` prende o apaga el modo
 vidrio (fondo translúcido; el desenfoque lo pone una regla de Hyprland).
 
-Además de las sesiones de Claude muestra alertas de DevHerd Observe (ver
-`devherd.py`): se ven como una sesión más y el clic abre su URL.
+Además de las sesiones de Claude muestra alertas: de DevHerd Observe
+(`devherd.py`), de GitHub (`github.py`), del pomodoro (`coffe.py`), de un
+comando largo que terminó y del uso de Claude. Se ven como una sesión más y el
+clic abre su URL o salta a su pane.
 
 Abierta a mano y con varias sesiones, debajo de la más urgente sale una fila
 por cada una de las demás, también las que están en reposo; un clic en la fila
@@ -36,7 +38,7 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import actions, devherd, hypr, ipc, mascot, settings, store, theme  # noqa: E402
+from . import actions, coffe, devherd, github, hypr, ipc, mascot, settings, store, theme  # noqa: E402
 from .state import Model  # noqa: E402
 
 MAX_ROWS = 4          # filas de la lista: las demás sesiones, sin la principal
@@ -64,6 +66,8 @@ FONT_ROW = 'Sans Semi-Bold 10'
 ROW_NAME_W = 130     # ancho de la columna del proyecto en la lista
 STATE_COLORS = {'permission': 'red', 'alert': 'red', 'waiting': 'yellow', 'done': 'green',
                 'working': 'accent'}
+TONE_COLORS = {'ok': 'green', 'info': 'yellow'}    # el punto de una alerta, según su tono
+CONTEXT_SHOW = 50    # % de contexto desde el que se muestra junto a la sesión
 BUTTON_H, BUTTON_W, BUTTON_GAP = 26, 84, 8
 ALLOW_BG, ALLOW_FG = (.95, .96, 1), (5 / 255, 6 / 255, 8 / 255)
 DENY_BG, DENY_FG = (1, 1, 1), (.95, .96, 1)
@@ -84,10 +88,25 @@ def clamp(x, lo=0.0, hi=1.0):
     return max(lo, min(hi, x))
 
 
+def dot_color(s):
+    """Color del punto de una fila, o None si está en reposo."""
+    if s.state == 'alert':
+        return TONE_COLORS.get(s.tone, 'red')
+    return STATE_COLORS.get(s.state)
+
+
+def context_color(pct):
+    """El contexto cambia de color al llenarse, como en la barra de estado de Claude."""
+    if pct >= 90:
+        return mascot.rgba('red')[:3]
+    return mascot.rgba('yellow')[:3] if pct >= 70 else MUTED_COLOR[:3]
+
+
 class Island:
     def __init__(self, app):
         self.model = Model()
         self.model.restore(store.load())
+        store.forget_usage()
         self.saved = self.model.dump()
         self.view = self.model.view()
         self.title, self.detail = '', ''
@@ -161,8 +180,14 @@ class Island:
         ipc.serve(lambda msg, req: GLib.idle_add(self.on_message, msg, req),
                   lambda req: GLib.idle_add(self.on_gone, req))
         hypr.listen(lambda name: GLib.idle_add(self.on_focused_monitor, name))
+        emit = lambda msg: GLib.idle_add(self.on_message, msg, None)  # noqa: E731
         if self.settings['devherd']:
-            devherd.watch(lambda msg: GLib.idle_add(self.on_message, msg, None))
+            devherd.watch(emit)
+        if self.settings['coffe']:
+            coffe.watch(emit)
+        if self.settings['github']:
+            only = self.settings['github']
+            github.watch(emit, only if isinstance(only, list) else None)
         GLib.timeout_add_seconds(3, self.poll_dnd)
         # "Terminó" y "esperando" caducan solos aunque no lleguen más eventos.
         GLib.timeout_add_seconds(1, self.on_second)
@@ -177,8 +202,13 @@ class Island:
         if 'control' in msg:
             self.on_control(msg['control'])
             return GLib.SOURCE_REMOVE
+        focus = self.model.focus
         self.model.handle(msg, req)
         self.refresh()
+        if focus and not self.model.focus and any(
+                s.state in ('waiting', 'alert') for s in self.model.sessions.values()):
+            # Se acabó el pomodoro: ahora sí, lo que se quedó esperando.
+            self.expand(KEY_OPEN_SECS)
         return GLib.SOURCE_REMOVE
 
     def on_gone(self, req):
@@ -534,15 +564,20 @@ class Island:
         if text_alpha > 0 and self.title:
             tx = x0 + 12 + PET + 10
             right = x0 + w - 18
-            if self.view.count > 1:
-                badge = self._layout(cr, f'{self.view.count} sesiones', FONT_DETAIL)
-                bw = badge.get_pixel_size()[0]
-                cr.move_to(right - bw, mid - 17)
-                cr.set_source_rgba(*MUTED_COLOR[:3], text_alpha)
+            # A la derecha del título: cuántas sesiones hay y, si ya pesa, el
+            # contexto de la que se está mostrando.
+            title_right = right
+            best = self.view.session
+            notes = [(f'{self.view.count} sesiones', MUTED_COLOR[:3])] if self.view.count > 1 else []
+            if best and best.context >= CONTEXT_SHOW:
+                notes.append((f'{best.context:.0f}%', context_color(best.context)))
+            for text, color in notes:
+                badge = self._layout(cr, text, FONT_DETAIL)
+                title_right -= badge.get_pixel_size()[0]
+                cr.move_to(title_right, mid - 17)
+                cr.set_source_rgba(*color, text_alpha)
                 PangoCairo.show_layout(cr, badge)
-                title_right = right - bw - 12
-            else:
-                title_right = right
+                title_right -= 12
             title = self._layout(cr, self.title, FONT_TITLE, title_right - tx)
             cr.move_to(tx, mid - 21)
             cr.set_source_rgba(*TITLE_COLOR[:3], text_alpha)
@@ -589,9 +624,10 @@ class Island:
                 cr.set_source_rgba(1, 1, 1, .07 * alpha)
                 cr.fill()
             cr.new_sub_path()
-            if s.state in STATE_COLORS:
+            color = dot_color(s)
+            if color:
                 cr.arc(left + 14, y + ROW_H / 2, 3.5, 0, 2 * math.pi)
-                cr.set_source_rgba(*mascot.rgba(STATE_COLORS[s.state], alpha))
+                cr.set_source_rgba(*mascot.rgba(color, alpha))
                 cr.fill()
             else:
                 # En reposo va hueco: con un acento apagado, un punto gris
@@ -605,8 +641,17 @@ class Island:
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, name)
             dx = left + 28 + ROW_NAME_W + 10
+            end = right - 10
+            if s.context >= CONTEXT_SHOW:
+                pct = self._layout(cr, f'{s.context:.0f}%', FONT_DETAIL)
+                pw, ph = pct.get_pixel_size()
+                end -= pw
+                cr.move_to(end, y + (ROW_H - ph) / 2)
+                cr.set_source_rgba(*context_color(s.context), alpha)
+                PangoCairo.show_layout(cr, pct)
+                end -= 10
             text = s.detail or f'En reposo {ago(time.monotonic() - s.updated)}'
-            detail = self._layout(cr, text, FONT_DETAIL, right - 10 - dx)
+            detail = self._layout(cr, text, FONT_DETAIL, end - dx)
             cr.move_to(dx, y + (ROW_H - detail.get_pixel_size()[1]) / 2)
             cr.set_source_rgba(*DETAIL_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, detail)

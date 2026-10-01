@@ -12,13 +12,15 @@ nada de `~/.local/share/omarchy/`: es una capa de Wayland propia.
 ## Instalar
 
 ```bash
-./install.sh     # enlaces en ~/.local/bin, servicio systemd de usuario y hooks
+./install.sh     # enlaces, servicio systemd de usuario, hooks, barra de estado y ~/.bashrc
 elyares-demo     # recorre los estados con eventos falsos
 ```
 
 `install.sh` se puede correr las veces que sea. Respalda
 `~/.claude/settings.json` antes de tocarlo, agrega sus hooks junto a los que ya
-hay y no modifica los demás. `./uninstall.sh` lo deshace todo.
+hay y no modifica los demás. También envuelve la barra de estado de Claude y
+agrega un bloque marcado a `~/.bashrc` (con respaldo la primera vez); ver "Uso
+de Claude" y "Comandos largos" abajo. `./uninstall.sh` lo deshace todo.
 
 Requisitos (en omarchy ya vienen): `gtk4`, `gtk4-layer-shell`,
 `python-gobject`, `python-cairo`, `jq`.
@@ -46,6 +48,7 @@ Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyar
 | `UserPromptSubmit` | `start` | se asoma trabajando ("Pensando…") |
 | `PreToolUse` | `tool` | teclea y dice qué archivo o comando toca |
 | `PostToolUse` | `tool-done` | baja la antena roja tras aprobar un permiso |
+| `PreCompact` | `compact` | sigue trabajando: "Compactando el contexto…" |
 | `PermissionRequest` | `ask` | antena roja con botones Permitir / Denegar |
 | `Notification` · `permission_prompt` | `permission` | antena roja, isla abierta |
 | `Notification` · `idle_prompt` | `idle` | confundida: lleva un rato esperándote |
@@ -107,6 +110,55 @@ proyectos conectados con `devherd observe attach`. Para apagar las alertas,
 
 Las alertas son un evento más del socket (`alert` y `alert-clear`, con `name`,
 `message` y `url`), así que cualquier otro programa puede mandar las suyas.
+Con `tone` cambia el aspecto: sin él es un problema (punto rojo, mascota
+enojada), `ok` es una buena noticia (verde, saltito) e `info` un aviso
+(amarillo, confundida). Con `ttl` dura esos segundos en vez de 10 min.
+
+### Pomodoro (`coffe`)
+
+Si está instalado [coffe](https://github.com/ElYares/omarchy-coffe-pomo), la
+mascota lee `coffe bar --watch`, lo mismo que Waybar. Mientras corre un
+pomodoro la isla solo se abre sola para un permiso: "terminó", "esperando" y
+las alertas se quedan asomadas (la mascota sí cambia de gesto, y con el ratón
+encima se abre como siempre). Al empezar el descanso avisa, y si algo se quedó
+esperando abre la lista. También avisa cuando el descanso se acaba.
+
+### Uso de Claude
+
+`install.sh` envuelve la barra de estado de Claude Code (`bin/elyares-statusline`
+corre la que ya tenías y guarda su comando en
+`~/.config/elyares-mascota/statusline.cmd`). Es el único sitio donde Claude
+dice cuánto contexto lleva una sesión y cuánto del límite de 5 h. Con eso:
+
+- Junto a cada sesión sale su contexto desde el 50 %, en amarillo desde el
+  70 % y en rojo desde el 90 %.
+- Avisa cuando una sesión pasa del 90 % ("se va a compactar pronto"; el clic
+  lleva a su pane) y cuando el límite de 5 h pasa del 80 % y del 95 %.
+- Mientras Claude compacta, la sesión dice "Compactando el contexto…".
+
+Sin barra de estado configurada no hay envoltura y esto no se ve.
+
+### Comandos largos de la terminal
+
+`install.sh` agrega a `~/.bashrc` una línea que carga `shell/elyares.bash`. Un
+comando que tarda 30 s o más avisa al terminar: "Terminó en 2 min 05 s: make
+test" (verde, se va a los 2 min) o "Falló (código 2) en 45 s: …" (rojo). El
+clic lleva al pane donde corrió. Vale para las terminales que abras después
+de instalar, y solo en bash.
+
+No avisa de programas en los que uno se queda a propósito (editores, `ssh`,
+`tmux`, `claude`, `less`…). El umbral se cambia con `ELYARES_CMD_SECS` y la
+lista se amplía con `ELYARES_CMD_SKIP="mi-tui otra"`, los dos antes de la
+línea de `~/.bashrc`. No hay estado de "trabajando" mientras corre: para eso
+bash tendría que avisar al empezar cada comando.
+
+### GitHub
+
+Con `gh` instalado, cada 2 min pregunta por tus pull requests abiertos y
+avisa cuando los checks de uno pasan a verde o a rojo, y cuando te piden
+revisar un PR. El clic abre el PR. Consulta todas las cuentas de `gh`; para
+elegir, `"github": ["Cuenta"]` en `settings.json`, o `false` para apagarlo.
+El token se le pide a `gh` en cada consulta y no se guarda.
 
 ### Color de acento
 
@@ -145,7 +197,8 @@ que contestarlo.
 
 Clic derecho en la isla prende o apaga el modo compacto. Sin él, se asoma con
 la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
-`~/.config/elyares-mascota/settings.json`.
+`~/.config/elyares-mascota/settings.json`. Ahí mismo se apagan las fuentes de
+alertas: `"devherd"`, `"coffe"` y `"github"` en `false`.
 
 ### Atajos de teclado
 

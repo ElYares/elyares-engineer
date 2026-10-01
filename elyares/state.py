@@ -11,10 +11,16 @@ Si el permiso llegó por el hook `ask`, la sesión guarda el Request del hook y
 la isla muestra Permitir / Denegar. El Request se suelta en cuanto la sesión
 sigue por otro lado (se contestó en la terminal, terminó el turno, etc.).
 
-Además de sesiones hay alertas (evento `alert`, hoy las manda `devherd.py`):
-no son de Claude, traen su propio nombre y una URL que abre el clic. Recién
+Además de sesiones hay alertas (evento `alert`): no son de Claude, traen su
+propio nombre y, si acaso, una URL o un pane que abre el clic. Las mandan
+`devherd.py`, `github.py` y `coffe.py`, y este módulo las crea para un comando
+largo que terminó (`cmd-done`) y para el uso de Claude (`status`). Recién
 llegada, una alerta abre la isla; después se queda como una fila más hasta
-que se resuelve, se descarta con un clic o caduca.
+que se resuelve, se descarta con un clic o caduca. El tono dice si es un
+problema (enojada, rojo), una buena noticia (`ok`) o un aviso (`info`).
+
+En foco (un pomodoro de `coffe` en curso) la isla solo se abre sola para un
+permiso; lo demás se queda asomado hasta el descanso.
 """
 
 import os
@@ -30,6 +36,9 @@ FORGET_SECS = 6 * 3600
 ALERT_OPEN_SECS = 8       # una alerta nueva abre la isla este rato
 ALERT_SECS = 600          # sin novedades, la alerta se va sola
 ALERT_COOLDOWN_SECS = 900 # descartada con un clic, no vuelve a salir en este rato
+CMD_OK_SECS = 120         # "terminó bien" es una buena noticia: se va pronto
+CONTEXT_WARN = 90         # % de contexto de una sesión a partir del cual avisa
+LIMIT_WARN = (80, 95)     # % del límite de 5 h en los que avisa
 ASK_TIMEOUT = 600         # timeout del hook PermissionRequest en settings.json
 
 DENY_MESSAGE = 'El usuario lo denegó desde la mascota ElYares.'
@@ -40,7 +49,8 @@ PRIORITY = {'permission': 4, 'waiting': 3, 'done': 2, 'working': 1, 'alert': .5}
 ALERT_FRESH = 3.5
 
 # Lo que se guarda de cada sesión entre reinicios del daemon.
-SAVED_TEXT = ('cwd', 'pane', 'tmux', 'state', 'detail', 'last_tool', 'name', 'url')
+SAVED_TEXT = ('cwd', 'pane', 'tmux', 'state', 'detail', 'last_tool', 'name', 'url', 'tone')
+SAVED_NUM = ('ttl', 'context')
 SAVED_TIMES = ('started', 'changed', 'updated')
 
 _root_cache = {}
@@ -130,6 +140,9 @@ class Session:
     ask_agent: str = ''
     name: str = ''            # solo en alertas: el nombre a mostrar, sin cwd de donde sacarlo
     url: str = ''             # solo en alertas: lo que abre el clic
+    tone: str = ''            # solo en alertas: '' problema, 'ok' buena noticia, 'info' aviso
+    ttl: float = 0            # solo en alertas: segundos que dura sin novedades (0 = ALERT_SECS)
+    context: float = 0        # % de la ventana de contexto que lleva usada la sesión
     changed: float = field(default_factory=time.monotonic)
     updated: float = field(default_factory=time.monotonic)
 
@@ -169,10 +182,12 @@ class Model:
     def __init__(self):
         self.sessions = {}
         self.dismissed = {}       # alerta descartada -> cuándo
+        self.focus = False        # hay un pomodoro en curso
+        self.limit = 0.0          # % usado del límite de 5 h de Claude, el mismo para todas
 
     def dump(self):
         """Las sesiones como datos planos, para guardarlas entre reinicios."""
-        return [{'sid': s.sid, **{k: getattr(s, k) for k in SAVED_TEXT + SAVED_TIMES}}
+        return [{'sid': s.sid, **{k: getattr(s, k) for k in SAVED_TEXT + SAVED_NUM + SAVED_TIMES}}
                 for s in self.sessions.values()]
 
     def restore(self, items, now=None):
@@ -191,6 +206,8 @@ class Model:
             if s.state not in PRIORITY:
                 s.state = 'idle'
             try:
+                for k in SAVED_NUM:
+                    setattr(s, k, float(it.get(k) or 0))
                 # Nunca en el futuro: un archivo de otro arranque no caducaría.
                 s.started = min(now, float(it.get('started') or 0))
                 s.changed = min(now, float(it.get('changed') or now))
@@ -211,6 +228,18 @@ class Model:
             if req:
                 req.reply(None)
             return
+        if ev == 'focus':
+            self.focus = bool(msg.get('on'))
+            return
+        if ev == 'cmd-done':
+            # Un comando largo de la terminal terminó: una alerta que lleva a su pane.
+            rc, took = msg.get('exit_code') or 0, elapsed(msg.get('seconds') or 0)
+            cmd = ' '.join((msg.get('command') or 'comando').split())
+            head = 'Terminó' if rc == 0 else f'Falló (código {rc})'
+            msg = {**msg, 'event': 'alert', 'name': project_name(msg.get('cwd') or ''),
+                   'message': f'{head} en {took}: {cmd}', 'tone': 'ok' if rc == 0 else '',
+                   'ttl': CMD_OK_SECS if rc == 0 else 0}
+            ev = 'alert'
         if ev == 'alert':
             if sid in self.dismissed and now - self.dismissed[sid] < ALERT_COOLDOWN_SECS:
                 return
@@ -219,6 +248,13 @@ class Model:
                 s = self.sessions[sid] = Session(sid, changed=now)
             s.name = msg.get('name') or s.name or 'alerta'
             s.url = msg.get('url') or s.url
+            s.pane = msg.get('pane') or s.pane
+            s.tmux = msg.get('tmux') or s.tmux
+            tone, ttl = msg.get('tone') or '', float(msg.get('ttl') or 0)
+            if tone != s.tone:
+                # De rojo a verde (o al revés) es otra noticia: vuelve a abrir.
+                s.tone, s.changed = tone, now
+            s.ttl = ttl
             s.set('alert', short(msg.get('message'), 300), now)
             return
         s = self.sessions.get(sid)
@@ -258,6 +294,10 @@ class Model:
                 s.updated = now
         elif ev == 'permission':
             s.set('permission', s.last_tool or short(msg.get('message')), now)
+        elif ev == 'compact':
+            s.set('working', 'Compactando el contexto…', now)
+        elif ev == 'status':
+            self._usage(s, msg, now)
         elif ev == 'idle':
             s.set('waiting', 'Esperando tu respuesta', now)
         elif ev == 'stop':
@@ -287,6 +327,27 @@ class Model:
             s.set('waiting', 'Esperando tu respuesta', now)
         return True
 
+    def _usage(self, s, msg, now):
+        """Uso de Claude que manda la barra de estado: contexto de la sesión y
+        límite de 5 h de la cuenta. Avisa al cruzar un umbral, no en cada dato."""
+        try:
+            context = float(msg.get('context_pct') or 0)
+            limit = float(msg.get('limit_pct') or 0)
+        except (TypeError, ValueError):
+            return
+        if s.context < CONTEXT_WARN <= context:
+            self.handle({'event': 'alert', 'session_id': f'ctx:{s.sid}', 'name': s.proj,
+                         'message': f'Contexto al {context:.0f}%: se va a compactar pronto',
+                         'tone': 'info', 'pane': s.pane, 'tmux': s.tmux}, now=now)
+        s.context = context
+        for mark in LIMIT_WARN:
+            if self.limit < mark <= limit:
+                self.handle({'event': 'alert', 'session_id': f'limit:{mark}', 'name': 'Claude',
+                             'message': f'Límite de 5 h al {limit:.0f}%',
+                             'tone': 'info' if mark < LIMIT_WARN[-1] else ''}, now=now)
+        if limit:
+            self.limit = limit
+
     def dismiss(self, s, now=None):
         """Quita una alerta porque ya se atendió con un clic."""
         if self.sessions.pop(s.sid, None) is not None:
@@ -310,7 +371,7 @@ class Model:
             if now - s.updated > FORGET_SECS:
                 s.release()
                 del self.sessions[sid]
-            elif s.state == 'alert' and now - s.updated > ALERT_SECS:
+            elif s.state == 'alert' and now - s.updated > (s.ttl or ALERT_SECS):
                 del self.sessions[sid]
             elif s.state == 'working' and now - s.updated > WORKING_STALE_SECS:
                 s.set('idle', '', now)
@@ -367,7 +428,13 @@ class Model:
             title = best.proj
         else:
             mode, title = 'peek', best.proj
-        pet = {'waiting': 'confused', 'alert': 'annoyed'}.get(st, st)
+        if st == 'alert':
+            pet = {'ok': 'done', 'info': 'confused'}.get(best.tone, 'annoyed')
+        else:
+            pet = {'waiting': 'confused'}.get(st, st)
+        # En foco solo un permiso abre la isla; lo demás se queda asomado.
+        if self.focus and mode == 'open' and st != 'permission':
+            mode = 'peek'
         ask = st == 'permission' and best.ask is not None
         return View(mode, pet, title, best.detail, count, ask, best, (best.sid, st, ask),
                     ranked[1:])

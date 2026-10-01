@@ -7,6 +7,7 @@ el reloj monotónico tal cual: cuenta desde el arranque de la máquina, no del
 daemon.
 """
 
+import glob
 import json
 import os
 
@@ -33,3 +34,17 @@ def save(sessions):
         os.replace(p + '.tmp', p)
     except OSError:
         pass
+
+
+def forget_usage():
+    """Borra lo que `elyares-statusline` recuerda haber mandado ya.
+
+    La barra de estado solo avisa cuando un porcentaje cambia, y lo apunta en
+    `elyares-status-<sesión>`. Si el daemon no estaba cuando avisó, ese dato se
+    perdió: sin esto no volvería a llegar hasta el siguiente cambio.
+    """
+    for f in glob.glob(os.path.join(os.path.dirname(path()), 'elyares-status-*')):
+        try:
+            os.unlink(f)
+        except OSError:
+            pass
