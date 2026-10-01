@@ -902,7 +902,9 @@ class Island:
                 detail = self._layout(cr, f'En reposo {ago(time.monotonic() - s.updated)}',
                                       FONT_DETAIL, end - dx)
             cr.move_to(dx, y + (ROW_H - detail.get_pixel_size()[1]) / 2)
-            cr.set_source_rgba(*rgb(self.colors['dim']), alpha)
+            # "En reposo…" va con el color claro del tema: con un gris se
+            # perdía, sobre todo en modo vidrio sobre una ventana clara.
+            cr.set_source_rgba(*rgb(self.colors['arg']), alpha)
             self._show(cr, detail, alpha)
 
     def draw_preview(self, cr, x0, w, top, height, alpha):
