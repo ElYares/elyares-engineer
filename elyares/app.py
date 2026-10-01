@@ -42,12 +42,16 @@ from .state import Model  # noqa: E402
 MAX_ROWS = 4          # filas de la lista: las demás sesiones, sin la principal
 ROW_H, LIST_PAD = 28, 10
 OPEN_H = 88
-WIN_W, WIN_H = 480, OPEN_H + MAX_ROWS * ROW_H + LIST_PAD + 8   # 8: margen del rebote
+DETAIL_LINES = 4      # líneas del detalle cuando se muestra entero
+MAX_EXTRA = 54        # alto de más que puede pedir el detalle entero
+# 8: margen del rebote
+WIN_W, WIN_H = 480, OPEN_H + MAX_EXTRA + MAX_ROWS * ROW_H + LIST_PAD + 8
 SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
          'open': (440, OPEN_H), 'ask': (440, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
+TEXT_INSET = 12 + PET + 10 + 18   # lo que le quitan al texto la mascota y los márgenes
 ISLAND_BG = (5 / 255, 6 / 255, 8 / 255, .97)
 GLASS_ALPHA, GLASS_EDGE = .5, .16    # modo vidrio: fondo translúcido y filo claro
 TITLE_COLOR = (.95, .96, 1, 1)
@@ -111,6 +115,7 @@ class Island:
         self.buttons = {}               # 'allow'/'deny' -> (x, y, w, h), del último dibujo
         self.rows = []                  # (sesión, y, alto) de la lista, del último dibujo
         self.list_layout = False        # la cabecera se queda arriba mientras hay lista
+        self.wrap = (None, 0)           # (detalle, alto de más que pide entero)
         self.pointer = None
         self.monitor = hypr.focused_monitor()
 
@@ -300,13 +305,35 @@ class Island:
                 mode = 'list'
         return mode
 
+    def extra(self, mode):
+        """Alto de más para que el detalle se vea entero, en vez de cortado con "…".
+
+        Solo cuando alguien lo está leyendo (isla abierta a mano o ratón encima)
+        o hay que contestar un permiso, que es cuando importa ver el comando
+        completo. Abierta sola por un aviso se queda en una línea.
+        """
+        if mode not in ('open', 'list', 'ask') or not self.title:
+            return 0
+        if not (self.view.ask or self.hover or self.expanded):
+            return 0
+        if self.wrap[0] != self.detail:
+            width = SIZES['open'][0] - TEXT_INSET
+            one = self._shape(self.da.create_pango_layout('X'), FONT_DETAIL)
+            full = self._shape(self.da.create_pango_layout(self.detail or ''), FONT_DETAIL,
+                               width, DETAIL_LINES)
+            more = full.get_pixel_size()[1] - one.get_pixel_size()[1]
+            self.wrap = (self.detail, int(clamp(more, 0, MAX_EXTRA)))
+        return self.wrap[1]
+
     def goal(self):
-        """Tamaño al que va la isla: el del modo, más las filas si hay lista."""
+        """Tamaño al que va la isla: el del modo, más el detalle entero y las filas."""
         mode = self.target()
         if mode == 'list':
             w, h = SIZES['open']
-            return w, h + LIST_PAD + ROW_H * min(MAX_ROWS, len(self.view.others))
-        return SIZES[mode]
+            return w, (h + self.extra(mode) + LIST_PAD
+                       + ROW_H * min(MAX_ROWS, len(self.view.others)))
+        w, h = SIZES[mode]
+        return w, h + self.extra(mode)
 
     def set_hover(self, value):
         self.hover = value
@@ -466,11 +493,13 @@ class Island:
         cr.clip()
 
         now = time.monotonic()
-        # Con lista, la cabecera (mascota y texto) se queda arriba y las filas
-        # van debajo. El diseño dura hasta que la isla vuelve a su alto normal,
-        # para que la cabecera no brinque mientras la lista se cierra.
+        # Con lista o con el detalle entero, la cabecera (mascota y texto) se
+        # queda arriba y lo demás va debajo. El diseño dura hasta que la isla
+        # vuelve a su alto normal, para que la cabecera no brinque al cerrarse.
         mode = self.target()
-        if mode == 'list':
+        extra = self.extra(mode)
+        head = OPEN_H + extra           # dónde termina la cabecera
+        if mode == 'list' or (mode == 'open' and extra):
             self.list_layout = True
         elif mode == 'ask' or h <= OPEN_H + 0.5:
             self.list_layout = False
@@ -518,7 +547,8 @@ class Island:
             cr.move_to(tx, mid - 21)
             cr.set_source_rgba(*TITLE_COLOR[:3], text_alpha)
             PangoCairo.show_layout(cr, title)
-            detail = self._layout(cr, self.detail, FONT_DETAIL, right - tx)
+            detail = self._layout(cr, self.detail, FONT_DETAIL, right - tx,
+                                  DETAIL_LINES if extra else 1)
             cr.move_to(tx, mid + 3)
             cr.set_source_rgba(*DETAIL_COLOR[:3], text_alpha)
             PangoCairo.show_layout(cr, detail)
@@ -526,8 +556,8 @@ class Island:
         if ask_alpha > 0 and text_alpha > 0:
             self.draw_buttons(cr, x0 + w - 18, h - 14, ask_alpha * text_alpha)
         self.rows = []
-        if self.list_layout and full_h > OPEN_H:
-            self.draw_rows(cr, x0, w, clamp((full_h - OPEN_H) / 20) * text_alpha)
+        if self.list_layout and self.view.others and full_h > head:
+            self.draw_rows(cr, x0, w, head, clamp((full_h - head) / 20) * text_alpha)
         cr.restore()
         if edge:
             # El filo claro es lo que hace que el fondo translúcido se lea como vidrio.
@@ -536,10 +566,10 @@ class Island:
             cr.set_line_width(1)
             cr.stroke()
 
-    def draw_rows(self, cr, x0, w, alpha):
+    def draw_rows(self, cr, x0, w, top, alpha):
         left, right = x0 + 14, x0 + w - 14
         cr.set_source_rgba(1, 1, 1, .08 * alpha)
-        cr.rectangle(left + 4, OPEN_H - 1, right - left - 8, 1)
+        cr.rectangle(left + 4, top - 1, right - left - 8, 1)
         cr.fill()
         px, py = self.pointer or (-1, -1)
         others = self.view.others
@@ -547,12 +577,12 @@ class Island:
         shown = others if len(others) <= MAX_ROWS else others[:MAX_ROWS - 1]
         if len(others) > len(shown):
             more = self._layout(cr, f'y {len(others) - len(shown)} más', FONT_DETAIL)
-            y = OPEN_H + 3 + len(shown) * ROW_H
+            y = top + 3 + len(shown) * ROW_H
             cr.move_to(left + 28, y + (ROW_H - more.get_pixel_size()[1]) / 2)
             cr.set_source_rgba(*MUTED_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, more)
         for i, s in enumerate(shown):
-            y = OPEN_H + 3 + i * ROW_H
+            y = top + 3 + i * ROW_H
             self.rows.append((s, y, ROW_H))
             if left <= px <= right and y <= py < y + ROW_H:
                 mascot.rrect(cr, left, y + 1, right - left, ROW_H - 2, 8)
@@ -604,14 +634,23 @@ class Island:
             PangoCairo.show_layout(cr, layout)
 
     @staticmethod
-    def _layout(cr, text, font, width=None):
-        layout = PangoCairo.create_layout(cr)
+    def _shape(layout, font, width=None, lines=1):
+        """Fuente, ancho y corte de un texto. Con lines > 1 se parte en líneas y
+        solo lleva "…" si ni así cabe."""
         layout.set_font_description(Pango.FontDescription.from_string(font))
-        layout.set_text(text or '', -1)
         if width:
             layout.set_width(int(max(10, width) * Pango.SCALE))
             layout.set_ellipsize(Pango.EllipsizeMode.END)
+            if lines > 1:
+                layout.set_wrap(Pango.WrapMode.WORD_CHAR)
+                layout.set_height(-lines)
         return layout
+
+    @classmethod
+    def _layout(cls, cr, text, font, width=None, lines=1):
+        layout = PangoCairo.create_layout(cr)
+        layout.set_text(text or '', -1)
+        return cls._shape(layout, font, width, lines)
 
     # ── clics ────────────────────────────────────────────────────────────────
 
@@ -631,7 +670,7 @@ class Island:
             if ry <= y < ry + rh:
                 self.go(s)
                 return
-        if y > OPEN_H and self.rows:
+        if self.rows and y > self.rows[0][1]:
             return
         if x < x0 + 12 + PET + 4:
             self.poke()

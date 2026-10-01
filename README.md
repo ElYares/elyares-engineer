@@ -74,6 +74,11 @@ Un permiso pendiente vuelve sin botones (el hook que esperaba el clic se fue
 con el servicio anterior) y se contesta en la terminal. Al apagar la máquina
 el archivo se borra, igual que los panes de tmux.
 
+El detalle se corta con "…" cuando la isla se abre sola. Para leerlo entero,
+pasa el ratón por la isla o ábrela a mano: crece y lo muestra en hasta cuatro
+líneas. Cuando pide permiso lo muestra entero siempre, para ver el comando
+completo antes de contestar. Las filas de la lista siguen en una línea.
+
 Un clic en la mascota la enoja; tres rápidos la marean.
 
 ### Alertas de DevHerd

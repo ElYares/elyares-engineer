@@ -219,7 +219,7 @@ class Model:
                 s = self.sessions[sid] = Session(sid, changed=now)
             s.name = msg.get('name') or s.name or 'alerta'
             s.url = msg.get('url') or s.url
-            s.set('alert', short(msg.get('message')), now)
+            s.set('alert', short(msg.get('message'), 300), now)
             return
         s = self.sessions.get(sid)
         if s is None:
