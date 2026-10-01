@@ -76,6 +76,33 @@ el archivo se borra, igual que los panes de tmux.
 
 Un clic en la mascota la enoja; tres rápidos la marean.
 
+### Alertas de DevHerd
+
+Si corre [DevHerd](https://github.com/ElYares/devherd) Observe, la mascota le
+pregunta cada 10 s a su API local (`127.0.0.1:9777`) y avisa de esto:
+
+| Qué pasó | En la isla |
+|---|---|
+| Un problema de nivel error recibió eventos | "Error nuevo: …" o "Error otra vez (N): …" |
+| Un contenedor vigilado se reinició solo | "queue se reinició", o "reinicia en bucle" desde 3 en 5 min |
+| Un contenedor vigilado se cayó con error | "app se cayó (código 1)" o "(sin memoria)" |
+| Observe dejó de responder (3 consultas) | "Observe no responde" |
+
+Una alerta nueva abre la isla 8 s, con la mascota enojada y la antena roja.
+Después queda como una fila más en la lista (punto rojo), debajo de las
+sesiones activas de Claude, hasta que el problema se resuelve o pasan 10 min
+sin novedades. Un clic abre el panel de Observe y la descarta; descartada, no
+vuelve a salir en 15 min. El contador "N sesiones" no cuenta las alertas.
+
+Al arrancar solo toma la foto: lo que ya estaba roto no se anuncia. Un
+contenedor parado a mano (`docker stop`, `devherd down`) no avisa: solo cuenta
+como caída una salida con código de error. Observe vigila únicamente los
+proyectos conectados con `devherd observe attach`. Para apagar las alertas,
+`"devherd": false` en `~/.config/elyares-mascota/settings.json`.
+
+Las alertas son un evento más del socket (`alert` y `alert-clear`, con `name`,
+`message` y `url`), así que cualquier otro programa puede mandar las suyas.
+
 ### Color de acento
 
 En omarchy, la antena y el foco de la laptop mientras Claude trabaja, y el

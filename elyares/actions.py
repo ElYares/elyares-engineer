@@ -39,7 +39,12 @@ def jump(session):
 
     Es la misma lógica que jump() de claude-notify.sh. TMUX trae
     "socket,pid,índice": el daemon corre fuera de tmux y necesita el socket.
+
+    Una alerta no tiene pane: trae una URL y el clic la abre.
     """
+    if session and session.url:
+        _run('xdg-open', session.url, timeout=5.0)
+        return
     _run('hyprctl', 'dispatch', 'focuswindow', f'class:{TERM_CLASS}')
     pane = session.pane if session else ''
     sock = (session.tmux or '').split(',')[0] if session else ''

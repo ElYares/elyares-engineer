@@ -10,6 +10,11 @@ sesión más importante y decide el modo de la isla:
 Si el permiso llegó por el hook `ask`, la sesión guarda el Request del hook y
 la isla muestra Permitir / Denegar. El Request se suelta en cuanto la sesión
 sigue por otro lado (se contestó en la terminal, terminó el turno, etc.).
+
+Además de sesiones hay alertas (evento `alert`, hoy las manda `devherd.py`):
+no son de Claude, traen su propio nombre y una URL que abre el clic. Recién
+llegada, una alerta abre la isla; después se queda como una fila más hasta
+que se resuelve, se descarta con un clic o caduca.
 """
 
 import os
@@ -22,14 +27,20 @@ WAITING_OPEN_SECS = 6     # abierta al quedarse esperando; luego se asoma
 WAITING_PEEK_SECS = 600   # tras 10 min esperando deja de asomarse
 WORKING_STALE_SECS = 1200 # 20 min sin eventos trabajando = se colgó o se cerró
 FORGET_SECS = 6 * 3600
+ALERT_OPEN_SECS = 8       # una alerta nueva abre la isla este rato
+ALERT_SECS = 600          # sin novedades, la alerta se va sola
+ALERT_COOLDOWN_SECS = 900 # descartada con un clic, no vuelve a salir en este rato
 ASK_TIMEOUT = 600         # timeout del hook PermissionRequest en settings.json
 
 DENY_MESSAGE = 'El usuario lo denegó desde la mascota ElYares.'
 
-PRIORITY = {'permission': 4, 'waiting': 3, 'done': 2, 'working': 1}
+# Una alerta vieja queda debajo de cualquier sesión activa: si no, taparía
+# durante minutos los avisos de Claude. Recién llegada vale ALERT_FRESH.
+PRIORITY = {'permission': 4, 'waiting': 3, 'done': 2, 'working': 1, 'alert': .5}
+ALERT_FRESH = 3.5
 
 # Lo que se guarda de cada sesión entre reinicios del daemon.
-SAVED_TEXT = ('cwd', 'pane', 'tmux', 'state', 'detail', 'last_tool')
+SAVED_TEXT = ('cwd', 'pane', 'tmux', 'state', 'detail', 'last_tool', 'name', 'url')
 SAVED_TIMES = ('started', 'changed', 'updated')
 
 _root_cache = {}
@@ -117,12 +128,14 @@ class Session:
     ask: object = None        # ipc.Request del hook PermissionRequest
     ask_tool: str = ''
     ask_agent: str = ''
+    name: str = ''            # solo en alertas: el nombre a mostrar, sin cwd de donde sacarlo
+    url: str = ''             # solo en alertas: lo que abre el clic
     changed: float = field(default_factory=time.monotonic)
     updated: float = field(default_factory=time.monotonic)
 
     @property
     def proj(self):
-        return project_name(self.cwd)
+        return self.name or project_name(self.cwd)
 
     def set(self, state, detail=None, now=None):
         now = now or time.monotonic()
@@ -155,6 +168,7 @@ class View:
 class Model:
     def __init__(self):
         self.sessions = {}
+        self.dismissed = {}       # alerta descartada -> cuándo
 
     def dump(self):
         """Las sesiones como datos planos, para guardarlas entre reinicios."""
@@ -190,12 +204,22 @@ class Model:
         ev = msg.get('event', '')
         sid = str(msg.get('session_id') or 'unknown')
         agent = msg.get('agent_id') or ''
-        if ev == 'session-end':
+        if ev in ('session-end', 'alert-clear'):
             s = self.sessions.pop(sid, None)
             if s:
                 s.release()
             if req:
                 req.reply(None)
+            return
+        if ev == 'alert':
+            if sid in self.dismissed and now - self.dismissed[sid] < ALERT_COOLDOWN_SECS:
+                return
+            s = self.sessions.get(sid)
+            if s is None:
+                s = self.sessions[sid] = Session(sid, changed=now)
+            s.name = msg.get('name') or s.name or 'alerta'
+            s.url = msg.get('url') or s.url
+            s.set('alert', short(msg.get('message')), now)
             return
         s = self.sessions.get(sid)
         if s is None:
@@ -263,6 +287,11 @@ class Model:
             s.set('waiting', 'Esperando tu respuesta', now)
         return True
 
+    def dismiss(self, s, now=None):
+        """Quita una alerta porque ya se atendió con un clic."""
+        if self.sessions.pop(s.sid, None) is not None:
+            self.dismissed[s.sid] = now or time.monotonic()
+
     def gone(self, req, now=None):
         """El hook se fue sin respuesta: Claude lo mató o se le acabó el tiempo."""
         for s in self.sessions.values():
@@ -275,9 +304,13 @@ class Model:
                 return
 
     def _expire(self, now):
+        self.dismissed = {sid: t for sid, t in self.dismissed.items()
+                          if now - t < ALERT_COOLDOWN_SECS}
         for sid, s in list(self.sessions.items()):
             if now - s.updated > FORGET_SECS:
                 s.release()
+                del self.sessions[sid]
+            elif s.state == 'alert' and now - s.updated > ALERT_SECS:
                 del self.sessions[sid]
             elif s.state == 'working' and now - s.updated > WORKING_STALE_SECS:
                 s.set('idle', '', now)
@@ -310,10 +343,14 @@ class Model:
         # La más urgente primero; entre iguales, la que se movió al último.
         # Las que están en reposo (prioridad 0) quedan al final: no asoman la
         # isla, pero salen en la lista.
-        ranked = sorted(self.sessions.values(),
-                        key=lambda s: (-PRIORITY.get(s.state, 0), -s.updated))
-        count = len(ranked)
-        if not ranked or not PRIORITY.get(ranked[0].state, 0):
+        def rank(s):
+            if s.state == 'alert' and now - s.changed < ALERT_OPEN_SECS:
+                return ALERT_FRESH
+            return PRIORITY.get(s.state, 0)
+
+        ranked = sorted(self.sessions.values(), key=lambda s: (-rank(s), -s.updated))
+        count = sum(1 for s in ranked if s.state != 'alert')   # "N sesiones": las de Claude
+        if not ranked or not rank(ranked[0]):
             return View(count=count, others=ranked)
         best = ranked[0]
 
@@ -325,9 +362,12 @@ class Model:
         elif st == 'waiting':
             mode = 'open' if now - best.changed < WAITING_OPEN_SECS else 'peek'
             title = best.proj
+        elif st == 'alert':
+            mode = 'open' if now - best.changed < ALERT_OPEN_SECS else 'peek'
+            title = best.proj
         else:
             mode, title = 'peek', best.proj
-        pet = {'waiting': 'confused'}.get(st, st)
+        pet = {'waiting': 'confused', 'alert': 'annoyed'}.get(st, st)
         ask = st == 'permission' and best.ask is not None
         return View(mode, pet, title, best.detail, count, ask, best, (best.sid, st, ask),
                     ranked[1:])

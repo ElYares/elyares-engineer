@@ -13,6 +13,9 @@ abrir la isla, esconderla del todo o cambiar de modo. Con `theme` vuelve a leer
 el color de acento del tema de omarchy y con `glass` prende o apaga el modo
 vidrio (fondo translúcido; el desenfoque lo pone una regla de Hyprland).
 
+Además de las sesiones de Claude muestra alertas de DevHerd Observe (ver
+`devherd.py`): se ven como una sesión más y el clic abre su URL.
+
 Abierta a mano y con varias sesiones, debajo de la más urgente sale una fila
 por cada una de las demás, también las que están en reposo; un clic en la fila
 lleva a su pane de tmux.
@@ -33,7 +36,7 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import actions, hypr, ipc, mascot, settings, store, theme  # noqa: E402
+from . import actions, devherd, hypr, ipc, mascot, settings, store, theme  # noqa: E402
 from .state import Model  # noqa: E402
 
 MAX_ROWS = 4          # filas de la lista: las demás sesiones, sin la principal
@@ -55,7 +58,8 @@ FONT_DETAIL = 'JetBrainsMono Nerd Font 9'
 FONT_BUTTON = 'Sans Semi-Bold 10'
 FONT_ROW = 'Sans Semi-Bold 10'
 ROW_NAME_W = 130     # ancho de la columna del proyecto en la lista
-STATE_COLORS = {'permission': 'red', 'waiting': 'yellow', 'done': 'green', 'working': 'accent'}
+STATE_COLORS = {'permission': 'red', 'alert': 'red', 'waiting': 'yellow', 'done': 'green',
+                'working': 'accent'}
 BUTTON_H, BUTTON_W, BUTTON_GAP = 26, 84, 8
 ALLOW_BG, ALLOW_FG = (.95, .96, 1), (5 / 255, 6 / 255, 8 / 255)
 DENY_BG, DENY_FG = (1, 1, 1), (.95, .96, 1)
@@ -152,6 +156,8 @@ class Island:
         ipc.serve(lambda msg, req: GLib.idle_add(self.on_message, msg, req),
                   lambda req: GLib.idle_add(self.on_gone, req))
         hypr.listen(lambda name: GLib.idle_add(self.on_focused_monitor, name))
+        if self.settings['devherd']:
+            devherd.watch(lambda msg: GLib.idle_add(self.on_message, msg, None))
         GLib.timeout_add_seconds(3, self.poll_dnd)
         # "Terminó" y "esperando" caducan solos aunque no lleguen más eventos.
         GLib.timeout_add_seconds(1, self.on_second)
@@ -623,16 +629,22 @@ class Island:
                 return
         for s, ry, rh in self.rows:
             if ry <= y < ry + rh:
-                self.collapse()
-                threading.Thread(target=actions.jump, args=(s,), daemon=True).start()
+                self.go(s)
                 return
         if y > OPEN_H and self.rows:
             return
         if x < x0 + 12 + PET + 4:
             self.poke()
         elif self.view.session:
-            self.collapse()
-            threading.Thread(target=actions.jump, args=(self.view.session,), daemon=True).start()
+            self.go(self.view.session)
+
+    def go(self, s):
+        """Clic en una sesión: salta a su pane. En una alerta abre su URL y la descarta."""
+        self.collapse()
+        if s.state == 'alert':
+            self.model.dismiss(s)
+            self.refresh()
+        threading.Thread(target=actions.jump, args=(s,), daemon=True).start()
 
     def on_right_click(self, _gesture, _n, x, y):
         x0, w, h = self.island_rect(self.da.get_width())
