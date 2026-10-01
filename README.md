@@ -56,6 +56,12 @@ Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyar
 Con varias sesiones muestra la más urgente (permiso > esperando > terminó >
 trabajando) y cuántas hay. Con el No molestar de swaync se duerme.
 
+Al abrirla a mano (clic en la pastilla, `elyares-ctl open` o, en modo normal,
+pasando el ratón) salen debajo las demás sesiones, una por fila: un punto con
+el color del estado, el proyecto y lo que está haciendo. Un clic en la fila
+lleva a su pane de tmux. Caben cuatro filas; si hay más, la última dice
+cuántas faltan. Con los botones de Permitir / Denegar no hay lista.
+
 Un clic en la mascota la enoja; tres rápidos la marean.
 
 ### Modo compacto

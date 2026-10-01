@@ -10,6 +10,9 @@ o cuando hay que contestar un permiso.
 
 `elyares-ctl` manda órdenes por el mismo socket (para atajos de Hyprland):
 abrir la isla, esconderla del todo o cambiar de modo.
+
+Abierta a mano y con varias sesiones, debajo de la más urgente sale una fila
+por cada una de las demás; un clic en la fila lleva a su pane de tmux.
 """
 
 import math
@@ -30,9 +33,12 @@ from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 from . import actions, hypr, ipc, mascot, settings  # noqa: E402
 from .state import Model  # noqa: E402
 
-WIN_W, WIN_H = 480, 112
+MAX_ROWS = 4          # filas de la lista: las demás sesiones, sin la principal
+ROW_H, LIST_PAD = 28, 10
+OPEN_H = 88
+WIN_W, WIN_H = 480, OPEN_H + MAX_ROWS * ROW_H + LIST_PAD + 8   # 8: margen del rebote
 SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
-         'open': (440, 88), 'ask': (440, 108)}
+         'open': (440, OPEN_H), 'ask': (440, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
@@ -43,6 +49,9 @@ MUTED_COLOR = (.44, .49, .63, 1)
 FONT_TITLE = 'Sans Semi-Bold 11'
 FONT_DETAIL = 'JetBrainsMono Nerd Font 9'
 FONT_BUTTON = 'Sans Semi-Bold 10'
+FONT_ROW = 'Sans Semi-Bold 10'
+ROW_NAME_W = 130     # ancho de la columna del proyecto en la lista
+STATE_COLORS = {'permission': 'red', 'waiting': 'yellow', 'done': 'green', 'working': 'blue'}
 BUTTON_H, BUTTON_W, BUTTON_GAP = 26, 84, 8
 ALLOW_BG, ALLOW_FG = (.95, .96, 1), (5 / 255, 6 / 255, 8 / 255)
 DENY_BG, DENY_FG = (1, 1, 1), (.95, .96, 1)
@@ -82,6 +91,8 @@ class Island:
         self.last_frame = None
         self.region = None
         self.buttons = {}               # 'allow'/'deny' -> (x, y, w, h), del último dibujo
+        self.rows = []                  # (sesión, y, alto) de la lista, del último dibujo
+        self.list_layout = False        # la cabecera se queda arriba mientras hay lista
         self.pointer = None
         self.monitor = hypr.focused_monitor()
 
@@ -220,7 +231,9 @@ class Island:
         if mode == 'open' and self.view.ask:
             return 'ask'
         if self.expanded:
-            return 'open' if self.view.session else 'peek'
+            if not self.view.session:
+                return 'peek'
+            return 'list' if self.view.others else 'open'
         # Un permiso se abre solo aunque esté compacta: hay que contestarlo.
         if self.settings['compact'] and self.view.pet != 'permission':
             return 'petit' if mode != 'hidden' or self.hover else 'hidden'
@@ -229,7 +242,17 @@ class Island:
                 mode = 'peek'
             elif mode == 'peek' and self.view.session:
                 mode = 'open'
+            if mode == 'open' and self.view.others:
+                mode = 'list'
         return mode
+
+    def goal(self):
+        """Tamaño al que va la isla: el del modo, más las filas si hay lista."""
+        mode = self.target()
+        if mode == 'list':
+            w, h = SIZES['open']
+            return w, h + LIST_PAD + ROW_H * min(MAX_ROWS, len(self.view.others))
+        return SIZES[mode]
 
     def set_hover(self, value):
         self.hover = value
@@ -295,7 +318,7 @@ class Island:
         dt = 1 / 60 if self.last_frame is None else min(0.05, now - self.last_frame)
         self.last_frame = now
 
-        tw, th = SIZES[self.target()]
+        tw, th = self.goal()
         for pos, vel, goal in (('w', 'vw', tw), ('h', 'vh', th)):
             x, v = getattr(self, pos), getattr(self, vel)
             v += (SPRING_K * (goal - x) - SPRING_C * v) * dt
@@ -340,7 +363,7 @@ class Island:
                 m = self.monitor
                 top = m['y'] + (m.get('reserved') or [0, 0])[1]
                 dx = pos[0] - (m['x'] + m['width'] / 2)
-                dy = pos[1] - (top + self.h / 2)
+                dy = pos[1] - (top + min(self.h, SIZES['ask'][1]) / 2)
                 d = math.hypot(dx, dy) or 1
                 k = min(1.0, d / 400)
                 self.look_target = (dx / d * k, dy / d * k)
@@ -387,6 +410,16 @@ class Island:
         cr.clip()
 
         now = time.monotonic()
+        # Con lista, la cabecera (mascota y texto) se queda arriba y las filas
+        # van debajo. El diseño dura hasta que la isla vuelve a su alto normal,
+        # para que la cabecera no brinque mientras la lista se cierra.
+        mode = self.target()
+        if mode == 'list':
+            self.list_layout = True
+        elif mode == 'ask' or h <= OPEN_H + 0.5:
+            self.list_layout = False
+        full_h, h = h, (min(h, OPEN_H) if self.list_layout else h)
+
         # La mascota crece con la isla: en miniatura en la pastilla compacta,
         # completa desde que la isla está asomada.
         pet_size = clamp((h - 6) / (SIZES['peek'][1] - 6))
@@ -436,7 +469,46 @@ class Island:
         self.buttons = {}
         if ask_alpha > 0 and text_alpha > 0:
             self.draw_buttons(cr, x0 + w - 18, h - 14, ask_alpha * text_alpha)
+        self.rows = []
+        if self.list_layout and full_h > OPEN_H:
+            self.draw_rows(cr, x0, w, clamp((full_h - OPEN_H) / 20) * text_alpha)
         cr.restore()
+
+    def draw_rows(self, cr, x0, w, alpha):
+        left, right = x0 + 14, x0 + w - 14
+        cr.set_source_rgba(1, 1, 1, .08 * alpha)
+        cr.rectangle(left + 4, OPEN_H - 1, right - left - 8, 1)
+        cr.fill()
+        px, py = self.pointer or (-1, -1)
+        others = self.view.others
+        # Si no caben todas, la última fila dice cuántas faltan.
+        shown = others if len(others) <= MAX_ROWS else others[:MAX_ROWS - 1]
+        if len(others) > len(shown):
+            more = self._layout(cr, f'y {len(others) - len(shown)} más', FONT_DETAIL)
+            y = OPEN_H + 3 + len(shown) * ROW_H
+            cr.move_to(left + 28, y + (ROW_H - more.get_pixel_size()[1]) / 2)
+            cr.set_source_rgba(*MUTED_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, more)
+        for i, s in enumerate(shown):
+            y = OPEN_H + 3 + i * ROW_H
+            self.rows.append((s, y, ROW_H))
+            if left <= px <= right and y <= py < y + ROW_H:
+                mascot.rrect(cr, left, y + 1, right - left, ROW_H - 2, 8)
+                cr.set_source_rgba(1, 1, 1, .07 * alpha)
+                cr.fill()
+            cr.new_sub_path()
+            cr.arc(left + 14, y + ROW_H / 2, 3.5, 0, 2 * math.pi)
+            cr.set_source_rgba(*mascot.rgba(STATE_COLORS.get(s.state, 'metal'), alpha))
+            cr.fill()
+            name = self._layout(cr, s.proj, FONT_ROW, ROW_NAME_W)
+            cr.move_to(left + 28, y + (ROW_H - name.get_pixel_size()[1]) / 2)
+            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, name)
+            dx = left + 28 + ROW_NAME_W + 10
+            detail = self._layout(cr, s.detail, FONT_DETAIL, right - 10 - dx)
+            cr.move_to(dx, y + (ROW_H - detail.get_pixel_size()[1]) / 2)
+            cr.set_source_rgba(*DETAIL_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, detail)
 
     def draw_buttons(self, cr, right, bottom, alpha):
         y = bottom - BUTTON_H
@@ -484,6 +556,13 @@ class Island:
                 self.model.decide(self.view.session, key == 'allow')
                 self.refresh()
                 return
+        for s, ry, rh in self.rows:
+            if ry <= y < ry + rh:
+                self.collapse()
+                threading.Thread(target=actions.jump, args=(s,), daemon=True).start()
+                return
+        if y > OPEN_H and self.rows:
+            return
         if x < x0 + 12 + PET + 4:
             self.poke()
         elif self.view.session:

@@ -145,6 +145,7 @@ class View:
     ask: bool = False         # mostrar Permitir / Denegar
     session: Session | None = None
     key: tuple = ()
+    others: list = field(default_factory=list)   # las demás sesiones activas, por urgencia
 
 
 class Model:
@@ -250,14 +251,13 @@ class Model:
     def view(self, now=None):
         now = now or time.monotonic()
         self._expire(now)
-        best, best_p = None, 0
-        for s in self.sessions.values():
-            p = PRIORITY.get(s.state, 0)
-            if p > best_p or (p == best_p and p > 0 and s.updated > best.updated):
-                best, best_p = s, p
+        # La más urgente primero; entre iguales, la que se movió al último.
+        ranked = sorted((s for s in self.sessions.values() if PRIORITY.get(s.state, 0)),
+                        key=lambda s: (-PRIORITY[s.state], -s.updated))
         count = len(self.active())
-        if best is None:
+        if not ranked:
             return View(count=0)
+        best = ranked[0]
 
         st = best.state
         if st == 'permission':
@@ -271,4 +271,5 @@ class Model:
             mode, title = 'peek', best.proj
         pet = {'waiting': 'confused'}.get(st, st)
         ask = st == 'permission' and best.ask is not None
-        return View(mode, pet, title, best.detail, count, ask, best, (best.sid, st, ask))
+        return View(mode, pet, title, best.detail, count, ask, best, (best.sid, st, ask),
+                    ranked[1:])
