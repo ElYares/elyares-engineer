@@ -18,8 +18,14 @@ Además de las sesiones de Claude muestra alertas: de DevHerd Observe
 comando largo que terminó y del uso de Claude. Se ven como una sesión más y el
 clic abre su URL o salta a su pane.
 
+Una alerta puede traer una ficha: unas líneas de detalle y botones propios
+(las de devherd traen Logs, Timeline, Levantar…), además de Descartar. Sale
+debajo de la cabecera con el ratón encima o abierta a mano. Si la alerta está
+en la lista, un clic en su fila la sube a la cabecera para leerla.
+
 Abierta a mano lleva al pie una pastilla por fuente (`sources.py`): dice si
-está conectada y un clic la prende o la apaga.
+está conectada y un clic la prende o la apaga. Con el cursor sobre una
+pastilla sale debajo de la isla una burbuja con lo que se sabe de esa fuente.
 
 Si la sesión principal está editando un archivo, abierta a mano (o al pedir
 permiso para editarlo) la isla se ensancha y muestra el fragmento que cambia,
@@ -32,6 +38,7 @@ lleva a su pane de tmux.
 
 import html
 import math
+import os
 import random
 import threading
 import time
@@ -62,9 +69,15 @@ CODE_LINE_H, PREVIEW_HEAD, PREVIEW_PAD = 15, 24, 8
 PREVIEW_MAX = PREVIEW_HEAD + (preview.MAX_LINES + 1) * CODE_LINE_H + 2 * PREVIEW_PAD
 ASK_TALL = 24         # con vista previa, los botones bajan debajo de ella
 PREVIEW_OPEN_SECS = 20    # abierta con el teclado y con código que leer
+CARD_BUTTONS = 40     # la fila de botones de la ficha de una alerta
+TIP_W, TIP_PAD, TIP_GAP = 400, 11, 6   # la burbuja de una fuente, debajo de la isla
+TIP_ROOM = 220        # el alto que se le reserva en la ventana
+TIP_LINES = 3         # líneas propias que puede traer una fuente
+TIP_FADE = .12        # segundos que tarda en aparecer
 # 8: margen del rebote
 WIN_W = PREVIEW_W + 40
-WIN_H = OPEN_H + MAX_EXTRA + PREVIEW_MAX + ASK_TALL + MAX_ROWS * ROW_H + LIST_PAD + PILLS_H + 8
+WIN_H = (OPEN_H + MAX_EXTRA + PREVIEW_MAX + ASK_TALL + MAX_ROWS * ROW_H + LIST_PAD + PILLS_H + 8
+         + TIP_ROOM)
 SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
          'open': (440, OPEN_H), 'ask': (440, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
@@ -146,16 +159,27 @@ class Island:
         self.slow_id = 0
         self.last_frame = None
         self.region = None
-        self.buttons = {}               # 'allow'/'deny' -> (x, y, w, h), del último dibujo
+        # 'allow'/'deny' del permiso, o 'dismiss' y el índice de cada botón de
+        # la ficha de una alerta -> (x, y, w, h), del último dibujo
+        self.buttons = {}
+        self.card_span = None           # (arriba, abajo) de la ficha, del último dibujo
+        self.pin = ''                   # la alerta que se eligió en la lista para leerla
         self.rows = []                  # (sesión, y, alto) de la lista, del último dibujo
         self.list_layout = False        # la cabecera se queda arriba mientras hay lista
         self.wrap = (None, 0)           # (detalle, alto de más que pide entero)
         self.pills = []                 # (fuente, x, y, ancho, alto), del último dibujo
-        # Lo que se sabe de cada fuente: si responde y una nota. Las que
-        # dependen de install.sh arrancan con lo que haya instalado.
-        self.sources = {key: {'ok': None, 'note': ''} for key, _ in sources.SOURCES}
+        self.tip = None                 # (fuente, centro, opacidad) de la pastilla bajo el cursor
+        self.tip_key, self.tip_since = None, 0.0
+        # Lo que se sabe de cada fuente: si responde, una nota y lo que dirá
+        # su burbuja. Las que dependen de install.sh arrancan con lo que haya
+        # instalado.
+        self.sources = {}
         for key, ok in sources.installed().items():
-            self.sources[key] = {'ok': ok, 'note': '' if ok else 'sin instalar'}
+            if ok:
+                self.on_source({'name': key, 'ok': True})
+            else:
+                self.on_source({'name': key, 'ok': False, 'note': 'sin instalar',
+                                'why': sources.MISSING[key], 'fix': sources.MISSING_FIX})
         self.focus_seen = False         # lo último que dijo coffe, aunque esté apagada
         self.pointer = None
         self.monitor = hypr.focused_monitor()
@@ -199,7 +223,7 @@ class Island:
         win.present()
         self.update_region()
 
-        ipc.serve(lambda msg, req: GLib.idle_add(self.on_message, msg, req),
+        ipc.serve(lambda msg, req: GLib.idle_add(self.on_socket, msg, req),
                   lambda req: GLib.idle_add(self.on_gone, req))
         hypr.listen(lambda name: GLib.idle_add(self.on_focused_monitor, name))
         # Los vigilantes corren siempre y miran la preferencia en cada vuelta:
@@ -219,6 +243,15 @@ class Island:
 
     # ── estado ───────────────────────────────────────────────────────────────
 
+    def on_socket(self, msg, req):
+        # Un botón que corre un comando solo lo ponen los vigilantes de la
+        # propia mascota. Por el socket una alerta puede traer ficha y botones
+        # que abren una URL, pero no comandos: quien pueda escribir aquí no
+        # debe poder disfrazar de "Logs" lo que quiera correr.
+        if isinstance(msg.get('actions'), list):
+            msg['actions'] = [a for a in msg['actions'] if isinstance(a, dict) and 'cmd' not in a]
+        return self.on_message(msg, req)
+
     def on_message(self, msg, req):
         if 'control' in msg:
             self.on_control(msg['control'], msg, req)
@@ -226,8 +259,8 @@ class Island:
                 req.reply(None)
             return GLib.SOURCE_REMOVE
         if msg.get('event') == 'source':
-            self.sources[msg.get('name')] = {'ok': msg.get('ok'), 'note': msg.get('note') or ''}
-            self.ensure_tick()
+            if self.on_source(msg):
+                self.ensure_tick()
             return GLib.SOURCE_REMOVE
         if msg.get('event') == 'focus':
             self.focus_seen = bool(msg.get('on'))
@@ -245,6 +278,27 @@ class Island:
             # Se acabó el pomodoro: ahora sí, lo que se quedó esperando.
             self.expand(KEY_OPEN_SECS)
         return GLib.SOURCE_REMOVE
+
+    def on_source(self, msg):
+        """Una fuente cuenta cómo está. True si cambió lo que se ve en su pastilla.
+
+        Además de `ok` y `note` puede traer lo que dirá su burbuja: `tip`
+        (unas líneas con cómo están las cosas) y, si no responde, `why` y
+        `fix`. Con `polled` avisa de que acaba de consultar.
+        """
+        name, now = msg.get('name'), time.monotonic()
+        if name not in sources.LABELS:
+            return False
+        old = self.sources.get(name) or {}
+        ok = msg.get('ok')
+        tip = msg.get('tip') if isinstance(msg.get('tip'), list) else []
+        self.sources[name] = {
+            'ok': ok, 'note': str(msg.get('note') or ''),
+            'why': str(msg.get('why') or ''), 'fix': str(msg.get('fix') or ''),
+            'tip': [t for t in tip if isinstance(t, str)][:TIP_LINES],
+            'since': old.get('since', now) if old.get('ok') == ok else now,   # desde cuándo está así
+            'polled': now if msg.get('polled') else old.get('polled', 0)}
+        return (ok, self.sources[name]['note']) != (old.get('ok'), old.get('note'))
 
     def on_gone(self, req):
         self.model.gone(req)
@@ -264,7 +318,7 @@ class Island:
         return GLib.SOURCE_CONTINUE
 
     def refresh(self):
-        v = self.model.view()
+        v = self.model.view(pin=self.pin)
         if self.dnd and v.mode != 'hidden' and v.pet != 'permission':
             v.mode, v.pet = 'peek', 'sleep'
         if v.pet != self.pet_state:
@@ -314,6 +368,45 @@ class Island:
             n = self.view.count
             return f'{n} sesión' if n == 1 else f'{n} sesiones'
         return self.sources.get(key, {}).get('note', '')
+
+    def source_tip(self, key):
+        """Lo que dice la burbuja de una fuente: (título, [(texto, color)])."""
+        state, now = self.source_state(key), time.monotonic()
+        src = self.sources.get(key) or {}
+        text, dim = rgb(self.colors['text']), rgb(self.colors['dim'])
+        facts = [sources.STATE_TEXT[state].capitalize()]
+        # En rojo, la nota es la de la avería, no el número de sesiones.
+        note = src.get('note', '') if state == 'bad' else self.source_note(key)
+        if state == 'bad' and src.get('why') and key not in sources.MISSING:
+            # Lo que falta instalar falta desde siempre; lo que dejó de
+            # responder, desde un momento que vale la pena saber.
+            facts[0] += f' desde {ago(now - src["since"])}'
+        elif note and state != 'off':
+            facts.append(note)
+        if key == 'usage' and state == 'on' and self.model.limit:
+            facts.append(f'límite de 5 h al {self.model.limit:.0f}%')
+        if key != 'claude' and state == 'on':
+            n = sum(1 for sid in self.model.sessions if sid.startswith(sources.PREFIXES[key]))
+            facts.append('sin alertas' if not n else '1 alerta' if n == 1 else f'{n} alertas')
+        lines = [(sources.ABOUT[key], text),
+                 (' · '.join(facts), rgb(paint.RED) if state == 'bad' else dim)]
+        if state == 'bad':
+            # Por qué está en rojo y qué hacer.
+            lines += [(line, text) for line in (src.get('why') or note, src.get('fix')) if line]
+        elif state == 'on':
+            lines += [(line, text) for line in src.get('tip') or []]
+            if key == 'coffe' and self.model.focus:
+                held = sum(1 for s in self.model.sessions.values() if s.state in ('waiting', 'alert'))
+                if held:
+                    lines.append(('1 aviso espera al descanso' if held == 1
+                                  else f'{held} avisos esperan al descanso', text))
+            if src.get('polled'):
+                lines.append((f'Consultado {ago(now - src["polled"])}', dim))
+        if key != 'claude':
+            # Claude no se apaga desde aquí: sin sus hooks no hay mascota.
+            lines.append(('Clic para prenderla' if state == 'off' else 'Clic para apagarla',
+                          MUTED_COLOR[:3]))
+        return sources.LABELS[key], lines
 
     def toggle_source(self, key):
         """Prende o apaga una fuente. Al apagarla se van sus alertas."""
@@ -393,6 +486,9 @@ class Island:
             GLib.source_remove(self.collapse_id)
             self.collapse_id = 0
         self.expanded = False
+        if self.pin:
+            self.pin = ''
+            self.refresh()
         self.ensure_tick()
 
     def on_collapse(self):
@@ -439,7 +535,8 @@ class Island:
             return 0
         if not (self.view.ask or self.hover or self.expanded):
             return 0
-        width = (PREVIEW_W if self.preview_h(mode) else SIZES['open'][0]) - TEXT_INSET
+        wide = self.preview_h(mode) or self.card_h(mode)
+        width = (PREVIEW_W if wide else SIZES['open'][0]) - TEXT_INSET
         if self.wrap[0] != (self.detail, width):
             one = self._shape(self.da.create_pango_layout('X'), FONT_DETAIL)
             full = self._shape(self.da.create_pango_layout(self.detail or ''), FONT_DETAIL,
@@ -463,6 +560,17 @@ class Island:
         lines = len(p.lines) + (1 if p.more else 0)
         return PREVIEW_HEAD + lines * CODE_LINE_H + 2 * PREVIEW_PAD
 
+    def card_h(self, mode):
+        """Alto de la ficha de una alerta (su detalle y sus botones): cuando
+        alguien la está leyendo, con el ratón encima o abierta a mano."""
+        s = self.view.session
+        if not s or not s.card or mode not in ('open', 'list'):
+            return 0
+        if not (self.hover or self.expanded):
+            return 0
+        body = (PREVIEW_HEAD if s.where or s.note else 0) + len(s.lines) * CODE_LINE_H
+        return (body + 2 * PREVIEW_PAD if body else 0) + CARD_BUTTONS
+
     def pills_h(self, mode):
         """Alto de la franja de fuentes: solo cuando alguien abrió la isla a mano."""
         by_hand = self.expanded or self.hover
@@ -473,7 +581,8 @@ class Island:
         filas y las fuentes."""
         mode = self.target()
         prev = self.preview_h(mode)
-        more = self.extra(mode) + prev + self.pills_h(mode)
+        card = self.card_h(mode)
+        more = self.extra(mode) + prev + card + self.pills_h(mode)
         if mode == 'list':
             w, h = SIZES['open']
             h += LIST_PAD + ROW_H * min(MAX_ROWS, len(self.view.others))
@@ -481,6 +590,8 @@ class Island:
             w, h = SIZES[mode]
         if prev:
             w, h = PREVIEW_W, h + (ASK_TALL if mode == 'ask' else 0)
+        elif card:
+            w = PREVIEW_W
         return w, h + more
 
     def set_hover(self, value):
@@ -648,8 +759,9 @@ class Island:
         extra = self.extra(mode)
         pills = self.pills_h(mode)
         prev = self.preview_h(mode)
+        card = self.card_h(mode)
         head = OPEN_H + extra           # dónde termina la cabecera
-        if mode == 'list' or (mode == 'open' and (extra or pills)) or prev:
+        if mode == 'list' or (mode == 'open' and (extra or pills)) or prev or card:
             self.list_layout = True
         elif mode == 'ask' or h <= OPEN_H + 0.5:
             self.list_layout = False
@@ -712,11 +824,15 @@ class Island:
             self.draw_buttons(cr, x0 + w - 18, full_h - 14, ask_alpha * text_alpha)
         if prev and full_h > head:
             self.draw_preview(cr, x0, w, head, prev, clamp((full_h - head) / 20) * text_alpha)
-        head += prev                    # la lista va debajo de la vista previa
+        self.card_span = None
+        if card and full_h > head:
+            self.draw_card(cr, x0, w, head, card, clamp((full_h - head) / 20) * text_alpha)
+        head += prev + card             # la lista va debajo de la vista previa o de la ficha
         self.rows = []
         if self.list_layout and self.view.others and mode != 'ask' and full_h > head:
             self.draw_rows(cr, x0, w, head, clamp((full_h - head) / 20) * text_alpha)
         self.pills = []
+        self.tip = None
         if pills and full_h > head:
             self.draw_pills(cr, x0, w, full_h, clamp((full_h - head) / 20) * text_alpha)
         cr.restore()
@@ -726,6 +842,10 @@ class Island:
             cr.set_source_rgba(1, 1, 1, GLASS_EDGE)
             cr.set_line_width(1)
             cr.stroke()
+        if self.tip:
+            self.draw_tip(cr, width, full_h, now)
+        else:
+            self.tip_key = None
 
     def draw_rows(self, cr, x0, w, top, alpha):
         left, right = x0 + 14, x0 + w - 14
@@ -828,6 +948,48 @@ class Island:
             PangoCairo.show_layout(cr, code)
             y += CODE_LINE_H
 
+    def draw_card(self, cr, x0, w, top, height, alpha):
+        """La ficha de una alerta: su detalle y, debajo, sus botones."""
+        s = self.view.session
+        self.card_span = (top, top + height)
+        left, right = x0 + 14, x0 + w - 14
+        body = height - CARD_BUTTONS
+        if body:
+            mascot.rrect(cr, left, top + 2, right - left, body - 6, 10)
+            cr.set_source_rgba(1, 1, 1, .05 * alpha)
+            cr.fill()
+            tx, y = left + 12, top + PREVIEW_PAD
+            if s.where or s.note:
+                # Arriba: de dónde sale a la izquierda, la nota a la derecha.
+                end = right - 12
+                if s.note:
+                    note = self._layout(cr, s.note, FONT_CODE)
+                    end -= note.get_pixel_size()[0]
+                    cr.move_to(end, y + 2)
+                    cr.set_source_rgba(*rgb(self.colors['dim']), alpha)
+                    PangoCairo.show_layout(cr, note)
+                    end -= 12
+                where = self._layout(cr, s.where, FONT_CODE, end - tx)
+                cr.move_to(tx, y + 2)
+                cr.set_source_rgba(*rgb(self.colors['path']), alpha)
+                PangoCairo.show_layout(cr, where)
+                y += PREVIEW_HEAD
+            for text in s.lines:
+                line = self._layout(cr, text, FONT_CODE, right - 12 - tx)
+                cr.move_to(tx, y + 1)
+                cr.set_source_rgba(*rgb(self.colors['text']), alpha)
+                PangoCairo.show_layout(cr, line)
+                y += CODE_LINE_H
+        # Los botones, de derecha a izquierda: el último de la alerta es el
+        # principal y Descartar queda al otro extremo.
+        x = x0 + w - 18
+        y = top + body + (CARD_BUTTONS - BUTTON_H) / 2 - 2
+        buttons = [('dismiss', 'Descartar')] + [(i, a['label']) for i, a in enumerate(s.actions)]
+        for n, (key, label) in enumerate(reversed(buttons)):
+            x -= BUTTON_W
+            self.draw_button(cr, key, label, x, y, n == 0 and key != 'dismiss', alpha)
+            x -= BUTTON_GAP
+
     def draw_pills(self, cr, x0, w, bottom, alpha):
         """Una pastilla por fuente, pegadas al borde de abajo."""
         left, right = x0 + 18, x0 + w - 18
@@ -862,29 +1024,66 @@ class Island:
             cr.set_source_rgba(*(MUTED_COLOR if state == 'off' else TITLE_COLOR)[:3], alpha)
             PangoCairo.show_layout(cr, layout)
             self.pills.append((key, x, y, pw, PILL_H))
+            if over:
+                self.tip = (key, x + pw / 2, alpha)
             x += pw + PILL_GAP
+
+    def draw_tip(self, cr, width, top, now):
+        """La burbuja de una fuente: sale debajo de la isla mientras el cursor
+        está sobre su pastilla, sin clic."""
+        key, cx, alpha = self.tip
+        if key != self.tip_key:
+            self.tip_key, self.tip_since = key, now
+        alpha *= clamp((now - self.tip_since) / TIP_FADE)
+        title, lines = self.source_tip(key)
+        inner = TIP_W - 2 * TIP_PAD
+        rows = [(self._layout(cr, title, FONT_ROW, inner), TITLE_COLOR[:3])]
+        # Una causa o un resumen largo se parte en dos líneas antes que cortarse.
+        rows += [(self._layout(cr, text, FONT_DETAIL, inner, 2), color) for text, color in lines]
+        sizes = [layout.get_pixel_size() for layout, _ in rows]
+        w = max(lw for lw, _ in sizes) + 2 * TIP_PAD
+        h = sum(lh for _, lh in sizes) + 3 * (len(rows) - 1) + 2 * TIP_PAD
+        x, y = clamp(cx - w / 2, 4, width - w - 4), top + TIP_GAP
+        glass = self.settings['glass']
+        mascot.rrect(cr, x, y, w, h, 12)
+        cr.set_source_rgba(*ISLAND_BG[:3], (GLASS_ALPHA if glass else ISLAND_BG[3]) * alpha)
+        if glass:
+            cr.fill_preserve()
+            cr.set_source_rgba(1, 1, 1, GLASS_EDGE * alpha)
+            cr.set_line_width(1)
+            cr.stroke()
+        else:
+            cr.fill()
+        ty = y + TIP_PAD
+        for (layout, color), (_, lh) in zip(rows, sizes):
+            cr.move_to(x + TIP_PAD, ty)
+            cr.set_source_rgba(*color, alpha)
+            PangoCairo.show_layout(cr, layout)
+            ty += lh + 3
 
     def draw_buttons(self, cr, right, bottom, alpha):
         y = bottom - BUTTON_H
-        for key, label, x, bg, fg, fill in (
-                ('allow', 'Permitir', right - BUTTON_W, ALLOW_BG, ALLOW_FG, .92),
-                ('deny', 'Denegar', right - 2 * BUTTON_W - BUTTON_GAP, DENY_BG, DENY_FG, .10)):
-            rect = (x, y, BUTTON_W, BUTTON_H)
-            self.buttons[key] = rect
-            px, py = self.pointer or (-1, -1)
-            over = x <= px <= x + BUTTON_W and y <= py <= y + BUTTON_H
-            r = BUTTON_H / 2
-            cr.new_sub_path()
-            cr.arc(x + r, y + r, r, math.pi / 2, 3 * math.pi / 2)
-            cr.arc(x + BUTTON_W - r, y + r, r, -math.pi / 2, math.pi / 2)
-            cr.close_path()
-            cr.set_source_rgba(*bg, min(1, fill + (.08 if over else 0)) * alpha)
-            cr.fill()
-            layout = self._layout(cr, label, FONT_BUTTON)
-            lw, lh = layout.get_pixel_size()
-            cr.move_to(x + (BUTTON_W - lw) / 2, y + (BUTTON_H - lh) / 2)
-            cr.set_source_rgba(*fg, alpha)
-            PangoCairo.show_layout(cr, layout)
+        self.draw_button(cr, 'allow', 'Permitir', right - BUTTON_W, y, True, alpha)
+        self.draw_button(cr, 'deny', 'Denegar', right - 2 * BUTTON_W - BUTTON_GAP, y, False, alpha)
+
+    def draw_button(self, cr, key, label, x, y, primary, alpha):
+        """Un botón de la isla. El principal va relleno; los demás, apenas marcados."""
+        bg, fg, fill = (ALLOW_BG, ALLOW_FG, .92) if primary else (DENY_BG, DENY_FG, .10)
+        self.buttons[key] = (x, y, BUTTON_W, BUTTON_H)
+        px, py = self.pointer or (-1, -1)
+        over = x <= px <= x + BUTTON_W and y <= py <= y + BUTTON_H
+        r = BUTTON_H / 2
+        cr.new_sub_path()
+        cr.arc(x + r, y + r, r, math.pi / 2, 3 * math.pi / 2)
+        cr.arc(x + BUTTON_W - r, y + r, r, -math.pi / 2, math.pi / 2)
+        cr.close_path()
+        cr.set_source_rgba(*bg, min(1, fill + (.08 if over else 0)) * alpha)
+        cr.fill()
+        layout = self._layout(cr, label, FONT_BUTTON, BUTTON_W - 12)
+        lw, lh = layout.get_pixel_size()
+        cr.move_to(x + (BUTTON_W - lw) / 2, y + (BUTTON_H - lh) / 2)
+        cr.set_source_rgba(*fg, alpha)
+        PangoCairo.show_layout(cr, layout)
 
     @staticmethod
     def _shape(layout, font, width=None, lines=1):
@@ -933,10 +1132,20 @@ class Island:
             self.expand()
             return
         for key, (bx, by, bw, bh) in self.buttons.items():
-            if self.view.ask and bx <= x <= bx + bw and by <= y <= by + bh:
+            if not (bx <= x <= bx + bw and by <= y <= by + bh):
+                continue
+            if key in ('allow', 'deny'):
+                if not self.view.ask:
+                    continue
                 self.model.decide(self.view.session, key == 'allow')
                 self.refresh()
-                return
+            else:
+                self.act(self.view.session, key)
+            return
+        if self.card_span and self.card_span[0] <= y < self.card_span[1]:
+            # En la ficha solo cuentan sus botones: un clic que falla uno no
+            # debe abrir el navegador y descartar la alerta.
+            return
         for key, bx, by, bw, bh in self.pills:
             if bx <= x <= bx + bw and by <= y <= by + bh:
                 # Claude no se apaga desde aquí: sin sus hooks no hay mascota.
@@ -945,7 +1154,14 @@ class Island:
                 return
         for s, ry, rh in self.rows:
             if ry <= y < ry + rh:
-                self.go(s)
+                if s.card:
+                    # Una alerta con ficha no se va con el clic: sube a la
+                    # cabecera, donde se leen su detalle y sus botones.
+                    self.pin = s.sid
+                    self.refresh()
+                    self.ensure_tick()
+                else:
+                    self.go(s)
                 return
         if self.rows and y > self.rows[0][1]:
             return
@@ -962,6 +1178,20 @@ class Island:
             self.refresh()
         threading.Thread(target=actions.jump, args=(s,), daemon=True).start()
 
+    def act(self, s, key):
+        """Un botón de la ficha de una alerta: Descartar, o uno de los suyos."""
+        if s is None or not s.card:
+            return
+        if key == 'dismiss':
+            self.model.dismiss(s)
+        elif isinstance(key, int) and key < len(s.actions):
+            action = s.actions[key]
+            threading.Thread(target=actions.run, args=(action,), daemon=True).start()
+            if action.get('after'):
+                self.model.dismiss(s, cooldown=action['after'] == 'dismiss')
+        self.refresh()
+        self.ensure_tick()
+
     def on_right_click(self, _gesture, _n, x, y):
         x0, w, h = self.island_rect(self.da.get_width())
         if not (x0 <= x <= x0 + w and y <= max(h, HOVER_STRIP)):
@@ -970,6 +1200,15 @@ class Island:
 
 
 def main(argv):
+    # gtk4-layer-shell ya está cargada (la precarga bin/elyares-mascota): que
+    # no la hereden los programas que lanza la mascota. Firefox es GTK 3 y
+    # aborta al arrancar con una biblioteca de GTK 4 dentro.
+    preload = [lib for lib in os.environ.get('LD_PRELOAD', '').split(':')
+               if lib and 'gtk4-layer-shell' not in lib]
+    if preload:
+        os.environ['LD_PRELOAD'] = ':'.join(preload)
+    else:
+        os.environ.pop('LD_PRELOAD', None)
     app = Gtk.Application(application_id='dev.elyares.Mascota')
 
     def activate(app):

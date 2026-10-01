@@ -11,12 +11,18 @@ comparan con la vez anterior. De ahí salen tres avisos:
 La primera consulta solo toma la foto: lo que ya estaba roto no se anuncia.
 Los avisos salen como mensajes `alert` / `alert-clear`, con la misma forma que
 los eventos de `elyares-hook`, para que el modelo los trate igual.
+
+Cada aviso lleva su ficha: de un error, el archivo y la línea donde revienta
+y la petición que lo causó; de un contenedor, sus últimas líneas de log. Y
+sus botones: Timeline (`devherd observe timeline`) y Abrir para un error,
+Logs y Levantar (`devherd up`) para un contenedor, Iniciar para el colector.
 """
 
 import json
 import subprocess
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 BASE = 'http://127.0.0.1:9777'
@@ -29,6 +35,8 @@ ERROR_LEVELS = ('error', 'fatal')
 # Con estos códigos el contenedor no se cayó: lo pararon (docker stop manda
 # SIGTERM = 143 y, si no hace caso, SIGKILL = 137).
 STOP_CODES = (0, 137, 143)
+TAIL_LINES = 8            # líneas de log que van en la ficha de un contenedor
+WORKDIR_LABEL = 'com.docker.compose.project.working_dir'
 
 
 def _get(path):
@@ -57,6 +65,27 @@ def exit_info(container_id):
         return None
 
 
+def tail(container_id, n=TAIL_LINES):
+    """Las últimas líneas de log de un contenedor, o [] si ya no existe."""
+    try:
+        out = subprocess.run(['docker', 'logs', '--tail', str(n), container_id],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, errors='replace', timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [line for line in out.splitlines() if line.strip()][-n:]
+
+
+def last_event(project, issue_id):
+    """El evento más reciente de un problema, o None. La API no filtra por
+    problema: se piden los últimos del proyecto y se busca entre ellos."""
+    try:
+        events = _get(f'/api/observe/events?project={urllib.parse.quote(project)}&limit=50')
+    except (OSError, ValueError):
+        return None
+    return next((e for e in events if str(e.get('issue_id')) == str(issue_id)), None)
+
+
 def unit_enabled():
     """¿El colector debería estar corriendo? Sin esto, si ya estaba caído al
     arrancar la mascota no habría forma de saber que falta."""
@@ -68,9 +97,15 @@ def unit_enabled():
     return out == 'enabled'
 
 
-def _alert(sid, name, message):
+def _alert(sid, name, message, **card):
+    """card: la ficha de la alerta (where, note, lines, actions)."""
     return {'event': 'alert', 'session_id': f'devherd:{sid}', 'name': name,
-            'message': message, 'url': BASE + '/'}
+            'message': message, 'url': BASE + '/', **card}
+
+
+def _logs(container):
+    return {'label': 'Logs', 'cmd': ['docker', 'logs', '-f', '--tail', '200', container],
+            'term': True, 'hold': True}
 
 
 def _clear(sid):
@@ -78,8 +113,8 @@ def _clear(sid):
 
 
 class Watcher:
-    def __init__(self, expected_up=False, exit_info=exit_info):
-        self.exit_info = exit_info
+    def __init__(self, expected_up=False, exit_info=exit_info, tail=tail, last_event=last_event):
+        self.exit_info, self.tail, self.last_event = exit_info, tail, last_event
         self.issues = None        # id -> event_count, de la consulta anterior
         self.containers = None    # container_id -> (estado, reinicios)
         self.restarts = {}        # proyecto/servicio -> momentos de sus reinicios
@@ -94,7 +129,9 @@ class Watcher:
             self.fails += 1
             if self.fails == DOWN_POLLS and self.seen_up:
                 self.collector_down = True
-                return [_alert('collector', 'devherd', 'Observe no responde')]
+                start = {'label': 'Iniciar', 'cmd': ['systemctl', '--user', 'start', UNIT],
+                         'after': 'clear'}
+                return [_alert('collector', 'devherd', 'Observe no responde', actions=[start])]
             return []
         msgs = []
         if self.collector_down:
@@ -119,7 +156,17 @@ class Watcher:
             new = iid not in before and i.get('first_seen') == i.get('last_seen')
             title = i.get('title') or 'error'
             text = f'Error nuevo: {title}' if new else f'Error otra vez ({count}): {title}'
-            msgs.append(_alert(f'issue:{iid}', i.get('project') or 'devherd', text))
+            project = i.get('project') or 'devherd'
+            event = self.last_event(project, iid) or {}
+            actions = [{'label': 'Abrir', 'url': BASE + '/', 'after': 'dismiss'}]
+            if event.get('event_id'):
+                actions.insert(0, {'label': 'Timeline', 'term': True, 'hold': True,
+                                   'cmd': ['devherd', 'observe', 'timeline', event['event_id']]})
+            events = '1 evento' if count == 1 else f'{count} eventos'
+            msgs.append(_alert(
+                f'issue:{iid}', project, text, where=i.get('culprit') or '',
+                note=' · '.join(filter(None, [i.get('service'), events])),
+                lines=[event.get('transaction') or ''], actions=actions))
         return msgs
 
     def _containers(self, containers, now):
@@ -134,6 +181,7 @@ class Watcher:
             project = c.get('project') or 'devherd'
             service = c.get('service') or c.get('name') or 'contenedor'
             key = f'{project}/{service}'
+            name = c.get('name') or cid[:12]
             status, count = self.containers[cid]
             if cid not in before:
                 # Recreado: si era el que estaba caído, ya volvió.
@@ -150,7 +198,10 @@ class Watcher:
                 self.restarts[key] = times
                 text = (f'{service} reinicia en bucle ({len(times)} veces en 5 min)'
                         if len(times) >= LOOP_RESTARTS else f'{service} se reinició')
-                msgs.append(_alert(f'ct:{key}', project, text))
+                msgs.append(_alert(
+                    f'ct:{key}', project, text, where=name,
+                    note='1 reinicio' if count == 1 else f'{count} reinicios',
+                    lines=self.tail(cid), actions=[_logs(name)]))
             elif was == 'running' and status in ('exited', 'dead'):
                 info = self.exit_info(cid)
                 if info is None:
@@ -159,7 +210,14 @@ class Watcher:
                 if oom or code not in STOP_CODES:
                     self.down.add(key)
                     why = 'sin memoria' if oom else f'código {code}'
-                    msgs.append(_alert(f'ct:{key}', project, f'{service} se cayó ({why})'))
+                    actions = [_logs(name)]
+                    path = (c.get('labels') or {}).get(WORKDIR_LABEL)
+                    if path:
+                        actions.append({'label': 'Levantar', 'cmd': ['devherd', 'up', path],
+                                        'term': True, 'hold': True, 'after': 'clear'})
+                    msgs.append(_alert(
+                        f'ct:{key}', project, f'{service} se cayó ({why})', where=name,
+                        note=why, lines=self.tail(cid), actions=actions))
             elif status == 'running' and was != 'running' and key in self.down:
                 self.down.discard(key)
                 msgs.append(_clear(f'ct:{key}'))
@@ -185,7 +243,11 @@ def watch(emit, enabled=lambda: True):
                 snap = snapshot()
                 if (snap is not None) != up:
                     up = snap is not None
-                    emit({'event': 'source', 'name': 'devherd', 'ok': up})
+                    source = {'event': 'source', 'name': 'devherd', 'ok': up}
+                    if not up:
+                        source.update(why=f'Observe no responde en {BASE.split("//")[1]}',
+                                      fix='Arráncalo con: devherd observe start')
+                    emit(source)
                 for msg in watcher.step(snap, time.monotonic()):
                     emit(msg)
             except Exception:

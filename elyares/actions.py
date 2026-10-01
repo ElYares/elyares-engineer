@@ -1,5 +1,7 @@
-"""Lo que la mascota hace fuera de sí misma: saltar al pane y leer No Molestar."""
+"""Lo que la mascota hace fuera de sí misma: saltar al pane, correr el botón
+de una alerta y leer No Molestar."""
 
+import shlex
 import shutil
 import subprocess
 
@@ -61,6 +63,36 @@ def jump(session):
             _run(*tmux, 'switch-client', '-c', max(clients)[1], '-t', sess)
     _run(*tmux, 'select-window', '-t', pane)
     _run(*tmux, 'select-pane', '-t', pane)
+
+
+def run(action):
+    """Lo que hace el botón de una alerta: abre su URL o corre su comando.
+
+    Con `term` el comando corre en una terminal nueva, donde se ve lo que
+    imprime; con `hold` la terminal espera una tecla al terminar. Sin `term`
+    corre suelto y en silencio.
+    """
+    if action.get('url'):
+        _run('xdg-open', action['url'], timeout=5.0)
+        return
+    cmd = action.get('cmd') or []
+    if not cmd:
+        return
+    if action.get('term'):
+        script = shlex.join(cmd)
+        if action.get('hold'):
+            # El trap deja que Ctrl-C corte el comando sin llevarse la terminal.
+            script = f"trap : INT; {script}; echo; read -rsn1 -p 'Pulsa una tecla para cerrar'"
+        cmd = ['xdg-terminal-exec', f'--title={action.get("label", "")}', '-e',
+               'bash', '-c', script]
+        if shutil.which('uwsm-app'):
+            cmd = ['uwsm-app', '--'] + cmd
+    try:
+        # Se espera para no dejar un zombi: quien llama ya está en su propio hilo.
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True).wait()
+    except OSError:
+        pass
 
 
 def live_panes(socks):
