@@ -59,17 +59,26 @@ def jump(session):
 
 
 def live_panes(socks):
-    """Ids de los panes de tmux que existen, o None si no se pudo preguntar."""
+    """Panes de tmux que existen, por socket: {socket: {(pid del servidor, pane)}}.
+
+    Un servidor que ya no corre sale sin panes. Un socket por el que no se
+    pudo preguntar no sale. El pid distingue a un servidor nuevo en el mismo
+    socket: los ids de pane empiezan otra vez en %0 y coincidirían con los de
+    las sesiones viejas.
+    """
+    live = {}
     if not shutil.which('tmux'):
-        return None
-    panes = set()
+        return live
     for sock in socks:
-        tmux = ['tmux', '-S', sock] if sock else ['tmux']
-        out = _run(*tmux, 'list-panes', '-a', '-F', '#{pane_id}')
-        if not out:
-            return None
-        panes.update(out.split())
-    return panes
+        try:
+            r = subprocess.run(['tmux', '-S', sock, 'list-panes', '-a', '-F', '#{pid} #{pane_id}'],
+                               capture_output=True, text=True, timeout=1.0)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        # tmux contesta con error cuando no hay servidor en ese socket.
+        lines = r.stdout.splitlines() if r.returncode == 0 else []
+        live[sock] = {tuple(line.split()) for line in lines}
+    return live
 
 
 def do_not_disturb():

@@ -286,9 +286,17 @@ class Model:
             elif s.state == 'waiting' and now - s.changed > WAITING_PEEK_SECS:
                 s.set('idle', '', now)
 
-    def prune(self, panes):
-        """Olvida las sesiones cuyo pane de tmux ya no existe. True si quitó alguna."""
-        dead = [sid for sid, s in self.sessions.items() if s.pane and s.pane not in panes]
+    def prune(self, live):
+        """Olvida las sesiones cuyo pane de tmux ya no existe. True si quitó alguna.
+
+        `live` es lo que devuelve actions.live_panes. Las sesiones de un socket
+        que no está ahí se quedan: no se pudo preguntar por ellas.
+        """
+        dead = []
+        for sid, s in self.sessions.items():
+            sock, pid = (s.tmux.split(',') + [''])[:2]
+            if s.pane and pid and sock in live and (pid, s.pane) not in live[sock]:
+                dead.append(sid)
         for sid in dead:
             self.sessions.pop(sid).release()
         return bool(dead)

@@ -231,14 +231,14 @@ class Island:
 
     def check_panes(self):
         """Olvida, sin frenar la isla, las sesiones cuyo pane se cerró sin avisar."""
-        socks = {(s.tmux or '').split(',')[0] for s in self.model.sessions.values() if s.pane}
+        socks = {s.tmux.split(',')[0] for s in self.model.sessions.values() if s.pane and s.tmux}
         if socks:
             threading.Thread(
                 target=lambda: GLib.idle_add(self.on_panes, actions.live_panes(socks)),
                 daemon=True).start()
 
     def on_panes(self, panes):
-        if panes is not None and self.model.prune(panes):
+        if self.model.prune(panes):
             self.refresh()
         return GLib.SOURCE_REMOVE
 

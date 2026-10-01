@@ -66,7 +66,7 @@ La lista incluye las sesiones en reposo (punto gris, "En reposo hace 12 min"):
 las que terminaron su turno y están en el prompt. Si no hay ninguna activa, la
 cabecera dice "Sin sesiones activas". La mascota solo conoce las sesiones que
 le han mandado algún evento; al abrir la lista olvida las que tenían un pane
-de tmux que ya no existe.
+de tmux que ya no existe, o cuyo servidor de tmux ya no corre.
 
 Las sesiones sobreviven al reinicio del servicio: se guardan en
 `$XDG_RUNTIME_DIR/elyares-sessions.json` y al arrancar vuelven como estaban.
@@ -139,4 +139,4 @@ puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
 
 ## Pendiente
 
-- Sonidos con `pw-play` y color de acento del tema de omarchy.
+- Color de acento del tema de omarchy.
