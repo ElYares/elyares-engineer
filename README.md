@@ -65,8 +65,14 @@ cuántas faltan. Con los botones de Permitir / Denegar no hay lista.
 La lista incluye las sesiones en reposo (punto gris, "En reposo hace 12 min"):
 las que terminaron su turno y están en el prompt. Si no hay ninguna activa, la
 cabecera dice "Sin sesiones activas". La mascota solo conoce las sesiones que
-le han mandado algún evento desde que arrancó el servicio; al abrir la lista
-olvida las que tenían un pane de tmux que ya no existe.
+le han mandado algún evento; al abrir la lista olvida las que tenían un pane
+de tmux que ya no existe.
+
+Las sesiones sobreviven al reinicio del servicio: se guardan en
+`$XDG_RUNTIME_DIR/elyares-sessions.json` y al arrancar vuelven como estaban.
+Un permiso pendiente vuelve sin botones (el hook que esperaba el clic se fue
+con el servicio anterior) y se contesta en la terminal. Al apagar la máquina
+el archivo se borra, igual que los panes de tmux.
 
 Un clic en la mascota la enoja; tres rápidos la marean.
 

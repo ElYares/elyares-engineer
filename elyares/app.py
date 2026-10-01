@@ -31,7 +31,7 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import actions, hypr, ipc, mascot, settings  # noqa: E402
+from . import actions, hypr, ipc, mascot, settings, store  # noqa: E402
 from .state import Model  # noqa: E402
 
 MAX_ROWS = 4          # filas de la lista: las demás sesiones, sin la principal
@@ -76,6 +76,8 @@ def clamp(x, lo=0.0, hi=1.0):
 class Island:
     def __init__(self, app):
         self.model = Model()
+        self.model.restore(store.load())
+        self.saved = self.model.dump()
         self.view = self.model.view()
         self.title, self.detail = '', ''
         self.dnd = False
@@ -149,6 +151,10 @@ class Island:
         GLib.timeout_add_seconds(3, self.poll_dnd)
         # "Terminó" y "esperando" caducan solos aunque no lleguen más eventos.
         GLib.timeout_add_seconds(1, self.on_second)
+        if self.model.sessions:
+            # Sesiones del daemon anterior: algún pane pudo cerrarse entre tanto.
+            self.refresh()
+            self.check_panes()
 
     # ── estado ───────────────────────────────────────────────────────────────
 
@@ -193,6 +199,10 @@ class Island:
         self.view = v
         if changed or v.mode != 'hidden':
             self.ensure_tick()
+        data = self.model.dump()
+        if data != self.saved:
+            self.saved = data
+            store.save(data)
 
     def on_control(self, order):
         if order == 'hide':
@@ -217,7 +227,10 @@ class Island:
             self.collapse_id = GLib.timeout_add_seconds(secs, self.on_collapse)
         self.refresh()
         self.ensure_tick()
-        # Una sesión cuyo pane se cerró sin avisar se quedaría en la lista.
+        self.check_panes()
+
+    def check_panes(self):
+        """Olvida, sin frenar la isla, las sesiones cuyo pane se cerró sin avisar."""
         socks = {(s.tmux or '').split(',')[0] for s in self.model.sessions.values() if s.pane}
         if socks:
             threading.Thread(

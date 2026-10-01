@@ -28,6 +28,10 @@ DENY_MESSAGE = 'El usuario lo denegó desde la mascota ElYares.'
 
 PRIORITY = {'permission': 4, 'waiting': 3, 'done': 2, 'working': 1}
 
+# Lo que se guarda de cada sesión entre reinicios del daemon.
+SAVED_TEXT = ('cwd', 'pane', 'tmux', 'state', 'detail', 'last_tool')
+SAVED_TIMES = ('started', 'changed', 'updated')
+
 _root_cache = {}
 
 
@@ -151,6 +155,35 @@ class View:
 class Model:
     def __init__(self):
         self.sessions = {}
+
+    def dump(self):
+        """Las sesiones como datos planos, para guardarlas entre reinicios."""
+        return [{'sid': s.sid, **{k: getattr(s, k) for k in SAVED_TEXT + SAVED_TIMES}}
+                for s in self.sessions.values()]
+
+    def restore(self, items, now=None):
+        """Recupera las sesiones que guardó el daemon anterior.
+
+        Un permiso vuelve sin botones: el hook que esperaba respuesta se fue
+        con el daemon, y el aviso de la terminal sigue ahí.
+        """
+        now = now or time.monotonic()
+        for it in items:
+            if not isinstance(it, dict) or not it.get('sid'):
+                continue
+            s = Session(str(it['sid']))
+            for k in SAVED_TEXT:
+                setattr(s, k, str(it.get(k) or ''))
+            if s.state not in PRIORITY:
+                s.state = 'idle'
+            try:
+                # Nunca en el futuro: un archivo de otro arranque no caducaría.
+                s.started = min(now, float(it.get('started') or 0))
+                s.changed = min(now, float(it.get('changed') or now))
+                s.updated = min(now, float(it.get('updated') or now))
+            except (TypeError, ValueError):
+                continue
+            self.sessions[s.sid] = s
 
     def handle(self, msg, req=None, now=None):
         now = now or time.monotonic()
