@@ -62,7 +62,7 @@ el color del estado, el proyecto y lo que está haciendo. Un clic en la fila
 lleva a su pane de tmux. Caben cuatro filas; si hay más, la última dice
 cuántas faltan. Con los botones de Permitir / Denegar no hay lista.
 
-La lista incluye las sesiones en reposo (punto gris, "En reposo hace 12 min"):
+La lista incluye las sesiones en reposo (aro gris hueco, "En reposo hace 12 min"):
 las que terminaron su turno y están en el prompt. Si no hay ninguna activa, la
 cabecera dice "Sin sesiones activas". La mascota solo conoce las sesiones que
 le han mandado algún evento; al abrir la lista olvida las que tenían un pane
@@ -75,6 +75,33 @@ con el servicio anterior) y se contesta en la terminal. Al apagar la máquina
 el archivo se borra, igual que los panes de tmux.
 
 Un clic en la mascota la enoja; tres rápidos la marean.
+
+### Color de acento
+
+En omarchy, la antena y el foco de la laptop mientras Claude trabaja, y el
+punto de "trabajando" en la lista, toman el color de acento del tema activo
+(`accent` en `~/.config/omarchy/current/theme/colors.toml`). Los demás estados
+conservan su color: rojo para permiso, amarillo para esperando y verde para
+terminó. `install.sh` deja un hook en `~/.config/omarchy/hooks/theme-set.d/`
+que avisa a la mascota al cambiar de tema, así que el color cambia sin
+reiniciar nada. Sin omarchy se queda con su azul.
+
+### Modo vidrio
+
+Viene apagado. Con `elyares-ctl glass` el fondo de la isla pasa de negro casi
+opaco a translúcido, con un filo claro en el borde. La preferencia se guarda
+en `~/.config/elyares-mascota/settings.json` (`"glass": true`).
+
+El desenfoque de lo que queda detrás lo hace Hyprland, no la mascota. Sin
+estas reglas el fondo queda translúcido pero nítido (`~/.config/hypr/looknfeel.conf`):
+
+```
+layerrule = blur on, match:namespace elyares
+layerrule = ignore_alpha 0.20, match:namespace elyares
+```
+
+`ignore_alpha` deja sin desenfocar la parte transparente de la ventana. Sobre
+fondos claros o muy coloridos el texto se lee peor que con el fondo negro.
 
 ### Modo compacto
 
@@ -97,6 +124,8 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | `elyares-ctl open` | abre la isla con lo que hace Claude; se cierra sola a los 6 s o al repetir |
 | `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
 | `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |
+| `elyares-ctl theme` | vuelve a leer el color de acento del tema (lo llama el hook de omarchy) |
+| `elyares-ctl glass` | prende o apaga el modo vidrio |
 
 Escondida no muestra ni los permisos: se contestan en la terminal. El estado
 de escondida no se guarda; al reiniciar el servicio vuelve a aparecer.
@@ -139,4 +168,5 @@ puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
 
 ## Pendiente
 
-- Color de acento del tema de omarchy.
+- Información en la pastilla del modo compacto: punto de color y número de
+  sesiones.

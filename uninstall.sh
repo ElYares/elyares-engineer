@@ -9,6 +9,7 @@ systemctl --user disable --now elyares-mascota.service 2>/dev/null || true
 rm -f "$HOME/.config/systemd/user/elyares-mascota.service"
 systemctl --user daemon-reload
 for f in elyares-mascota elyares-hook elyares-ctl elyares-demo; do rm -f "$HOME/.local/bin/$f"; done
+rm -f "$HOME/.config/omarchy/hooks/theme-set.d/elyares-mascota"
 
 if [ -f "$settings" ]; then
   cp "$settings" "$settings.elyares-bak-$(date +%F-%H%M%S)"

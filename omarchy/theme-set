@@ -1,0 +1,6 @@
+#!/bin/bash
+# Hook theme-set de omarchy: al cambiar de tema, la mascota vuelve a leer el
+# color de acento. install.sh lo enlaza en
+# ~/.config/omarchy/hooks/theme-set.d/elyares-mascota. omarchy lo llama cuando
+# colors.toml del tema nuevo ya está en su lugar.
+"$HOME/.local/bin/elyares-ctl" theme 2>/dev/null || true

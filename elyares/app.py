@@ -9,7 +9,9 @@ queda en una pastilla con la mascota en miniatura, y solo se abre con un clic
 o cuando hay que contestar un permiso.
 
 `elyares-ctl` manda órdenes por el mismo socket (para atajos de Hyprland):
-abrir la isla, esconderla del todo o cambiar de modo.
+abrir la isla, esconderla del todo o cambiar de modo. Con `theme` vuelve a leer
+el color de acento del tema de omarchy y con `glass` prende o apaga el modo
+vidrio (fondo translúcido; el desenfoque lo pone una regla de Hyprland).
 
 Abierta a mano y con varias sesiones, debajo de la más urgente sale una fila
 por cada una de las demás, también las que están en reposo; un clic en la fila
@@ -31,7 +33,7 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import actions, hypr, ipc, mascot, settings, store  # noqa: E402
+from . import actions, hypr, ipc, mascot, settings, store, theme  # noqa: E402
 from .state import Model  # noqa: E402
 
 MAX_ROWS = 4          # filas de la lista: las demás sesiones, sin la principal
@@ -44,6 +46,7 @@ HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está esco
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
 ISLAND_BG = (5 / 255, 6 / 255, 8 / 255, .97)
+GLASS_ALPHA, GLASS_EDGE = .5, .16    # modo vidrio: fondo translúcido y filo claro
 TITLE_COLOR = (.95, .96, 1, 1)
 DETAIL_COLOR = (.66, .71, .84, 1)
 MUTED_COLOR = (.44, .49, .63, 1)
@@ -52,7 +55,7 @@ FONT_DETAIL = 'JetBrainsMono Nerd Font 9'
 FONT_BUTTON = 'Sans Semi-Bold 10'
 FONT_ROW = 'Sans Semi-Bold 10'
 ROW_NAME_W = 130     # ancho de la columna del proyecto en la lista
-STATE_COLORS = {'permission': 'red', 'waiting': 'yellow', 'done': 'green', 'working': 'blue'}
+STATE_COLORS = {'permission': 'red', 'waiting': 'yellow', 'done': 'green', 'working': 'accent'}
 BUTTON_H, BUTTON_W, BUTTON_GAP = 26, 84, 8
 ALLOW_BG, ALLOW_FG = (.95, .96, 1), (5 / 255, 6 / 255, 8 / 255)
 DENY_BG, DENY_FG = (1, 1, 1), (.95, .96, 1)
@@ -83,6 +86,7 @@ class Island:
         self.dnd = False
         self.hover = False
         self.settings = settings.load()
+        mascot.set_accent(theme.accent())
         self.expanded = False           # abierta a mano, con un clic o con elyares-ctl
         self.collapse_id = 0
         self.off = False                # escondida del todo con elyares-ctl hide
@@ -210,6 +214,13 @@ class Island:
             self.collapse()
         elif order == 'compact':
             self.toggle_compact()
+        elif order == 'theme':
+            mascot.set_accent(theme.accent())
+            self.ensure_tick()
+        elif order == 'glass':
+            self.settings['glass'] = not self.settings['glass']
+            settings.save(self.settings)
+            self.ensure_tick()
         elif order == 'open':
             if self.expanded and not self.off:
                 self.collapse()
@@ -441,8 +452,10 @@ class Island:
         cr.line_to(x0 + r, h)
         cr.arc(x0 + r, h - r, r, math.pi / 2, math.pi)
         cr.close_path()
-        cr.set_source_rgba(*ISLAND_BG)
+        glass = self.settings['glass']
+        cr.set_source_rgba(*ISLAND_BG[:3], GLASS_ALPHA if glass else ISLAND_BG[3])
         cr.fill_preserve()
+        edge = cr.copy_path() if glass else None
         cr.save()
         cr.clip()
 
@@ -510,6 +523,12 @@ class Island:
         if self.list_layout and full_h > OPEN_H:
             self.draw_rows(cr, x0, w, clamp((full_h - OPEN_H) / 20) * text_alpha)
         cr.restore()
+        if edge:
+            # El filo claro es lo que hace que el fondo translúcido se lea como vidrio.
+            cr.append_path(edge)
+            cr.set_source_rgba(1, 1, 1, GLASS_EDGE)
+            cr.set_line_width(1)
+            cr.stroke()
 
     def draw_rows(self, cr, x0, w, alpha):
         left, right = x0 + 14, x0 + w - 14
@@ -534,9 +553,17 @@ class Island:
                 cr.set_source_rgba(1, 1, 1, .07 * alpha)
                 cr.fill()
             cr.new_sub_path()
-            cr.arc(left + 14, y + ROW_H / 2, 3.5, 0, 2 * math.pi)
-            cr.set_source_rgba(*mascot.rgba(STATE_COLORS.get(s.state, 'metal'), alpha))
-            cr.fill()
+            if s.state in STATE_COLORS:
+                cr.arc(left + 14, y + ROW_H / 2, 3.5, 0, 2 * math.pi)
+                cr.set_source_rgba(*mascot.rgba(STATE_COLORS[s.state], alpha))
+                cr.fill()
+            else:
+                # En reposo va hueco: con un acento apagado, un punto gris
+                # relleno se confundiría con el de "trabajando".
+                cr.arc(left + 14, y + ROW_H / 2, 3, 0, 2 * math.pi)
+                cr.set_source_rgba(*mascot.rgba('metal', .7 * alpha))
+                cr.set_line_width(1.5)
+                cr.stroke()
             name = self._layout(cr, s.proj, FONT_ROW, ROW_NAME_W)
             cr.move_to(left + 28, y + (ROW_H - name.get_pixel_size()[1]) / 2)
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)

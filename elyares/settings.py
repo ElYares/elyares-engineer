@@ -7,7 +7,7 @@ está roto se usan los valores por defecto.
 import json
 import os
 
-DEFAULTS = {'compact': True}
+DEFAULTS = {'compact': True, 'glass': False}
 
 
 def path():

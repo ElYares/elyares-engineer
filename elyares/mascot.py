@@ -14,9 +14,18 @@ TAU = math.pi * 2
 COLORS = {
     'line': '#10131a', 'face': '#fbfdff', 'face_shade': '#d9e4f5', 'mesh': '#9db0da',
     'band': '#eef4fc', 'hair': '#15171c', 'strap': '#b9c2cf', 'metal': '#aeb7c4',
-    'blue': '#4f9bff', 'red': '#ff4d5e', 'red_dim': '#8e2632', 'green': '#35d07f',
+    'accent': '#4f9bff', 'red': '#ff4d5e', 'red_dim': '#8e2632', 'green': '#35d07f',
     'yellow': '#ffd23f', 'mouth': '#6e1a27', 'tongue': '#ff7d8e', 'laptop': '#cfd6e1',
 }
+
+
+DEFAULT_ACCENT = COLORS['accent']
+
+
+def set_accent(color):
+    """Color de la antena y del foco de la laptop mientras trabaja, y del punto
+    de "trabajando" en la lista. None vuelve al azul de siempre."""
+    COLORS['accent'] = color or DEFAULT_ACCENT
 
 
 def rgba(color, alpha=1.0):
@@ -291,7 +300,7 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
     stroke(cr, 3.5)
 
     if st in ('permission', 'working'):
-        col = 'red' if st == 'permission' else 'blue'
+        col = 'red' if st == 'permission' else 'accent'
         sp = 1.6 if st == 'permission' else 0.9
         for k in range(3):
             p = (t * sp * motion + k / 3) % 1
@@ -301,7 +310,7 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
 
     ball, glow = 'face', 0.0
     if st == 'working':
-        ball, glow = 'blue', 10 + 8 * math.sin(t * 5)
+        ball, glow = 'accent', 10 + 8 * math.sin(t * 5)
     elif st == 'permission':
         on = (t * 2.6) % 1 < 0.55
         ball, glow = ('red', 22) if on else ('red_dim', 0)
@@ -480,7 +489,7 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
         fill(cr, 'laptop', preserve=True)
         stroke(cr, 3.5)
         cr.arc(0, 97, 4, 0, TAU)
-        fill(cr, 'blue')
+        fill(cr, 'accent')
         rrect(cr, -42, 106, 84, 8, 3)
         fill(cr, 'metal', preserve=True)
         stroke(cr, 3.5)

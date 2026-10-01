@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Instala ElYares: enlaces en ~/.local/bin, servicio systemd de usuario y hooks
-# de Claude Code. Se puede correr las veces que sea: reemplaza lo suyo y no
-# toca los demás hooks.
+# Instala ElYares: enlaces en ~/.local/bin, servicio systemd de usuario, hooks
+# de Claude Code y, en omarchy, el hook de cambio de tema. Se puede correr las
+# veces que sea: reemplaza lo suyo y no toca los demás hooks.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -23,6 +23,14 @@ done
 # Copia y no enlace: systemctl enable trata distinto a las units enlazadas.
 install -m 644 "$here/systemd/elyares-mascota.service" "$unit_dir/"
 echo "✓ binarios en $bin_dir y servicio en $unit_dir"
+
+# En omarchy: al cambiar de tema, la mascota vuelve a leer el color de acento.
+omarchy_hooks="$HOME/.config/omarchy/hooks"
+if [ -d "$omarchy_hooks" ]; then
+  mkdir -p "$omarchy_hooks/theme-set.d"
+  ln -sfn "$here/omarchy/theme-set" "$omarchy_hooks/theme-set.d/elyares-mascota"
+  echo "✓ hook de tema en $omarchy_hooks/theme-set.d"
+fi
 
 if [ -f "$settings" ]; then
   backup="$settings.elyares-bak-$(date +%F-%H%M%S)"

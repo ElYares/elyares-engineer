@@ -6,13 +6,15 @@ Uso: elyares-ctl <orden>
     open      abre la isla con lo que hace la sesión; otra vez, la cierra
     hide      esconde la mascota del todo; otra vez, la vuelve a mostrar
     compact   prende o apaga el modo compacto
+    theme     vuelve a leer el color de acento del tema de omarchy
+    glass     prende o apaga el modo vidrio
 """
 import json
 import os
 import socket
 import sys
 
-ORDERS = ('open', 'hide', 'compact')
+ORDERS = ('open', 'hide', 'compact', 'theme', 'glass')
 
 
 def main():
