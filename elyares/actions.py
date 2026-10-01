@@ -13,6 +13,27 @@ def _run(*cmd, timeout=1.0):
         return ''
 
 
+def _real_clients(tmux):
+    """Clientes que son una terminal de verdad: [(actividad, tty, sesión)].
+
+    Quedan fuera los anidados del panel SSH y de la terminal flotante: un
+    `tmux attach` dentro de un popup (sesión oculta _*) o de un pane fijo (su
+    tty es el de un pane). Mover uno de esos a la sesión que lo contiene deja
+    a tmux mostrándose a sí mismo y la ventana se encoge hasta 3x1 (pasó el
+    2026-09-30 con el panel SSH fijo).
+    """
+    panes = set(_run(*tmux, 'list-panes', '-a', '-F', '#{pane_tty}').split())
+    out = _run(*tmux, 'list-clients', '-F', '#{client_activity}\t#{client_tty}\t#{client_session}')
+    clients = []
+    for line in out.splitlines():
+        act, _, rest = line.partition('\t')
+        tty, _, sess = rest.partition('\t')
+        if sess.startswith('_') or tty in panes:
+            continue
+        clients.append((int(act) if act.isdigit() else 0, tty, sess))
+    return clients
+
+
 def jump(session):
     """Enfoca ghostty y lleva tmux a la sesión/ventana/pane de Claude.
 
@@ -28,12 +49,11 @@ def jump(session):
     sess = _run(*tmux, 'display-message', '-p', '-t', pane, '#{session_name}')
     if not sess:
         return
-    if not _run(*tmux, 'list-clients', '-t', sess, '-F', '#{client_tty}'):
+    clients = _real_clients(tmux)
+    if not any(s == sess for _, _, s in clients):
         # Ningún cliente en esa sesión: mueve el que se usó más recientemente.
-        clients = _run(*tmux, 'list-clients', '-F', '#{client_activity} #{client_tty}').splitlines()
         if clients:
-            tty = sorted(clients, reverse=True)[0].split(' ', 1)[1]
-            _run(*tmux, 'switch-client', '-c', tty, '-t', sess)
+            _run(*tmux, 'switch-client', '-c', max(clients)[1], '-t', sess)
     _run(*tmux, 'select-window', '-t', pane)
     _run(*tmux, 'select-pane', '-t', pane)
 
