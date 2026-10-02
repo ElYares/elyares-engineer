@@ -1,1 +1,1 @@
-"""ElYares: la mascota que vigila las sesiones de Claude Code en Hyprland."""
+"""elyares-engineer: la isla que vigila a tus agentes de código en Hyprland."""

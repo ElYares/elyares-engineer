@@ -1,5 +1,5 @@
 #!/bin/sh
-# Lanza el daemon de la mascota.
+# Lanza el daemon de elyares-engineer.
 #
 # gtk4-layer-shell tiene que cargarse antes que libwayland-client, y desde
 # Python eso solo se consigue con LD_PRELOAD. Se usa el python3 del sistema a

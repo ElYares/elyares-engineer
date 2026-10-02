@@ -1,14 +1,17 @@
 #!/usr/bin/python3
-"""Manda una orden a la mascota. Pensado para atajos de Hyprland.
+"""Manda una orden a elyares-engineer. Pensado para atajos de Hyprland.
 
 Uso: elyares-ctl <orden>
 
     open      abre la isla con lo que hace la sesión; otra vez, la cierra
-    hide      esconde la mascota del todo; otra vez, la vuelve a mostrar
+    hide      esconde la isla del todo; otra vez, la vuelve a mostrar
     compact   prende o apaga el modo compacto
+    pin       fija la isla abierta con todo a la vista; otra vez, la suelta
     theme     vuelve a leer el color de acento del tema de omarchy
     glass     prende o apaga el modo vidrio
-    status    lista las fuentes de la mascota y cómo está cada una
+    allow     permite lo que pide el permiso que la isla tiene a la vista
+    deny      lo deniega, y corta el turno como el No de la terminal
+    status    lista las fuentes de elyares-engineer y cómo está cada una
     toggle <fuente>
               prende o apaga una fuente: devherd, coffe, github, terminal, usage
 """
@@ -17,7 +20,8 @@ import os
 import socket
 import sys
 
-ORDERS = ('open', 'hide', 'compact', 'theme', 'glass', 'status', 'toggle')
+ORDERS = ('open', 'hide', 'compact', 'pin', 'theme', 'glass', 'allow', 'deny', 'status', 'toggle')
+REPLIES = ('allow', 'deny', 'status')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
 STATES = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
 
@@ -31,7 +35,7 @@ def main():
     msg = {'control': order}
     if order == 'toggle':
         msg['source'] = source
-    if order == 'status':
+    if order in REPLIES:
         msg['reply'] = True
     path = os.path.join(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'),
                         'elyares.sock')
@@ -40,7 +44,7 @@ def main():
             s.settimeout(0.3)
             s.connect(path)
             s.sendall((json.dumps(msg) + '\n').encode())
-            if order != 'status':
+            if order not in REPLIES:
                 return 0
             s.settimeout(2)
             data = b''
@@ -50,9 +54,14 @@ def main():
                     break
                 data += b
     except OSError:
-        print('elyares-ctl: la mascota no está corriendo', file=sys.stderr)
+        print('elyares-ctl: elyares-engineer no está corriendo', file=sys.stderr)
         return 1
-    for src in json.loads(data or b'{}').get('sources', []):
+    answer = json.loads(data or b'{}')
+    if order != 'status':
+        if not answer.get('ok'):
+            print(f"elyares-ctl: {answer.get('why') or 'elyares-engineer no contestó'}", file=sys.stderr)
+        return 0 if answer.get('ok') else 1
+    for src in answer.get('sources', []):
         print(f"{src['label']:<10}{STATES.get(src['state'], src['state']):<15}{src['note']}".rstrip())
     return 0
 

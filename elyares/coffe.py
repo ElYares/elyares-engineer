@@ -100,7 +100,7 @@ def watch(emit):
     if not shutil.which('coffe'):
         emit({'event': 'source', 'name': 'coffe', 'ok': False, 'note': 'falta coffe',
               'why': 'No está instalado coffe, el pomodoro',
-              'fix': 'Instálalo y reinicia la mascota'})
+              'fix': 'Instálalo y reinicia elyares-engineer'})
         return
 
     def loop():

@@ -45,6 +45,14 @@ def focused_monitor():
     return None
 
 
+def binds():
+    """Los atajos de teclado que hay ahora, como los da `hyprctl binds -j`."""
+    try:
+        return json.loads(request('j/binds'))
+    except (OSError, ValueError):
+        return []
+
+
 def cursor_pos():
     try:
         x, y = request('cursorpos').split(',')

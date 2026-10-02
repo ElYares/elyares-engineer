@@ -11,7 +11,11 @@ o cuando hay que contestar un permiso.
 `elyares-ctl` manda órdenes por el mismo socket (para atajos de Hyprland):
 abrir la isla, esconderla del todo o cambiar de modo. Con `theme` vuelve a leer
 el color de acento del tema de omarchy y con `glass` prende o apaga el modo
-vidrio (fondo translúcido; el desenfoque lo pone una regla de Hyprland).
+vidrio (fondo translúcido; el desenfoque lo pone una regla de Hyprland). Con
+`allow` y `deny` contesta desde el teclado el permiso que la isla tiene a la
+vista. Con `pin` (o con el clic central) la isla se queda fijada: abierta con
+todo a la vista (el detalle entero, la lista, las fuentes) aunque el ratón se
+vaya, hasta que se desfija.
 
 Además de las sesiones de Claude muestra alertas: de DevHerd Observe
 (`devherd.py`), de GitHub (`github.py`), del pomodoro (`coffe.py`), de un
@@ -19,13 +23,22 @@ comando largo que terminó y del uso de Claude. Se ven como una sesión más y e
 clic abre su URL o salta a su pane.
 
 Una alerta puede traer una ficha: unas líneas de detalle y botones propios
-(las de devherd traen Logs, Timeline, Levantar…), además de Descartar. Sale
+(las de devherd traen Logs, Timeline, Levantar…; las de GitHub, Reintentar y
+Abrir PR; las de la terminal y del uso, Ir al pane), además de Descartar. Sale
 debajo de la cabecera con el ratón encima o abierta a mano. Si la alerta está
 en la lista, un clic en su fila la sube a la cabecera para leerla.
 
 Abierta a mano lleva al pie una pastilla por fuente (`sources.py`): dice si
 está conectada y un clic la prende o la apaga. Con el cursor sobre una
-pastilla sale debajo de la isla una burbuja con lo que se sabe de esa fuente.
+pastilla sale debajo de la isla una burbuja con lo que se sabe de esa fuente
+y, para consultar, sus comandos (`commands.py`). Al final de la franja, la
+pastilla "?" trae los del propio elyares-engineer: atajos de teclado, clics y órdenes.
+
+Mientras corren unas pruebas en una terminal la isla se queda abierta con su
+ficha a la vista: la lista de las que van pasando (✓) y fallando (✗), que
+`testrun.Follower` va leyendo de lo que imprime el pane. Al terminar, y cuando
+las corre Claude, la ficha con el resultado se ve el rato que la isla está
+abierta por la noticia.
 
 Si la sesión principal está editando un archivo, abierta a mano (o al pedir
 permiso para editarlo) la isla se ensancha y muestra el fragmento que cambia,
@@ -53,8 +66,8 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import (actions, coffe, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, settings, sources, store, theme)
+from . import (actions, coffe, commands, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
+               preview, settings, sources, store, testrun, theme)
 from .state import Model  # noqa: E402
 
 MAX_ROWS = 4          # filas de la lista: las demás sesiones, sin la principal
@@ -64,6 +77,7 @@ DETAIL_LINES = 4      # líneas del detalle cuando se muestra entero
 MAX_EXTRA = 54        # alto de más que puede pedir el detalle entero
 PILLS_H = 34          # la franja de pastillas de las fuentes
 PILL_H, PILL_GAP = 20, 5
+PILL_PAD = 22         # lo que mide una pastilla además de su texto: el punto y los bordes
 PREVIEW_W = 600       # con vista previa la isla se ensancha: el código pide ancho
 CODE_LINE_H, PREVIEW_HEAD, PREVIEW_PAD = 15, 24, 8
 PREVIEW_MAX = PREVIEW_HEAD + (preview.MAX_LINES + 1) * CODE_LINE_H + 2 * PREVIEW_PAD
@@ -71,7 +85,9 @@ ASK_TALL = 24         # con vista previa, los botones bajan debajo de ella
 PREVIEW_OPEN_SECS = 20    # abierta con el teclado y con código que leer
 CARD_BUTTONS = 40     # la fila de botones de la ficha de una alerta
 TIP_W, TIP_PAD, TIP_GAP = 400, 11, 6   # la burbuja de una fuente, debajo de la isla
-TIP_ROOM = 220        # el alto que se le reserva en la ventana
+TIP_ROOM = 440        # el alto que se le reserva en la ventana
+TIP_COL_GAP = 16      # entre un comando y lo que hace
+TIP_HEAD_GAP = 7      # aire sobre el título de un bloque de comandos
 TIP_LINES = 3         # líneas propias que puede traer una fuente
 TIP_FADE = .12        # segundos que tarda en aparecer
 # 8: margen del rebote
@@ -86,6 +102,7 @@ PET_SCALE = PET / 260
 TEXT_INSET = 12 + PET + 10 + 18   # lo que le quitan al texto la mascota y los márgenes
 ISLAND_BG = (5 / 255, 6 / 255, 8 / 255, .97)
 GLASS_ALPHA, GLASS_EDGE = .5, .16    # modo vidrio: fondo translúcido y filo claro
+TIP_GLASS_ALPHA = .82                # la burbuja, en vidrio: se lee más rato que la isla
 TITLE_COLOR = (.95, .96, 1, 1)
 MUTED_COLOR = (.44, .49, .63, 1)
 FONT_TITLE = 'Sans Semi-Bold 11'
@@ -97,7 +114,13 @@ FONT_CODE = 'JetBrainsMono Nerd Font 8'
 ROW_NAME_W = 130     # ancho de la columna del proyecto en la lista
 STATE_COLORS = {'permission': 'red', 'alert': 'red', 'waiting': 'yellow', 'done': 'green',
                 'working': 'accent'}
-TONE_COLORS = {'ok': 'green', 'info': 'yellow'}    # el punto de una alerta, según su tono
+# El punto de una alerta, según su tono.
+TONE_COLORS = {'ok': 'green', 'info': 'yellow', 'run': 'accent'}
+# Una línea de la ficha que empieza con la marca de una prueba: el color de
+# la marca y el del nombre. Verde y rojo son fijos, como los puntos de estado:
+# el "verde" de algunos temas es un gris.
+MARK_COLORS = {testrun.MARKS[testrun.OK]: ('green', 'text'), testrun.MARKS[testrun.FAIL]: ('red', 'bad'),
+               testrun.MARKS[testrun.SKIP]: ('metal', 'dim')}
 CONTEXT_SHOW = 1     # % de contexto desde el que se muestra junto a la sesión: siempre que se sepa
 BUTTON_H, BUTTON_W, BUTTON_GAP = 26, 84, 8
 ALLOW_BG, ALLOW_FG = (.95, .96, 1), (5 / 255, 6 / 255, 8 / 255)
@@ -106,6 +129,9 @@ SPRING_K, SPRING_C = 220.0, 22.0   # rigidez y amortiguación: rebota un poquito
 LOOK_EVERY = 1 / 15                # frecuencia con la que se pregunta el cursor
 IDLE_FPS = 12                      # asomada y quieta: ~3% de CPU en vez de ~8% a 30
 KEY_OPEN_SECS = 6                  # abierta con el teclado: se cierra sola
+ASK_GUARD_SECS = .6                # un permiso recién salido no se contesta con el teclado
+REAP_SECS = 15                     # cada cuánto se mira si los procesos de Claude siguen ahí
+BG_TAG = '2º plano'                # una sesión de segundo plano, en su fila de la lista
 
 
 def ago(secs):
@@ -137,13 +163,17 @@ class Island:
         store.forget_usage()
         self.saved = self.model.dump()
         self.view = self.model.view()
+        self.key_since = time.monotonic()   # desde cuándo la cabecera muestra lo que muestra
         self.title, self.detail = '', ''
         self.dnd = False
         self.hover = False
         self.settings = settings.load()
         self.load_theme()
-        self.expanded = False           # abierta a mano, con un clic o con elyares-ctl
+        # Abierta a mano, con un clic o con elyares-ctl. Fijada (preferencia
+        # `pinned`) se queda así: no se cierra sola ni cuando el ratón se va.
+        self.expanded = self.settings['pinned']
         self.collapse_id = 0
+        self.seconds = 0
         self.off = False                # escondida del todo con elyares-ctl hide
         self.w, self.h = SIZES['hidden']
         self.vw = self.vh = 0.0
@@ -170,6 +200,7 @@ class Island:
         self.pills = []                 # (fuente, x, y, ancho, alto), del último dibujo
         self.tip = None                 # (fuente, centro, opacidad) de la pastilla bajo el cursor
         self.tip_key, self.tip_since = None, 0.0
+        self.tip_ref = []               # los comandos de la burbuja que se está viendo
         # Lo que se sabe de cada fuente: si responde, una nota y lo que dirá
         # su burbuja. Las que dependen de install.sh arrancan con lo que haya
         # instalado.
@@ -212,6 +243,9 @@ class Island:
         right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
         right.connect('pressed', self.on_right_click)
         da.add_controller(right)
+        middle = Gtk.GestureClick(button=Gdk.BUTTON_MIDDLE)
+        middle.connect('pressed', self.on_middle_click)
+        da.add_controller(middle)
         win.set_child(da)
         self.da = da
 
@@ -227,8 +261,9 @@ class Island:
                   lambda req: GLib.idle_add(self.on_gone, req))
         hypr.listen(lambda name: GLib.idle_add(self.on_focused_monitor, name))
         # Los vigilantes corren siempre y miran la preferencia en cada vuelta:
-        # así una fuente se prende y se apaga sin reiniciar la mascota.
+        # así una fuente se prende y se apaga sin reiniciar elyares-engineer.
         emit = lambda msg: GLib.idle_add(self.on_message, msg, None)  # noqa: E731
+        self.tests = testrun.Follower(emit)
         devherd.watch(emit, lambda: self.settings['devherd'])
         coffe.watch(emit)
         github.watch(emit, lambda: self.settings['github'],
@@ -244,8 +279,8 @@ class Island:
     # ── estado ───────────────────────────────────────────────────────────────
 
     def on_socket(self, msg, req):
-        # Un botón que corre un comando solo lo ponen los vigilantes de la
-        # propia mascota. Por el socket una alerta puede traer ficha y botones
+        # Un botón que corre un comando solo lo ponen los vigilantes del
+        # propio elyares-engineer. Por el socket una alerta puede traer ficha y botones
         # que abren una URL, pero no comandos: quien pueda escribir aquí no
         # debe poder disfrazar de "Logs" lo que quiera correr.
         if isinstance(msg.get('actions'), list):
@@ -270,6 +305,13 @@ class Island:
             if req:
                 req.reply(None)
             return GLib.SOURCE_REMOVE
+        if 'results' not in msg:
+            # Pruebas en una terminal: al empezar se las sigue y al terminar
+            # el mensaje vuelve con sus resultados (`results`).
+            if msg.get('event') == 'cmd-start' and not self.tests.start(msg):
+                return GLib.SOURCE_REMOVE
+            if msg.get('event') == 'cmd-done' and self.tests.finish(msg):
+                return GLib.SOURCE_REMOVE
         focus = self.model.focus
         self.model.handle(msg, req)
         self.refresh()
@@ -306,6 +348,11 @@ class Island:
         return GLib.SOURCE_REMOVE
 
     def on_second(self):
+        self.seconds += 1
+        if self.seconds % REAP_SECS == 0:
+            # Las sesiones sin pane (las de segundo plano) no tienen otra
+            # forma de irse si se cierran sin avisar.
+            self.model.reap(actions.proc_alive)
         if self.model.sessions:
             self.refresh()
         return GLib.SOURCE_CONTINUE
@@ -332,6 +379,8 @@ class Island:
         elif self.expanded:
             self.title, self.detail = 'Sin sesiones', 'Nada corriendo ahora'
         changed = v.mode != self.view.mode or v.key != self.view.key
+        if v.key != self.view.key:
+            self.key_since = time.monotonic()
         self.view = v
         if changed or v.mode != 'hidden':
             self.ensure_tick()
@@ -370,10 +419,15 @@ class Island:
         return self.sources.get(key, {}).get('note', '')
 
     def source_tip(self, key):
-        """Lo que dice la burbuja de una fuente: (título, [(texto, color)])."""
+        """Lo que dice la burbuja de una pastilla: (título, filas). Una fila es
+        ('text', texto, color), ('head', título de un bloque) o
+        ('cmd', comando, qué hace)."""
+        text, dim = rgb(self.colors['text']), rgb(self.colors['dim'])
+        if key == commands.HELP:
+            return 'Atajos de elyares-engineer', [('text', 'Para consultar: nada de aquí se ejecuta', dim)
+                                            ] + self.tip_ref
         state, now = self.source_state(key), time.monotonic()
         src = self.sources.get(key) or {}
-        text, dim = rgb(self.colors['text']), rgb(self.colors['dim'])
         facts = [sources.STATE_TEXT[state].capitalize()]
         # En rojo, la nota es la de la avería, no el número de sesiones.
         note = src.get('note', '') if state == 'bad' else self.source_note(key)
@@ -403,10 +457,10 @@ class Island:
             if src.get('polled'):
                 lines.append((f'Consultado {ago(now - src["polled"])}', dim))
         if key != 'claude':
-            # Claude no se apaga desde aquí: sin sus hooks no hay mascota.
+            # Claude no se apaga desde aquí: sin sus hooks no hay nada que mostrar.
             lines.append(('Clic para prenderla' if state == 'off' else 'Clic para apagarla',
                           MUTED_COLOR[:3]))
-        return sources.LABELS[key], lines
+        return sources.LABELS[key], [('text', *line) for line in lines] + self.tip_ref
 
     def toggle_source(self, key):
         """Prende o apaga una fuente. Al apagarla se van sus alertas."""
@@ -434,6 +488,10 @@ class Island:
                 req.reply({'sources': [
                     {'key': key, 'label': label, 'state': self.source_state(key),
                      'note': self.source_note(key)} for key, label in sources.SOURCES]})
+        elif order in ('allow', 'deny'):
+            why = self.answer(order == 'allow', (msg or {}).get('peer'))
+            if req:
+                req.reply({'ok': not why, 'why': why})
         elif order == 'toggle':
             if (msg or {}).get('source') in sources.PREFIXES:
                 self.toggle_source(msg['source'])
@@ -442,6 +500,8 @@ class Island:
             self.collapse()
         elif order == 'compact':
             self.toggle_compact()
+        elif order == 'pin':
+            self.toggle_pinned()
         elif order == 'theme':
             self.load_theme()
             self.ensure_tick()
@@ -451,10 +511,33 @@ class Island:
             self.ensure_tick()
         elif order == 'open':
             if self.expanded and not self.off:
-                self.collapse()
+                # Cerrarla a mano también la desfija: si no, no se cerraría.
+                if self.settings['pinned']:
+                    self.toggle_pinned()
+                else:
+                    self.collapse()
             else:
                 self.off = False
                 self.expand(PREVIEW_OPEN_SECS if self.preview() else KEY_OPEN_SECS)
+
+    def answer(self, allow, peer=None, now=None):
+        """Contesta con el teclado el permiso que está a la vista. Devuelve por
+        qué no lo hizo, o '' si lo contestó.
+
+        Solo el que se ve en la cabecera: no uno tapado por otra sesión, ni
+        con la isla escondida, ni uno que acaba de salir y no dio tiempo de
+        leer. Y permitir no puede pedirlo un proceso lanzado por Claude: se
+        estaría aprobando a sí mismo. Denegar, sí.
+        """
+        if allow and (not peer or 'claude' in peer):
+            return 'permitir no se puede pedir desde una sesión de Claude'
+        if self.off or not self.view.ask:
+            return 'no hay ningún permiso a la vista'
+        if (now or time.monotonic()) - self.key_since < ASK_GUARD_SECS:
+            return 'el permiso acaba de salir: léelo y pulsa otra vez'
+        self.model.decide(self.view.session, allow)
+        self.refresh()
+        return ''
 
     def expand(self, secs=None):
         """Abre la isla a mano. Con secs se cierra sola si el ratón no está encima."""
@@ -462,7 +545,7 @@ class Island:
             GLib.source_remove(self.collapse_id)
             self.collapse_id = 0
         self.expanded = True
-        if secs:
+        if secs and not self.settings['pinned']:
             self.collapse_id = GLib.timeout_add_seconds(secs, self.on_collapse)
         self.refresh()
         self.ensure_tick()
@@ -485,7 +568,9 @@ class Island:
         if self.collapse_id:
             GLib.source_remove(self.collapse_id)
             self.collapse_id = 0
-        self.expanded = False
+        # Fijada no se cierra: solo suelta la alerta que se había elegido en la
+        # lista, para que no tape algo más urgente.
+        self.expanded = self.settings['pinned']
         if self.pin:
             self.pin = ''
             self.refresh()
@@ -497,6 +582,16 @@ class Island:
         if not self.hover:
             self.collapse()
         return GLib.SOURCE_REMOVE
+
+    def toggle_pinned(self):
+        """Fija la isla abierta, o la suelta para que vuelva a cerrarse sola."""
+        self.settings['pinned'] = not self.settings['pinned']
+        settings.save(self.settings)
+        if self.settings['pinned']:
+            self.off = False
+            self.expand()
+        else:
+            self.collapse()
 
     def toggle_compact(self):
         self.settings['compact'] = not self.settings['compact']
@@ -566,7 +661,9 @@ class Island:
         s = self.view.session
         if not s or not s.card or mode not in ('open', 'list'):
             return 0
-        if not (self.hover or self.expanded):
+        # La de unas pruebas se ve sin pedirla mientras la isla está abierta
+        # por ellas: para eso se abrió.
+        if not (self.hover or self.expanded or (s.tests and self.view.mode == 'open')):
             return 0
         body = (PREVIEW_HEAD if s.where or s.note else 0) + len(s.lines) * CODE_LINE_H
         return (body + 2 * PREVIEW_PAD if body else 0) + CARD_BUTTONS
@@ -801,6 +898,8 @@ class Island:
             title_right = right
             best = self.view.session
             notes = [(f'{self.view.count} sesiones', MUTED_COLOR[:3])] if self.view.count > 1 else []
+            if self.settings['pinned']:
+                notes.insert(0, ('fijada', rgb('accent')))
             if best and best.context >= CONTEXT_SHOW:
                 notes.append((f'{best.context:.0f}%',
                               rgb(self.colors[paint.context_role(best.context)])))
@@ -896,6 +995,15 @@ class Island:
                 cr.set_source_rgba(*rgb(self.colors[paint.context_role(s.context)]), alpha)
                 PangoCairo.show_layout(cr, pct)
                 end -= 10
+            if s.kind == 'bg':
+                # No tiene terminal: es lo que la distingue de otra del mismo repo.
+                tag = self._layout(cr, BG_TAG, FONT_DETAIL)
+                tw, th = tag.get_pixel_size()
+                end -= tw
+                cr.move_to(end, y + (ROW_H - th) / 2)
+                cr.set_source_rgba(*MUTED_COLOR[:3], alpha)
+                PangoCairo.show_layout(cr, tag)
+                end -= 10
             if s.detail:
                 detail = self._layout(cr, s.detail, FONT_DETAIL, end - dx, markup=self.markup(s.detail))
             else:
@@ -977,9 +1085,17 @@ class Island:
                 PangoCairo.show_layout(cr, where)
                 y += PREVIEW_HEAD
             for text in s.lines:
-                line = self._layout(cr, text, FONT_CODE, right - 12 - tx)
-                cr.move_to(tx, y + 1)
-                cr.set_source_rgba(*rgb(self.colors['text']), alpha)
+                mark, role, lx = MARK_COLORS.get(text[:1]) if text[1:2] == ' ' else None, 'text', tx
+                if mark:
+                    # La marca de una prueba, en su color; el nombre, a su lado.
+                    sign = self._layout(cr, text[0], FONT_CODE)
+                    cr.move_to(tx, y + 1)
+                    cr.set_source_rgba(*mascot.rgba(mark[0], alpha))
+                    PangoCairo.show_layout(cr, sign)
+                    text, role, lx = text[2:], mark[1], tx + 14
+                line = self._layout(cr, text, FONT_CODE, right - 12 - lx)
+                cr.move_to(lx, y + 1)
+                cr.set_source_rgba(*rgb(self.colors[role]), alpha)
                 PangoCairo.show_layout(cr, line)
                 y += CODE_LINE_H
         # Los botones, de derecha a izquierda: el último de la alerta es el
@@ -993,7 +1109,8 @@ class Island:
             x -= BUTTON_GAP
 
     def draw_pills(self, cr, x0, w, bottom, alpha):
-        """Una pastilla por fuente, pegadas al borde de abajo."""
+        """Una pastilla por fuente, pegadas al borde de abajo, y al final la
+        de los atajos de elyares-engineer."""
         left, right = x0 + 18, x0 + w - 18
         top = bottom - PILLS_H
         cr.set_source_rgba(1, 1, 1, .08 * alpha)
@@ -1005,7 +1122,7 @@ class Island:
             state = self.source_state(key)
             layout = self._layout(cr, label, FONT_PILL)
             lw, lh = layout.get_pixel_size()
-            pw = lw + 26
+            pw = lw + PILL_PAD
             over = x <= px <= x + pw and y <= py <= y + PILL_H
             mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
             cr.set_source_rgba(1, 1, 1, (.13 if over else .07) * alpha)
@@ -1013,42 +1130,84 @@ class Island:
             cr.new_sub_path()
             if state == 'off':
                 # Apagada va hueca, como una sesión en reposo.
-                cr.arc(x + 11, y + PILL_H / 2, 2.5, 0, 2 * math.pi)
+                cr.arc(x + 10, y + PILL_H / 2, 2.5, 0, 2 * math.pi)
                 cr.set_source_rgba(*mascot.rgba('metal', .6 * alpha))
                 cr.set_line_width(1.3)
                 cr.stroke()
             else:
                 color = {'on': 'green', 'bad': 'red'}.get(state, 'metal')
-                cr.arc(x + 11, y + PILL_H / 2, 3, 0, 2 * math.pi)
+                cr.arc(x + 10, y + PILL_H / 2, 3, 0, 2 * math.pi)
                 cr.set_source_rgba(*mascot.rgba(color, alpha))
                 cr.fill()
-            cr.move_to(x + 19, y + (PILL_H - lh) / 2)
+            cr.move_to(x + 17, y + (PILL_H - lh) / 2)
             cr.set_source_rgba(*(MUTED_COLOR if state == 'off' else TITLE_COLOR)[:3], alpha)
             PangoCairo.show_layout(cr, layout)
             self.pills.append((key, x, y, pw, PILL_H))
             if over:
                 self.tip = (key, x + pw / 2, alpha)
             x += pw + PILL_GAP
+        # La de los atajos no es una fuente: va sin punto, al otro extremo.
+        layout = self._layout(cr, '?', FONT_PILL)
+        lw, lh = layout.get_pixel_size()
+        pw = lw + 16
+        x = right - pw
+        over = x <= px <= x + pw and y <= py <= y + PILL_H
+        mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
+        cr.set_source_rgba(1, 1, 1, (.13 if over else .07) * alpha)
+        cr.fill()
+        cr.move_to(x + (pw - lw) / 2, y + (PILL_H - lh) / 2)
+        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+        PangoCairo.show_layout(cr, layout)
+        self.pills.append((commands.HELP, x, y, pw, PILL_H))
+        if over:
+            self.tip = (commands.HELP, x + pw / 2, alpha)
 
     def draw_tip(self, cr, width, top, now):
-        """La burbuja de una fuente: sale debajo de la isla mientras el cursor
-        está sobre su pastilla, sin clic."""
+        """La burbuja de una pastilla: sale debajo de la isla mientras el
+        cursor está sobre ella, sin clic. Arriba, cómo está la fuente; debajo,
+        sus comandos en dos columnas."""
         key, cx, alpha = self.tip
         if key != self.tip_key:
             self.tip_key, self.tip_since = key, now
+            # Los comandos se leen al salir la burbuja: un cambio en el archivo
+            # o en los atajos de Hyprland se ve sin reiniciar nada.
+            self.tip_ref = commands.reference(
+                key, commands.load(), hypr.binds() if key == commands.HELP else None)
         alpha *= clamp((now - self.tip_since) / TIP_FADE)
-        title, lines = self.source_tip(key)
+        title, rows = self.source_tip(key)
+        room = width - 8 - 2 * TIP_PAD          # lo más ancha que puede ser por dentro
         inner = TIP_W - 2 * TIP_PAD
-        rows = [(self._layout(cr, title, FONT_ROW, inner), TITLE_COLOR[:3])]
-        # Una causa o un resumen largo se parte en dos líneas antes que cortarse.
-        rows += [(self._layout(cr, text, FONT_DETAIL, inner, 2), color) for text, color in lines]
-        sizes = [layout.get_pixel_size() for layout, _ in rows]
-        w = max(lw for lw, _ in sizes) + 2 * TIP_PAD
-        h = sum(lh for _, lh in sizes) + 3 * (len(rows) - 1) + 2 * TIP_PAD
+        cmds = [self._layout(cr, row[1], FONT_DETAIL) for row in rows if row[0] == 'cmd']
+        col = max((layout.get_pixel_size()[0] for layout in cmds), default=0) + TIP_COL_GAP
+        # Cada fila: (lo que se pinta a la izquierda, color, lo de la derecha, aire arriba).
+        drawn = [(self._layout(cr, title, FONT_ROW, inner), TITLE_COLOR[:3], None, 0)]
+        cmds = iter(cmds)
+        for row in rows:
+            if row[0] == 'text':
+                # Una causa o un resumen largo se parte en dos líneas antes que cortarse.
+                drawn.append((self._layout(cr, row[1], FONT_DETAIL, inner, 2), row[2], None, 0))
+            elif row[0] == 'head':
+                drawn.append((self._layout(cr, row[1].upper(), FONT_PILL), MUTED_COLOR[:3], None,
+                              TIP_HEAD_GAP))
+            else:
+                what = self._layout(cr, row[2], FONT_DETAIL, room - col)
+                drawn.append((next(cmds), rgb(self.colors['cmd']), what, 0))
+        # Lo que ocupa cada fila hacia abajo: los comandos van más juntos.
+        steps = [gap + layout.get_pixel_size()[1] + (1 if what else 3)
+                 for layout, _, what, gap in drawn]
+        while sum(steps) + 2 * TIP_PAD > TIP_ROOM - TIP_GAP and len(drawn) > 2:
+            # Más comandos de los que caben en la ventana: se dice que hay más.
+            drawn[-2:] = [(self._layout(cr, '…', FONT_DETAIL), MUTED_COLOR[:3], None, 0)]
+            steps[-2:] = [drawn[-1][0].get_pixel_size()[1] + 3]
+        w = max([layout.get_pixel_size()[0] for layout, *_ in drawn]
+                + [col + what.get_pixel_size()[0] for _, _, what, _ in drawn if what]) + 2 * TIP_PAD
+        h = sum(steps) - 3 + 2 * TIP_PAD
         x, y = clamp(cx - w / 2, 4, width - w - 4), top + TIP_GAP
+        self.tip_size = (w, h)
         glass = self.settings['glass']
         mascot.rrect(cr, x, y, w, h, 12)
-        cr.set_source_rgba(*ISLAND_BG[:3], (GLASS_ALPHA if glass else ISLAND_BG[3]) * alpha)
+        # Con comandos se lee más rato: en vidrio va más opaca que la isla.
+        cr.set_source_rgba(*ISLAND_BG[:3], (TIP_GLASS_ALPHA if glass else ISLAND_BG[3]) * alpha)
         if glass:
             cr.fill_preserve()
             cr.set_source_rgba(1, 1, 1, GLASS_EDGE * alpha)
@@ -1057,11 +1216,15 @@ class Island:
         else:
             cr.fill()
         ty = y + TIP_PAD
-        for (layout, color), (_, lh) in zip(rows, sizes):
-            cr.move_to(x + TIP_PAD, ty)
+        for (layout, color, what, gap), step in zip(drawn, steps):
+            cr.move_to(x + TIP_PAD, ty + gap)
             cr.set_source_rgba(*color, alpha)
             PangoCairo.show_layout(cr, layout)
-            ty += lh + 3
+            if what:
+                cr.move_to(x + TIP_PAD + col, ty + gap)
+                cr.set_source_rgba(*rgb(self.colors['text']), alpha)
+                PangoCairo.show_layout(cr, what)
+            ty += step
 
     def draw_buttons(self, cr, right, bottom, alpha):
         y = bottom - BUTTON_H
@@ -1150,8 +1313,9 @@ class Island:
             return
         for key, bx, by, bw, bh in self.pills:
             if bx <= x <= bx + bw and by <= y <= by + bh:
-                # Claude no se apaga desde aquí: sin sus hooks no hay mascota.
-                if key != 'claude':
+                # Claude no se apaga desde aquí: sin sus hooks no hay nada que mostrar.
+                # Y la de los atajos no es una fuente.
+                if key in sources.PREFIXES:
                     self.toggle_source(key)
                 return
         for s, ry, rh in self.rows:
@@ -1188,11 +1352,20 @@ class Island:
             self.model.dismiss(s)
         elif isinstance(key, int) and key < len(s.actions):
             action = s.actions[key]
-            threading.Thread(target=actions.run, args=(action,), daemon=True).start()
+            if action.get('jump'):
+                self.collapse()
+                threading.Thread(target=actions.jump, args=(s,), daemon=True).start()
+            else:
+                threading.Thread(target=actions.run, args=(action,), daemon=True).start()
             if action.get('after'):
                 self.model.dismiss(s, cooldown=action['after'] == 'dismiss')
         self.refresh()
         self.ensure_tick()
+
+    def on_middle_click(self, _gesture, _n, x, y):
+        x0, w, h = self.island_rect(self.da.get_width())
+        if x0 <= x <= x0 + w and y <= max(h, HOVER_STRIP):
+            self.toggle_pinned()
 
     def on_right_click(self, _gesture, _n, x, y):
         x0, w, h = self.island_rect(self.da.get_width())
@@ -1202,8 +1375,8 @@ class Island:
 
 
 def main(argv):
-    # gtk4-layer-shell ya está cargada (la precarga bin/elyares-mascota): que
-    # no la hereden los programas que lanza la mascota. Firefox es GTK 3 y
+    # gtk4-layer-shell ya está cargada (la precarga bin/elyares-engineer): que
+    # no la hereden los programas que lanza elyares-engineer. Firefox es GTK 3 y
     # aborta al arrancar con una biblioteca de GTK 4 dentro.
     preload = [lib for lib in os.environ.get('LD_PRELOAD', '').split(':')
                if lib and 'gtk4-layer-shell' not in lib]
@@ -1211,7 +1384,7 @@ def main(argv):
         os.environ['LD_PRELOAD'] = ':'.join(preload)
     else:
         os.environ.pop('LD_PRELOAD', None)
-    app = Gtk.Application(application_id='dev.elyares.Mascota')
+    app = Gtk.Application(application_id='dev.elyares.Engineer')
 
     def activate(app):
         if not getattr(app, 'island', None):

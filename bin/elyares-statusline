@@ -2,7 +2,7 @@
 # Envoltura de la barra de estado de Claude Code.
 #
 # Corre la barra que ya tenías (install.sh guarda su comando en
-# ~/.config/elyares-mascota/statusline.cmd) y, de paso, le cuenta a la mascota
+# ~/.config/elyares-engineer/statusline.cmd) y, de paso, le cuenta a elyares-engineer
 # cuánto contexto lleva la sesión y cuánto del límite de 5 h. Los hooks de
 # Claude Code no traen ese dato; la barra de estado es el único sitio donde
 # Claude lo entrega.
@@ -12,7 +12,7 @@
 
 input="$(cat)"
 
-orig="${XDG_CONFIG_HOME:-$HOME/.config}/elyares-mascota/statusline.cmd"
+orig="${XDG_CONFIG_HOME:-$HOME/.config}/elyares-engineer/statusline.cmd"
 [ -s "$orig" ] && printf '%s' "$input" | sh -c "$(cat "$orig")"
 
 IFS=$'\t' read -r sid ctx lim < <(jq -r '[.session_id // "",

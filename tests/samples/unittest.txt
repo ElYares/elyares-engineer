@@ -1,0 +1,23 @@
+.EFs.
+======================================================================
+ERROR: test_error (test_a.Cuentas.test_error)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/muestra/py/test_a.py", line 9, in test_error
+    def test_error(self): raise ValueError('boom')
+                          ^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: boom
+
+======================================================================
+FAIL: test_resta (test_a.Cuentas.test_resta)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/muestra/py/test_a.py", line 4, in test_resta
+    def test_resta(self): self.assertEqual(2 - 1, 3)
+                          ~~~~~~~~~~~~~~~~^^^^^^^^^^
+AssertionError: 1 != 3
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.003s
+
+FAILED (failures=1, errors=1, skipped=1)

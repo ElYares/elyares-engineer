@@ -1,0 +1,21 @@
+
+   PASS  Tests\Unit\ExampleTest
+  ✓ that true is true                                                    0.01s
+
+   FAIL  Tests\Feature\OrderTest
+  ✓ it lists the orders                                                  0.21s
+  ⨯ it creates an order                                                  0.12s
+  - it sends the receipt → pendiente                                     0.01s
+  ✓ it cancels an order                                                  0.08s
+  ────────────────────────────────────────────────────────────────────────────
+   FAILED  Tests\Feature\OrderTest > it creates an order
+  Expected response status code [201] but received 500.
+
+  at tests/Feature/OrderTest.php:24
+     20▕     $response = $this->postJson('/api/orders', $payload);
+     21▕
+  ➜  24▕     $response->assertCreated();
+
+  Tests:    1 failed, 1 skipped, 3 passed (7 assertions)
+  Duration: 0.61s
+

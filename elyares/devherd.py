@@ -88,7 +88,7 @@ def last_event(project, issue_id):
 
 def unit_enabled():
     """¿El colector debería estar corriendo? Sin esto, si ya estaba caído al
-    arrancar la mascota no habría forma de saber que falta."""
+    arrancar elyares-engineer no habría forma de saber que falta."""
     try:
         out = subprocess.run(['systemctl', '--user', 'is-enabled', UNIT],
                              capture_output=True, text=True, timeout=2).stdout.strip()

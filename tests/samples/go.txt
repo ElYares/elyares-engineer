@@ -1,0 +1,8 @@
+--- FAIL: TestResta (0.00s)
+    a_test.go:4: esperaba 3, salió 1
+--- FAIL: TestSub (0.00s)
+    --- FAIL: TestSub/caso_dos (0.00s)
+        a_test.go:6: no
+FAIL
+FAIL	sample	0.002s
+FAIL

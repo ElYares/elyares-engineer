@@ -1,12 +1,17 @@
 #!/usr/bin/python3
-"""Manda un evento de Claude Code a la mascota.
+"""Manda un evento de Claude Code a elyares-engineer.
 
 Uso (desde settings.json):  elyares-hook <evento>   con el payload del hook por stdin
-Eventos: start tool tool-done permission idle stop failure session-end ask
-         compact (hook PreCompact), status (barra de estado: uso de contexto y
-         del límite de 5 h) y cmd-done (un comando largo de la terminal terminó)
+Eventos: start tool tool-done tool-fail permission idle stop failure session-end
+         ask compact (hook PreCompact), status (barra de estado: uso de contexto
+         y del límite de 5 h), cmd-start (empiezan unas pruebas en la terminal)
+         y cmd-done (un comando largo de la terminal, o unas pruebas, terminó)
 
-Nunca falla: si la mascota no está corriendo, sale en silencio.
+Cuando Claude corre pruebas con Bash, `tool-done` y `tool-fail` (hooks
+PostToolUse y PostToolUseFailure: unas pruebas en rojo salen con error) llevan
+además lo que imprimió el comando, para que la isla diga cuáles pasaron.
+
+Nunca falla: si elyares-engineer no está corriendo, sale en silencio.
 
 Todos los eventos son de una sola vía menos `ask` (hook PermissionRequest), que
 espera a que se pulse Permitir o Denegar en la isla y lo imprime en stdout. En
@@ -21,13 +26,37 @@ import sys
 import time
 
 KEEP = ('tool_name', 'tool_input', 'message', 'notification_type', 'reason',
-        'error_type', 'agent_id', 'context_pct', 'limit_pct', 'command', 'exit_code', 'seconds')
+        'error_type', 'agent_id', 'context_pct', 'limit_pct', 'command', 'exit_code', 'seconds',
+        'output', 'at')
 KEEP_INPUT = ('file_path', 'notebook_path', 'command', 'pattern', 'path', 'url',
               'query', 'description', 'subagent_type')
 # El fragmento que se edita, para la vista previa de la isla. Va más largo que
 # lo demás, pero con tope: un Write puede traer megas de contenido.
 EDIT_INPUT = ('old_string', 'new_string', 'content', 'new_source')
 EDIT_CHARS, MAX_EDITS = 6000, 3
+OUTPUT_CHARS = 64000      # de lo que imprimieron unas pruebas, el final
+
+
+def test_output(payload):
+    """Lo que imprimió un comando de pruebas que corrió Claude, o None si el
+    comando no era de pruebas. Claude Code lo entrega distinto según acabe
+    bien (`tool_response`) o con error (`error`)."""
+    ti = payload.get('tool_input')
+    command = ti.get('command') if isinstance(ti, dict) else None
+    if payload.get('tool_name') != 'Bash' or not isinstance(command, str):
+        return None
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    from elyares import testrun
+    if not testrun.is_test(command):
+        return None
+    parts = []
+    for key in ('tool_response', 'error'):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            parts += [value.get(k) for k in ('stdout', 'stderr')]
+        else:
+            parts.append(value)
+    return '\n'.join(p for p in parts if isinstance(p, str) and p)[-OUTPUT_CHARS:]
 
 
 def trim(ti):
@@ -43,6 +72,37 @@ def trim(ti):
                        if kk in EDIT_INPUT and isinstance(vv, str)}
                       for e in v[:MAX_EDITS] if isinstance(e, dict)]
     return out
+
+# Los eventos que lanza el propio proceso de la sesión de Claude. Los demás
+# vienen de la barra de estado o de una terminal: su padre es otra cosa.
+FROM_SESSION = ('start', 'tool', 'tool-done', 'tool-fail', 'permission', 'idle', 'stop',
+                'failure', 'compact', 'ask')
+SHELLS = ('sh', 'bash', 'dash', 'zsh', 'fish')
+
+
+def session_proc():
+    """El proceso de la sesión de Claude que lanzó este hook: ("pid:arranque",
+    su entorno). Lo primero es para que elyares-engineer sepa cuándo deja de
+    existir; el arranque distingue a otro proceso que más tarde reciba el
+    mismo pid. ('', {}) si no se pudo saber."""
+    pid = os.getppid()
+    for _ in range(4):
+        try:
+            with open(f'/proc/{pid}/stat') as f:
+                comm, rest = f.read().rsplit(')', 1)
+            fields = rest.split()
+            # Claude lanza el hook con una shell de por medio: se salta.
+            if comm.split('(', 1)[1] in SHELLS:
+                pid = int(fields[1])
+                continue
+            with open(f'/proc/{pid}/environ', 'rb') as f:
+                env = dict(item.split('=', 1) for item in f.read().decode(errors='replace').split('\0')
+                           if '=' in item)
+            return f'{pid}:{fields[19]}', env
+        except (OSError, ValueError, IndexError):
+            break
+    return '', {}
+
 
 # Piden respuesta del usuario, no permiso: un "allow" sin respuesta no sirve.
 NO_ASK = ('AskUserQuestion', 'ExitPlanMode')
@@ -86,6 +146,19 @@ def main():
         'pane': os.environ.get('TMUX_PANE', ''),
     }
     msg.update({k: payload[k] for k in KEEP if k in payload})
+    if event in FROM_SESSION:
+        msg['proc'], env = session_proc()
+        # Una sesión en segundo plano no tiene terminal: Claude Code le pone
+        # un nombre, que es lo único que la distingue de otra del mismo repo.
+        # Lo lleva en su entorno, pero no se lo pasa a lo que lanza.
+        msg['kind'] = env.get('CLAUDE_CODE_SESSION_KIND', '')
+        name = env.get('CLAUDE_CODE_SESSION_NAME', '')
+        if name and not msg['session_id'].startswith(name):   # sin nombre, trae su propio id
+            msg['label'] = name
+    if event in ('tool-done', 'tool-fail'):
+        output = test_output(payload)
+        if output:
+            msg['output'] = output
     ti = msg.get('tool_input')
     if isinstance(ti, dict):
         msg['tool_input'] = trim(ti)

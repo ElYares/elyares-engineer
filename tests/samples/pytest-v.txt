@@ -1,0 +1,45 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0 -- /home/yo/x
+cachedir: .pytest_cache
+rootdir: /tmp/muestra/py
+collecting ... collected 7 items
+
+test_a.py::Cuentas::test_con_doc PASSED                                  [ 14%]
+test_a.py::Cuentas::test_error FAILED                                    [ 28%]
+test_a.py::Cuentas::test_resta FAILED                                    [ 42%]
+test_a.py::Cuentas::test_saltada SKIPPED (luego)                         [ 57%]
+test_a.py::Cuentas::test_suma PASSED                                     [ 71%]
+test_a.py::test_funcion PASSED                                           [ 85%]
+test_a.py::test_funcion_falla FAILED                                     [100%]
+
+=================================== FAILURES ===================================
+______________________________ Cuentas.test_error ______________________________
+
+self = <test_a.Cuentas testMethod=test_error>
+
+>   def test_error(self): raise ValueError('boom')
+                          ^^^^^^^^^^^^^^^^^^^^^^^^
+E   ValueError: boom
+
+test_a.py:9: ValueError
+______________________________ Cuentas.test_resta ______________________________
+
+self = <test_a.Cuentas testMethod=test_resta>
+
+>   def test_resta(self): self.assertEqual(2 - 1, 3)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: 1 != 3
+
+test_a.py:4: AssertionError
+______________________________ test_funcion_falla ______________________________
+
+>   def test_funcion_falla(): assert 1 == 2
+                              ^^^^^^^^^^^^^
+E   assert 1 == 2
+
+test_a.py:11: AssertionError
+=========================== short test summary info ============================
+FAILED test_a.py::Cuentas::test_error - ValueError: boom
+FAILED test_a.py::Cuentas::test_resta - AssertionError: 1 != 3
+FAILED test_a.py::test_funcion_falla - assert 1 == 2
+==================== 3 failed, 3 passed, 1 skipped in 0.03s ====================

@@ -1,4 +1,4 @@
-"""Las fuentes de la mascota: de dónde le llega lo que muestra.
+"""Las fuentes de elyares-engineer: de dónde le llega lo que muestra.
 
 Cada una es una pastilla al pie de la isla abierta a mano, y una línea de
 `elyares-ctl status`. Menos Claude, todas se apagan desde ahí (o en
@@ -30,15 +30,15 @@ ABOUT = {'claude': 'Sesiones de Claude Code y sus permisos',
          'devherd': 'Errores y contenedores de DevHerd Observe',
          'coffe': 'Pomodoro: modo foco y descansos',
          'github': 'Checks de tus PRs y revisiones pedidas',
-         'terminal': 'Comandos de bash de 30 s o más',
+         'terminal': 'Comandos de bash de 30 s o más, y pruebas en vivo',
          'usage': 'Contexto de cada sesión y límite de 5 h'}
 
 # Por qué está en rojo una fuente a la que le falta su enganche. Las tres las
 # pone install.sh.
-MISSING = {'claude': 'Faltan los hooks de la mascota en ~/.claude/settings.json',
+MISSING = {'claude': 'Faltan los hooks de elyares-engineer en ~/.claude/settings.json',
            'usage': 'La barra de estado de Claude no pasa por elyares-statusline',
-           'terminal': 'Falta el bloque de la mascota en ~/.bashrc'}
-MISSING_FIX = 'Corre install.sh en el repo de la mascota'
+           'terminal': 'Falta el bloque de elyares-engineer en ~/.bashrc'}
+MISSING_FIX = 'Corre install.sh en el repo de elyares-engineer'
 
 # Con qué empieza el id de las alertas de cada fuente, para quitarlas al apagarla.
 PREFIXES = {'devherd': ('devherd:',), 'github': ('gh:',), 'coffe': ('coffe',),
@@ -48,7 +48,7 @@ PREFIXES = {'devherd': ('devherd:',), 'github': ('gh:',), 'coffe': ('coffe',),
 def source_of(msg):
     """De qué fuente viene un mensaje del socket."""
     ev, sid = msg.get('event'), str(msg.get('session_id') or '')
-    if ev == 'cmd-done':
+    if ev in ('cmd-start', 'cmd-done'):
         return 'terminal'
     if ev == 'status':
         return 'usage'
@@ -82,4 +82,4 @@ def installed():
     bar = (claude.get('statusLine') or {}).get('command') or ''
     return {'claude': 'elyares-hook' in hooks,
             'usage': bar.endswith('elyares-statusline'),
-            'terminal': '>>> elyares-mascota >>>' in _read('~/.bashrc')}
+            'terminal': '>>> elyares-engineer >>>' in _read('~/.bashrc')}

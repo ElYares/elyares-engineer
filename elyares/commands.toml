@@ -1,0 +1,45 @@
+# Los comandos que la isla enseña para consultar. Cada sección sale en la
+# burbuja de una pastilla, al pasarle el cursor: las de una fuente (devherd,
+# coffe, github, terminal, usage, claude) en la suya, y `raton` y `engineer` en
+# la de la pastilla "?", junto a los atajos de teclado, que se leen de Hyprland.
+#
+#     "comando" = "qué hace"
+#
+# Para cambiarlos sin tocar el repo, copia las secciones que quieras a
+# ~/.config/elyares-engineer/commands.toml: una sección de ahí reemplaza a la
+# de aquí, y una sección vacía la quita. Se relee cada vez que sale la burbuja.
+
+[devherd]
+"devherd serve" = "Levanta el proyecto, aplica el proxy y lo abre"
+"devherd up [ruta]" = "Levanta el proyecto de esta carpeta"
+"devherd down" = "Lo detiene"
+"devherd logs -f" = "Sus logs, en vivo"
+"devherd open" = "Lo abre en el navegador"
+"devherd list" = "Los proyectos registrados"
+"devherd observe open" = "El panel de errores de Observe"
+"devherd observe status" = "Si corre el colector de Observe"
+"devherd doctor" = "Revisa lo que necesita la máquina"
+
+[coffe]
+"coffe start <tarea>" = "Arranca un pomodoro sobre una tarea"
+"coffe pause" = "Al refri: anula el pomodoro y aparca la tarea"
+"coffe resume" = "Saca del refri la última tarea aparcada"
+"coffe switch <tarea>" = "Cambia de tarea en caliente"
+"coffe done" = "Da por terminada la tarea en curso"
+"coffe interrupt" = "Apunta una interrupción (-e si fue de otro)"
+"coffe status" = "Cómo va todo"
+"coffe task list" = "Las tareas que hay"
+"coffe report" = "En qué se te fue el tiempo"
+
+[raton]
+"Clic en el texto" = "Va al pane de la sesión, o abre la alerta"
+"Clic en una fila" = "Va a esa sesión, o sube la alerta a la cabecera"
+"Clic en una pastilla" = "Prende o apaga esa fuente"
+"Clic derecho" = "Modo compacto"
+"Clic central" = "Fija la isla abierta, o la suelta"
+
+[engineer]
+"elyares-ctl status" = "Cómo está cada fuente"
+"elyares-ctl toggle <fuente>" = "Prende o apaga una fuente"
+"elyares-ctl glass" = "Modo vidrio"
+"elyares-demo" = "Recorre los estados con eventos falsos"

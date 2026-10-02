@@ -15,6 +15,7 @@ def ask: {hooks: [{type: "command", command: ($hook + " ask"), timeout: 600}]};
     .hooks.UserPromptSubmit += [entry("start"; null)]
   | .hooks.PreToolUse       += [entry("tool"; null)]
   | .hooks.PostToolUse      += [entry("tool-done"; null)]
+  | .hooks.PostToolUseFailure += [entry("tool-fail"; null)]
   | .hooks.PermissionRequest += [ask]
   | .hooks.Notification     += [entry("permission"; "permission_prompt"), entry("idle"; "idle_prompt")]
   | .hooks.Stop             += [entry("stop"; null)]

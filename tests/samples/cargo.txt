@@ -1,0 +1,26 @@
+   Compiling sample v0.1.0 (/tmp/muestra/rs)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.49s
+     Running unittests src/lib.rs (target/debug/deps/sample-47a80adcc4928405)
+
+running 3 tests
+test tests::saltada ... ignored
+test tests::resta ... FAILED
+test tests::suma ... ok
+
+failures:
+
+---- tests::resta stdout ----
+
+thread 'tests::resta' (467248) panicked at src/lib.rs:4:26:
+assertion `left == right` failed
+  left: 1
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tests::resta
+
+test result: FAILED. 1 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

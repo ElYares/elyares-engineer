@@ -1,0 +1,23 @@
+PASS src/b.test.js
+FAIL src/a.test.js
+  cuentas
+    ✓ suma (2 ms)
+    ✕ resta (3 ms)
+    ○ skipped saltada
+
+  ● cuentas › resta
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 3
+    Received: 1
+
+      2 | describe('cuentas', () => {
+    > 4 |   it('resta', () => { expect(2 - 1).toBe(3) })
+        |                                     ^
+
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       1 failed, 1 skipped, 2 passed, 4 total
+Snapshots:   0 total
+Time:        0.512 s
+Ran all test suites.
