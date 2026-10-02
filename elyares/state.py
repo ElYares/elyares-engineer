@@ -39,6 +39,9 @@ hooks SubagentStart y SubagentStop avisan cuándo arranca y termina cada uno
 (`agent-start`, `agent-stop`), y lo que hace una herramienta dentro de uno llega
 con su `agent_id` y su `agent_type`. Si alguno es de la familia (`AGENT_ROLES`),
 la mascota se vuelve ese personaje mientras trabaja (`View.role`).
+
+Una sesión se nombra «agente | proyecto» (`View.agent_name` y `View.title`): el
+agente es `elyares-engineer` salvo mientras trabaja un subagente de la familia.
 """
 
 import os
@@ -87,7 +90,9 @@ SAVED_TIMES = ('started', 'changed', 'updated')
 # engineer.
 AGENT_ROLES = {'elyares-architect': 'architect', 'elyares-auditor': 'auditor',
                'elyares-reviewer': 'reviewer'}
-AGENT_PREFIX = 'elyares-'
+# Quien trabaja en una sesión mientras no lo haga un subagente de la familia,
+# y su personaje.
+MAIN_AGENT, MAIN_ROLE = 'elyares-engineer', 'engineer'
 
 _root_cache = {}
 
@@ -231,13 +236,10 @@ class Agent:
 
     @property
     def role(self):
-        return AGENT_ROLES.get(self.kind, 'engineer')
+        return AGENT_ROLES.get(self.kind, MAIN_ROLE)
 
     @property
     def name(self):
-        """Como sale en la lista: los de la familia, sin el prefijo."""
-        if self.kind in AGENT_ROLES:
-            return self.kind[len(AGENT_PREFIX):]
         return self.kind or 'subagente'
 
 
@@ -286,11 +288,23 @@ class Session:
         return self.state == 'alert' and bool(self.lines or self.actions)
 
     @property
-    def role(self):
-        """El personaje que le toca a la mascota: el del subagente de la
-        familia que arrancó al último y sigue trabajando, o el engineer."""
+    def lead(self):
+        """El subagente de la familia que arrancó al último y sigue trabajando, o None."""
         family = [a for a in self.agents.values() if a.kind in AGENT_ROLES]
-        return max(family, key=lambda a: a.started).role if family else 'engineer'
+        return max(family, key=lambda a: a.started) if family else None
+
+    @property
+    def role(self):
+        """El personaje que le toca a la mascota: el de ese subagente, o el engineer."""
+        return self.lead.role if self.lead else MAIN_ROLE
+
+    @property
+    def agent_name(self):
+        """El nombre de quien trabaja en la sesión: ese subagente, o el
+        engineer. Una alerta no es de ningún agente: ''."""
+        if self.state == 'alert':
+            return ''
+        return self.lead.name if self.lead else MAIN_AGENT
 
     def set(self, state, detail=None, now=None):
         now = now or time.monotonic()
@@ -318,7 +332,8 @@ class View:
     session: Session | None = None
     key: tuple = ()
     others: list = field(default_factory=list)   # las demás sesiones, por urgencia; al final las en reposo
-    role: str = 'engineer'    # el personaje de la mascota: el del subagente que trabaja
+    role: str = MAIN_ROLE     # el personaje de la mascota: el del subagente que trabaja
+    agent_name: str = ''      # quién trabaja, para la cabecera «agente | proyecto»; '' en una alerta
 
 
 class Model:
@@ -683,9 +698,8 @@ class Model:
         st = best.state
         # Dos sesiones del mismo repo se distinguen por el nombre de la que lo tiene.
         name = f'{best.proj} · {best.label}' if best.label else best.proj
-        if st == 'permission':
-            mode, title = 'open', f'{name} necesita permiso'
-        elif st == 'done':
+        if st in ('permission', 'done'):
+            # Que pide permiso lo dicen la antena roja y la nota de la cabecera.
             mode, title = 'open', name
         elif st == 'waiting':
             mode = 'open' if now - best.changed < WAITING_OPEN_SECS else 'peek'
@@ -706,4 +720,4 @@ class Model:
             mode = 'peek'
         ask = st == 'permission' and best.ask is not None
         return View(mode, pet, title, best.detail, count, ask, best, (best.sid, st, ask),
-                    ranked[1:], best.role)
+                    ranked[1:], best.role, best.agent_name)

@@ -73,7 +73,7 @@ from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, coffe, commands, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
                preview, settings, sources, store, testrun, theme)
-from .state import Model, elapsed  # noqa: E402
+from .state import MAIN_AGENT, MAIN_ROLE, Model, elapsed  # noqa: E402
 
 MAX_ROWS = 5          # filas de la lista: las demás sesiones y los subagentes de cada una
 ROW_H, LIST_PAD = 28, 10
@@ -100,7 +100,7 @@ WIN_W = PREVIEW_W + 40
 WIN_H = (OPEN_H + MAX_EXTRA + PREVIEW_MAX + ASK_TALL + MAX_ROWS * ROW_H + LIST_PAD + PILLS_H + 8
          + TIP_ROOM)
 SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
-         'open': (440, OPEN_H), 'ask': (440, 108)}
+         'open': (560, OPEN_H), 'ask': (560, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
@@ -110,13 +110,15 @@ GLASS_ALPHA, GLASS_EDGE = .5, .16    # modo vidrio: fondo translúcido y filo cl
 TIP_GLASS_ALPHA = .82                # la burbuja, en vidrio: se lee más rato que la isla
 TITLE_COLOR = (.95, .96, 1, 1)
 MUTED_COLOR = (.44, .49, .63, 1)
+# La barra entre el agente y el proyecto, en el mismo gris.
+SEP_COLOR = '#%02x%02x%02x' % tuple(round(c * 255) for c in MUTED_COLOR[:3])
 FONT_TITLE = 'Sans Semi-Bold 11'
 FONT_DETAIL = 'JetBrainsMono Nerd Font 9'
 FONT_BUTTON = 'Sans Semi-Bold 10'
 FONT_ROW = 'Sans Semi-Bold 10'
 FONT_PILL = 'Sans Semi-Bold 8'
 FONT_CODE = 'JetBrainsMono Nerd Font 8'
-ROW_NAME_W = 130     # ancho de la columna del proyecto en la lista
+ROW_NAME_W = 256     # ancho de la columna «agente | proyecto» en la lista
 AGENT_INDENT = 24    # lo que se mete la fila de un subagente bajo la de su sesión
 AGENT_PET = 21       # alto de su carita
 STATE_COLORS = {'permission': 'red', 'alert': 'red', 'waiting': 'yellow', 'done': 'green',
@@ -172,6 +174,7 @@ class Island:
         self.view = self.model.view()
         self.key_since = time.monotonic()   # desde cuándo la cabecera muestra lo que muestra
         self.title, self.detail = '', ''
+        self.agent_name, self.role = '', MAIN_ROLE   # de quién es la cabecera
         self.dnd = False
         self.hover = False
         self.settings = settings.load()
@@ -379,12 +382,14 @@ class Island:
             self.pet_state, self.pet_since = v.pet, time.monotonic()
         if v.title:
             self.title, self.detail = v.title, v.detail
+            self.agent_name, self.role = v.agent_name, v.role
         elif self.expanded and v.others:
             # Abierta a mano sin nada corriendo: la cabecera lo dice y la lista
             # trae las sesiones en reposo.
             self.title, self.detail = 'Sin sesiones activas', f'{len(v.others)} en reposo'
+            self.agent_name = ''
         elif self.expanded:
-            self.title, self.detail = 'Sin sesiones', 'Nada corriendo ahora'
+            self.title, self.detail, self.agent_name = 'Sin sesiones', 'Nada corriendo ahora', ''
         changed = v.mode != self.view.mode or v.key != self.view.key
         if v.key != self.view.key:
             self.key_since = time.monotonic()
@@ -545,6 +550,31 @@ class Island:
         self.model.decide(self.view.session, allow)
         self.refresh()
         return ''
+
+    @staticmethod
+    def who(agent_name, project, color=None):
+        """«agente | proyecto», como texto y como marcado de Pango. El agente
+        va en su color; sin color (uno que no es de la familia), en blanco
+        como el proyecto."""
+        tint = f' foreground="{color}"' if color else ''
+        return (f'{agent_name} | {project}',
+                f'<span{tint}>{html.escape(agent_name, quote=False)}</span>'
+                f'<span foreground="{SEP_COLOR}"> | </span>{html.escape(project, quote=False)}')
+
+    def head_notes(self):
+        """Lo que va a la derecha del título, como (texto, color) y de derecha
+        a izquierda: si está fijada, cuántas sesiones hay, el contexto de la
+        que se muestra y si pide permiso."""
+        best = self.view.session
+        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] else []
+        if self.view.count > 1:
+            notes.append((f'{self.view.count} sesiones', MUTED_COLOR[:3]))
+        if best and best.context >= CONTEXT_SHOW:
+            notes.append((f'{best.context:.0f}%',
+                          rgb(self.colors[paint.context_role(best.context)])))
+        if best and best.state == 'permission':
+            notes.append(('pide permiso', rgb('red')))
+        return notes
 
     def listing(self):
         """Las filas de la lista, como (sesión, subagente o None): los
@@ -913,27 +943,22 @@ class Island:
         if text_alpha > 0 and self.title:
             tx = x0 + 12 + PET + 10
             right = x0 + w - 18
-            # A la derecha del título: cuántas sesiones hay y, si ya pesa, el
-            # contexto de la que se está mostrando.
             title_right = right
-            best = self.view.session
-            notes = [(f'{self.view.count} sesiones', MUTED_COLOR[:3])] if self.view.count > 1 else []
-            if self.settings['pinned']:
-                notes.insert(0, ('fijada', rgb('accent')))
-            if best and best.context >= CONTEXT_SHOW:
-                notes.append((f'{best.context:.0f}%',
-                              rgb(self.colors[paint.context_role(best.context)])))
-            for text, color in notes:
+            for text, color in self.head_notes():
                 badge = self._layout(cr, text, FONT_DETAIL)
                 title_right -= badge.get_pixel_size()[0]
                 cr.move_to(title_right, mid - 17)
                 cr.set_source_rgba(*color, text_alpha)
                 PangoCairo.show_layout(cr, badge)
                 title_right -= 12
-            title = self._layout(cr, self.title, FONT_TITLE, title_right - tx)
+            # Una sesión se nombra «agente | proyecto»; una alerta, con su título.
+            text, markup = (self.who(self.agent_name, self.title, mascot.accent(self.role))
+                            if self.agent_name else (self.title, None))
+            title = self._layout(cr, text, FONT_TITLE, title_right - tx, markup=markup)
             cr.move_to(tx, mid - 21)
-            cr.set_source_rgba(*TITLE_COLOR[:3], text_alpha)
-            PangoCairo.show_layout(cr, title)
+            # Opaco: la transparencia la pone `_show` sobre el texto entero.
+            cr.set_source_rgba(*TITLE_COLOR[:3], 1)
+            self._show(cr, title, text_alpha)
             detail = self._layout(cr, self.detail, FONT_DETAIL, right - tx,
                                   DETAIL_LINES if extra else 1, self.markup(self.detail))
             cr.move_to(tx, mid + 3)
@@ -990,7 +1015,7 @@ class Island:
                 cr.set_source_rgba(1, 1, 1, .07 * alpha)
                 cr.fill()
             if agent is not None:
-                self.draw_agent(cr, agent, left, right, y, alpha)
+                self.draw_agent(cr, s, agent, left, right, y, alpha)
                 continue
             cr.new_sub_path()
             color = dot_color(s)
@@ -1005,10 +1030,13 @@ class Island:
                 cr.set_source_rgba(*mascot.rgba('metal', .7 * alpha))
                 cr.set_line_width(1.5)
                 cr.stroke()
-            name = self._layout(cr, s.proj, FONT_ROW, ROW_NAME_W)
+            # La fila es de la sesión, o sea del engineer; sus subagentes van debajo.
+            text, markup = (self.who(MAIN_AGENT, s.proj, mascot.accent(MAIN_ROLE)) if s.agent_name
+                            else (s.proj, None))
+            name = self._layout(cr, text, FONT_ROW, ROW_NAME_W, markup=markup)
             cr.move_to(left + 28, y + (ROW_H - name.get_pixel_size()[1]) / 2)
-            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-            PangoCairo.show_layout(cr, name)
+            cr.set_source_rgba(*TITLE_COLOR[:3], 1)
+            self._show(cr, name, alpha)
             dx = left + 28 + ROW_NAME_W + 10
             end = right - 10
             if s.context >= CONTEXT_SHOW:
@@ -1039,8 +1067,8 @@ class Island:
             cr.set_source_rgba(*rgb(self.colors['arg']), alpha)
             self._show(cr, detail, alpha)
 
-    def draw_agent(self, cr, agent, left, right, y, alpha):
-        """La fila de un subagente: su carita, su nombre, lo que hace y cuánto lleva."""
+    def draw_agent(self, cr, s, agent, left, right, y, alpha):
+        """La fila de un subagente: su carita, «agente | proyecto», lo que hace y cuánto lleva."""
         cr.push_group()
         cr.translate(left + AGENT_INDENT + 12, y + ROW_H / 2 + 1)
         cr.scale(AGENT_PET / 253, AGENT_PET / 253)
@@ -1049,13 +1077,12 @@ class Island:
         cr.pop_group_to_source()
         cr.paint_with_alpha(alpha)
         nx = left + 28 + AGENT_INDENT
-        name = self._layout(cr, agent.name, FONT_ROW, ROW_NAME_W - AGENT_INDENT)
+        family = agent.role != MAIN_ROLE
+        text, markup = self.who(agent.name, s.proj, mascot.accent(agent.role) if family else None)
+        name = self._layout(cr, text, FONT_ROW, ROW_NAME_W - AGENT_INDENT, markup=markup)
         cr.move_to(nx, y + (ROW_H - name.get_pixel_size()[1]) / 2)
-        # Los de la familia, con su color; los demás, como una sesión.
-        family = agent.role != 'engineer'
-        cr.set_source_rgba(*(mascot.rgba(mascot.accent(agent.role), alpha) if family
-                             else (*TITLE_COLOR[:3], alpha)))
-        PangoCairo.show_layout(cr, name)
+        cr.set_source_rgba(*TITLE_COLOR[:3], 1)
+        self._show(cr, name, alpha)
         dx, end = left + 28 + ROW_NAME_W + 10, right - 10
         took = self._layout(cr, elapsed(time.monotonic() - agent.started), FONT_DETAIL)
         tw, th = took.get_pixel_size()

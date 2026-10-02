@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Deshace install.sh: servicio, enlaces, hooks, la envoltura de la barra de
-# estado y el bloque de ~/.bashrc. No toca los demás hooks.
+# Deshace install.sh: servicio, enlaces, hooks, los agentes de la familia y sus
+# catálogos, la envoltura de la barra de estado y el bloque de ~/.bashrc. No
+# toca los demás hooks; de los agentes, quita los que se llaman como los de
+# agents/.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -21,6 +23,22 @@ systemctl --user daemon-reload
 for f in elyares-hook elyares-ctl elyares-demo elyares-statusline; do
   rm -f "$HOME/.local/bin/$f"
 done
+rules_dir="$HOME/.claude/elyares/seguridad"
+shopt -s nullglob
+for f in "$here"/agents/elyares-*.md; do
+  rm -f "$HOME/.claude/agents/$(basename "$f")"
+done
+if [ -L "$rules_dir" ]; then
+  # Una instalación vieja lo dejó como enlace a rules/: se quita el enlace,
+  # nunca lo que hay detrás.
+  rm -f "$rules_dir"
+else
+  for f in "$here"/rules/seguridad/*.md; do
+    rm -f "$rules_dir/$(basename "$f")"
+  done
+fi
+shopt -u nullglob
+rmdir "$rules_dir" "$HOME/.claude/elyares" "$HOME/.claude/agents" 2>/dev/null || true
 
 if [ -f "$settings" ]; then
   cp "$settings" "$settings.elyares-bak-$(date +%F-%H%M%S)"

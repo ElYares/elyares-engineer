@@ -119,9 +119,25 @@ class Subagentes(ModelCase):
         self.assertEqual(self.m.view(now=T).role, 'engineer')
         self.send('agent-start', agent_id='s1', agent_type='elyares-auditor')
         self.assertEqual(self.m.view(now=T).role, 'auditor')
-        self.assertEqual(self.agents()['s1'].name, 'auditor')
+        self.assertEqual(self.agents()['s1'].name, 'elyares-auditor')
         self.send('agent-stop', agent_id='s1')
         self.assertEqual(self.m.view(now=T).role, 'engineer')
+
+    def test_la_sesion_se_nombra_por_quien_trabaja(self):
+        self.send('start')
+        v = self.m.view(now=T)
+        self.assertEqual((v.agent_name, v.title), ('elyares-engineer', 'proj'))
+        self.send('agent-start', agent_id='s1', agent_type='elyares-auditor')
+        self.assertEqual(self.m.view(now=T).agent_name, 'elyares-auditor')
+        # Uno que no es de la familia no le quita el nombre al engineer.
+        self.send('agent-stop', agent_id='s1')
+        self.send('agent-start', agent_id='s2', agent_type='Explore')
+        self.assertEqual(self.m.view(now=T).agent_name, 'elyares-engineer')
+
+    def test_una_alerta_no_es_de_ningun_agente(self):
+        self.alert()
+        self.assertEqual(self.m.view(now=T).agent_name, '')
+        self.assertEqual(self.m.sessions['x:1'].agent_name, '')
 
     def test_manda_el_de_la_familia_que_arranco_al_ultimo(self):
         self.send('start')
@@ -196,7 +212,7 @@ class SegundoPlano(ModelCase):
         self.assertEqual((s.kind, s.proc), ('bg', '778688:829925'))
         self.assertEqual(v.others[0].kind, '')
         self.send('permission', sid='fondo', now=T + 2, message='x')
-        self.assertEqual(self.m.view(now=T + 2).title, 'proj · Mejoras e integración necesita permiso')
+        self.assertEqual(self.m.view(now=T + 2).title, 'proj · Mejoras e integración')
 
     def test_olvida_las_de_un_proceso_que_ya_no_existe(self):
         self.send('start', sid='viva', proc='10:1')
@@ -232,7 +248,7 @@ class Permisos(ModelCase):
         self.ask()
         v = self.m.view(now=T)
         self.assertTrue(v.ask)
-        self.assertEqual((v.mode, v.pet, v.title), ('open', 'permission', 'proj necesita permiso'))
+        self.assertEqual((v.mode, v.pet, v.title), ('open', 'permission', 'proj'))
         self.assertEqual(v.detail, 'Ejecutando rm -rf build')
 
     def test_ask_sin_hook_esperando_no_hace_nada(self):
