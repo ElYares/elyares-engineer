@@ -118,6 +118,17 @@ def live_panes(socks):
     return live
 
 
+def proc_alive(proc):
+    """¿Sigue ahí el proceso "pid:arranque" que anotó el hook? Con el pid solo
+    no basta: el sistema lo vuelve a usar para otro proceso."""
+    pid, _, start = proc.partition(':')
+    try:
+        with open(f'/proc/{int(pid)}/stat') as f:
+            return f.read().rsplit(')', 1)[1].split()[19] == start
+    except (OSError, ValueError, IndexError):
+        return False
+
+
 def do_not_disturb():
     if not shutil.which('swaync-client'):
         return False

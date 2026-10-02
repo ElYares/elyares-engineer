@@ -30,7 +30,7 @@ ABOUT = {'claude': 'Sesiones de Claude Code y sus permisos',
          'devherd': 'Errores y contenedores de DevHerd Observe',
          'coffe': 'Pomodoro: modo foco y descansos',
          'github': 'Checks de tus PRs y revisiones pedidas',
-         'terminal': 'Comandos de bash de 30 s o más',
+         'terminal': 'Comandos de bash de 30 s o más, y pruebas en vivo',
          'usage': 'Contexto de cada sesión y límite de 5 h'}
 
 # Por qué está en rojo una fuente a la que le falta su enganche. Las tres las
@@ -48,7 +48,7 @@ PREFIXES = {'devherd': ('devherd:',), 'github': ('gh:',), 'coffe': ('coffe',),
 def source_of(msg):
     """De qué fuente viene un mensaje del socket."""
     ev, sid = msg.get('event'), str(msg.get('session_id') or '')
-    if ev == 'cmd-done':
+    if ev in ('cmd-start', 'cmd-done'):
         return 'terminal'
     if ev == 'status':
         return 'usage'

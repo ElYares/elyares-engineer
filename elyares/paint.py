@@ -6,14 +6,15 @@ opción, cadena, ruta...) y `colors()` le da un color a cada papel, sacado del
 tema de omarchy cuando hay uno. No colorea como un editor: solo lo bastante
 para que de un vistazo se distinga el comando de sus argumentos.
 
-Los colores de aviso (ámbar y rojo) son fijos y no salen del tema: son
-semánticos, y en algunos temas el "amarillo" de la paleta es un azul grisáceo.
+Los colores de aviso (ámbar, rojo y el verde de unas pruebas que pasaron) son
+fijos y no salen del tema: son semánticos, y en algunos temas el "amarillo" de
+la paleta es un azul grisáceo y el "verde", un gris.
 """
 
 import re
 
 ISLAND = '#050608'
-AMBER, RED = '#e0a02e', '#e05252'
+AMBER, RED, GREEN = '#e0a02e', '#e05252', '#35d07f'
 
 # Papel -> (clave del tema, color si no hay tema).
 ROLES = {
@@ -27,6 +28,8 @@ ROLES = {
 }
 VERBS = ('Ejecutando', 'Leyendo', 'Editando', 'Escribiendo', 'Buscando')
 DONE = re.compile(r'(Terminó|Falló \(código \d+\))( en .+?: )(.*)', re.S)
+TESTS = re.compile(r'(Pruebas en verde|Pruebas en rojo|Corriendo pruebas)(: .*)', re.S)
+TEST_ROLES = {'Pruebas en verde': 'pass', 'Pruebas en rojo': 'bad', 'Corriendo pruebas': 'cmd'}
 TOKEN = re.compile(r'''(?P<ws>\s+)|(?P<str>"(?:[^"\\]|\\.)*"?|'[^']*'?)'''
                    r'''|(?P<op>&&|\|\||[|;<>&]+|\$\(|[()])|(?P<word>[^\s|;&<>()"']+)''')
 
@@ -53,6 +56,7 @@ def colors(palette=None):
         'dim': mix(ISLAND, fg, .48),       # verbos, operadores, la carpeta de una ruta
         'ok': mix(_hex(palette.get('color10')) or '#35d07f', '#ffffff', .12),
         'bad': RED,
+        'pass': GREEN,
         # Contexto usado: verde, arena, ámbar, rojo.
         'pct0': mix(_hex(palette.get('color10')) or '#35d07f', '#ffffff', .12),
         'pct1': mix(_hex(palette.get('color11')) or '#e0af68', '#ffffff', .12),
@@ -117,4 +121,7 @@ def segments(detail):
     if m:
         # Un comando largo de la terminal que terminó.
         return [(m[1], 'ok' if m[1] == 'Terminó' else 'bad'), (m[2], 'dim')] + _shell(m[3])
+    m = TESTS.fullmatch(detail)
+    if m:
+        return [(m[1], TEST_ROLES[m[1]]), (m[2], 'text')]
     return [(detail, 'text')]

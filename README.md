@@ -48,6 +48,7 @@ Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyar
 | `UserPromptSubmit` | `start` | se asoma trabajando ("Pensando…") |
 | `PreToolUse` | `tool` | teclea y dice qué archivo o comando toca |
 | `PostToolUse` | `tool-done` | baja la antena roja tras aprobar un permiso |
+| `PostToolUseFailure` | `tool-fail` | si eran pruebas, dice cuáles fallaron |
 | `PreCompact` | `compact` | sigue trabajando: "Compactando el contexto…" |
 | `PermissionRequest` | `ask` | antena roja con botones Permitir / Denegar |
 | `Notification` · `permission_prompt` | `permission` | antena roja, isla abierta |
@@ -70,6 +71,16 @@ las que terminaron su turno y están en el prompt. Si no hay ninguna activa, la
 cabecera dice "Sin sesiones activas". La mascota solo conoce las sesiones que
 le han mandado algún evento; al abrir la lista olvida las que tenían un pane
 de tmux que ya no existe, o cuyo servidor de tmux ya no corre.
+
+Dos filas con el mismo proyecto son dos sesiones de Claude Code distintas en
+ese repo. Una que corre en segundo plano (`/bg`, o una conversación que se
+bifurcó a segundo plano) no tiene terminal: su fila lleva la marca "2º plano"
+y, cuando pasa a la cabecera, el nombre que le puso Claude Code ("proyecto ·
+nombre"). Para tener una a mano, Claude Code mantiene además una sesión de
+repuesto que solo pinta su barra de estado: esa no sale ni se cuenta hasta que
+hace algo. Una sesión se olvida cuando avisa de que termina, cuando su pane de
+tmux ya no existe o, cada 15 s, cuando su proceso de Claude ya no existe (es
+lo único que vale para las de segundo plano, que no tienen pane).
 
 Las sesiones sobreviven al reinicio del servicio: se guardan en
 `$XDG_RUNTIME_DIR/elyares-sessions.json` y al arrancar vuelven como estaban.
@@ -112,6 +123,35 @@ suyas hay en la isla y qué hará el clic. Además:
   cómo va el día y cuántos avisos esperan al descanso.
 - **Punto rojo:** por qué (Observe no responde, el reloj de coffe está caído,
   falta `gh` o un enganche de `install.sh`), desde cuándo y qué hacer.
+
+### Comandos y atajos, para consultar
+
+La burbuja de una fuente trae además sus comandos, en dos columnas: el comando
+y qué hace. La de devherd, los de `devherd`; la de coffe, los de `coffe`. Al
+otro extremo de la franja, la pastilla **?** trae los de la propia mascota:
+
+- **Teclado:** los atajos que hay en Hyprland. No están escritos en ningún
+  lado: se leen de `hyprctl binds` (los `bindd` cuya descripción empieza con
+  "Mascota:"), así que siempre son los de verdad.
+- **Ratón:** lo que hace cada clic.
+- **Terminal:** las órdenes de `elyares-ctl`.
+
+Es solo para mirar: nada de ahí se ejecuta ni se copia.
+
+Los comandos salen de `elyares/commands.toml`. Para cambiarlos sin tocar el
+repo, copia las secciones que quieras a
+`~/.config/elyares-mascota/commands.toml`: una sección de ahí reemplaza a la
+del repo y una vacía la quita. Cada sección lleva la clave de su pastilla
+(`devherd`, `coffe`, `github`, `terminal`, `usage`, `claude`), y `raton` y
+`mascota` son las de la pastilla **?**. Se relee cada vez que sale la burbuja.
+
+```toml
+[devherd]
+"devherd serve" = "Levanta el proyecto, aplica el proxy y lo abre"
+
+[github]
+"gh pr checks" = "Los checks del PR de esta rama"
+```
 
 Lo mismo desde la terminal:
 
@@ -173,11 +213,12 @@ Con `tone` cambia el aspecto: sin él es un problema (punto rojo, mascota
 enojada), `ok` es una buena noticia (verde, saltito) e `info` un aviso
 (amarillo, confundida). Con `ttl` dura esos segundos en vez de 10 min.
 
-También pueden traer ficha: `lines` (una lista con hasta 8 líneas de detalle),
+También pueden traer ficha: `lines` (una lista con hasta 10 líneas de detalle;
+una que empieza con `✓ `, `✗ ` u `○ ` lleva la marca a color),
 `where` y `note` (el encabezado, a la izquierda y a la derecha) y `actions`
-(hasta dos botones `{"label": "...", "url": "..."}`). Por el socket un botón
-solo puede abrir una URL: los que corren un comando los ponen los vigilantes
-de la propia mascota.
+(hasta dos botones `{"label": "...", "url": "..."}`, o con `"jump": true` en
+vez de la URL para que lleve al `pane` de la alerta). Por el socket un botón
+no puede correr un comando: esos los ponen los vigilantes de la propia mascota.
 
 ### Pomodoro (`coffe`)
 
@@ -199,6 +240,9 @@ dice cuánto contexto lleva una sesión y cuánto del límite de 5 h. Con eso:
   en amarillo desde el 70 % y en rojo desde el 90 %.
 - Avisa cuando una sesión pasa del 90 % ("se va a compactar pronto"; el clic
   lleva a su pane) y cuando el límite de 5 h pasa del 80 % y del 95 %.
+- Los dos avisos traen ficha. El del contexto dice qué sesión es (su carpeta
+  y lo que hacía al llegar al 90 %), con el botón Ir al pane. El del límite
+  lista las sesiones abiertas, con el contexto de cada una y lo que hace.
 - Mientras Claude compacta, la sesión dice "Compactando el contexto…".
 
 Sin barra de estado configurada no hay envoltura y esto no se ve.
@@ -211,11 +255,55 @@ test" (verde, se va a los 2 min) o "Falló (código 2) en 45 s: …" (rojo). El
 clic lleva al pane donde corrió. Vale para las terminales que abras después
 de instalar, y solo en bash.
 
+Dentro de tmux la alerta trae ficha: la carpeta, el código de salida y lo que
+tardó, las últimas 8 líneas que había en el pane al terminar y el botón Ir al
+pane. Si el comando corría pruebas, la ficha es la de [Pruebas](#pruebas). Fuera de tmux no hay de dónde copiar lo que imprimió, ni pane al que ir.
+
 No avisa de programas en los que uno se queda a propósito (editores, `ssh`,
 `tmux`, `claude`, `less`…). El umbral se cambia con `ELYARES_CMD_SECS` y la
 lista se amplía con `ELYARES_CMD_SKIP="mi-tui otra"`, los dos antes de la
 línea de `~/.bashrc`. No hay estado de "trabajando" mientras corre: para eso
 bash tendría que avisar al empezar cada comando.
+
+### Pruebas
+
+Cuando corren las pruebas de un proyecto, la isla muestra la lista: cuáles
+pasaron (✓ verde), cuáles fallaron (✗ rojo, siempre arriba) y cuáles se
+saltaron (○), con el total a la derecha ("12 ✓ · 1 ✗ · 2 ○"). Caben diez
+líneas: primero las que fallaron y luego las últimas que corrieron.
+
+- **En una terminal, en vivo.** Dentro de tmux, al lanzar un comando de
+  pruebas la isla se abre con "Corriendo pruebas" y se queda abierta mientras
+  corren, con la lista llenándose. Al terminar dice "Pruebas en verde: 13
+  pasaron en 12 s" o "Pruebas en rojo: 1 falló, 12 pasaron en 12 s" y vuelve
+  a portarse como cualquier alerta (8 s abierta; en verde se va a los 2 min).
+  Descartar la quita aunque sigan corriendo; la siguiente corrida vuelve a
+  salir. En un pomodoro, o en modo compacto, no se abre sola.
+- **Las que corre Claude, al terminar.** Claude Code solo entrega lo que
+  imprimió un comando cuando acaba, así que no hay lista en vivo: al terminar
+  sale la misma alerta con el resultado, sobre la sesión que sigue trabajando.
+
+Cuenta como pruebas un comando con `pytest`, `phpunit`, `pest`, `vitest`,
+`jest`, `tox`, `-m unittest`, o `test` después de `artisan`, `sail`, `go`,
+`cargo`, `deno`, `bun`, `mvn`, `composer`, `make`, `just`, `npm`, `pnpm` o
+`yarn` (también `make test-unit`, `npm run test:e2e`…). Da igual lo que lleve
+delante: `docker compose exec app php artisan test` vale.
+
+Lo que se ve depende de lo que el programa imprime:
+
+| Programa | Lista de pruebas |
+|---|---|
+| pest, `artisan test`, `cargo test`, `pytest -v`, `go test -v`, `unittest -v`, `vitest --reporter=verbose`, `jest --verbose` | una línea por prueba, mientras corren |
+| vitest y jest sin más | una línea por archivo, y las pruebas que fallan |
+| `pytest`, unittest y phpunit sin `-v` | solo cuántas van; las que fallan salen con su nombre al final |
+| `go test` sin `-v` | las que fallan, y los paquetes que pasan |
+
+Para seguirlas en vivo, `shell/elyares.bash` le pide a tmux que copie lo que
+imprime el pane a `$XDG_RUNTIME_DIR/elyares-tests-<pane>.log` (`pipe-pane`)
+mientras dura el comando; la mascota lo relee cada medio segundo y lo borra al
+terminar. tmux lleva una sola copia por pane: si el pane ya se está copiando a
+otro sitio (un plugin de registro), no se toca y esas pruebas avisan solo al
+final, como un comando largo. Fuera de tmux, lo mismo.
 
 ### GitHub
 
@@ -224,6 +312,13 @@ avisa cuando los checks de uno pasan a verde o a rojo, y cuando te piden
 revisar un PR. El clic abre el PR. Consulta todas las cuentas de `gh`; para
 elegir, `"github_accounts": ["Cuenta"]` en `settings.json`. El token se le
 pide a `gh` en cada consulta y no se guarda.
+
+Un PR en rojo trae ficha: el check que se cayó (y cuántos más), las últimas 8
+líneas del log de sus pasos caídos y los botones Reintentar y Abrir PR.
+Reintentar abre una terminal con `gh run rerun --failed`, con la cuenta que
+vio el PR, y quita la alerta; el siguiente cambio de los checks vuelve a
+avisar. El log y Reintentar son solo para checks de GitHub Actions, y GitHub
+borra los logs a los 90 días: sin log, la ficha lista los demás checks caídos.
 
 ### Vista previa del código
 
@@ -318,8 +413,11 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | `elyares-ctl open` | abre la isla con lo que hace Claude; se cierra sola a los 6 s o al repetir |
 | `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
 | `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |
+| `elyares-ctl pin` | fija la isla abierta con todo a la vista; otra vez, la suelta. Como el clic central |
 | `elyares-ctl theme` | vuelve a leer el color de acento del tema (lo llama el hook de omarchy) |
 | `elyares-ctl glass` | prende o apaga el modo vidrio |
+| `elyares-ctl allow` | permite lo que pide el permiso que la isla tiene a la vista |
+| `elyares-ctl deny` | lo deniega y corta el turno, como el botón Denegar |
 | `elyares-ctl status` | lista las fuentes y cómo está cada una |
 | `elyares-ctl toggle <fuente>` | prende o apaga una fuente |
 
@@ -332,6 +430,23 @@ En Hyprland (`~/.config/hypr/bindings.conf`):
 bindd = SUPER ALT, Y, Mascota: abrir la isla, exec, elyares-ctl open
 bindd = SUPER SHIFT ALT, Y, Mascota: esconder o mostrar, exec, elyares-ctl hide
 bindd = SUPER CTRL ALT, Y, Mascota: modo compacto, exec, elyares-ctl compact
+bindd = SUPER ALT, U, Mascota: fijar o soltar, exec, elyares-ctl pin
+```
+
+Fijada, la isla se queda abierta como cuando le pasas el ratón por encima (el
+detalle entero, la lista de sesiones, la ficha de una alerta y las fuentes),
+pero sin tener que dejar el cursor ahí: no se cierra sola ni al irse el ratón,
+ni en modo compacto. Arriba a la derecha dice "fijada". Se suelta con el mismo
+atajo, con el clic central o con `elyares-ctl open`, y vuelve a asomarse y
+esconderse como siempre. La preferencia (`pinned` en `settings.json`) se guarda:
+tras reiniciar sigue fijada. Un permiso sigue mostrando sus botones, y
+`elyares-ctl hide` la esconde igual.
+
+Para contestar un permiso sin soltar el teclado:
+
+```
+bindd = SUPER ALT, A, Mascota: permitir, exec, elyares-ctl allow
+bindd = SUPER ALT, BackSpace, Mascota: denegar, exec, elyares-ctl deny
 ```
 
 ### Permitir / Denegar
@@ -345,6 +460,14 @@ puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
   desde la mascota ElYares." y el turno se corta, como con el No de la
   terminal: la decisión lleva `interrupt: true` y la isla pasa a "Esperando tu
   respuesta".
+- **Con el teclado:** `elyares-ctl allow` y `elyares-ctl deny` hacen lo mismo
+  que los botones, y solo con el permiso que se ve en la cabecera: ni uno
+  tapado por otra sesión, ni con la isla escondida, ni uno que salió hace
+  menos de 0.6 s (no dio tiempo de leerlo). Si no contestan, dicen por qué y
+  salen con 1. `allow` no vale desde un proceso lanzado por Claude: con un
+  comando en segundo plano se aprobaría a sí mismo. El socket mira quién
+  manda la orden (`SO_PEERCRED` y sus procesos padre) y la rechaza si entre
+  ellos está `claude`, o si ya no se puede saber. `deny` vale desde donde sea.
 - **Contestas en la terminal:** con Sí llega `tool-done` y la isla suelta el
   hook; con No, Claude mata el hook y la isla pasa a "Esperando tu respuesta".
 - **Headless (`claude -p`, SDK):** ahí el hook sí bloquearía, así que sale sin
@@ -361,6 +484,12 @@ puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
 - **CPU.** Escondida no dibuja nada (0%). Asomada y quieta va a 12 fps, ~3% de
   un núcleo; solo las transiciones van a 60 fps.
 - **Logs:** `journalctl --user -u elyares-mascota`.
+- **Pruebas.** `make test` corre `tests/` con `unittest` y el python del
+  sistema. No abren ninguna ventana ni llaman a nada de fuera: los vigilantes
+  reciben fotos inventadas, el socket corre en una carpeta temporal con
+  `elyares-hook` y `elyares-ctl` de verdad, y la isla se arma sin pantalla y
+  se dibuja sobre una superficie de cairo. Con un python sin PyGObject las de
+  la isla se saltan.
 
 ## Pendiente
 
