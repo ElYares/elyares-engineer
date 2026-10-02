@@ -51,8 +51,9 @@ y sus últimos pasos; los libres, en chiquito en la banca. El frente se parte
 según cuántos trabajen, y con los cuatro son cuatro cuadros. Un clic en uno
 abre su desglose: todos sus pasos y lo que tardó cada uno. Un clic en la
 pestaña elegida lleva al pane de tmux de esa sesión. La pestaña se va sola a
-la sesión que pide permiso o acaba de terminar. Debajo del tablero van las
-alertas, una fila cada una.
+la sesión que pide permiso o acaba de terminar y, cuando la elegida se queda
+en reposo, a la que sigue trabajando. Debajo del tablero van las alertas, una
+fila cada una.
 
 Sin abrirla, la isla sigue como siempre: asomada, con la mascota (que es el
 personaje del que trabaja: `mascot.py` dibuja a los cuatro) y, a su lado, las
@@ -642,12 +643,30 @@ class Island:
 
     def follow(self, v):
         """La pestaña se va sola a la sesión que pide permiso o acaba de
-        terminar: es lo que no debe quedarse tapado en otra carpeta."""
+        terminar: es lo que no debe quedarse tapado en otra carpeta. Y si la
+        elegida se quedó en reposo, a la más urgente de las que trabajan: con
+        los cuatro libres a la vista mientras otra sesión trabaja, la isla
+        parece desconectada. Solo con una novedad: sin ella, la pestaña que
+        se eligió a mano se queda."""
+        if v.key == self.view.key:
+            return
         s = v.session
-        if s is not None and s.state in ('permission', 'done') and v.key != self.view.key:
-            if self.tab != s.sid:
-                self.focus = None
-            self.tab = s.sid
+        if s is None or s.state not in ('permission', 'done'):
+            sessions = [o for o in ([s] if s else []) + v.others if o.state != 'alert']
+            chosen = next((o for o in sessions if o.sid == self.tab), None)
+            if chosen is None or self.busy(chosen):
+                return
+            s = next((o for o in sessions if self.busy(o)), None)
+            if s is None:
+                return
+        if self.tab != s.sid:
+            self.focus = None
+        self.tab = s.sid
+
+    @staticmethod
+    def busy(s):
+        """¿Alguno de los cuatro de la sesión hace algo? Es lo que dice su tablero."""
+        return any(m.busy for m in s.team())
 
     def focused(self):
         """(sesión, miembro) del desglose abierto, o None. Se cierra solo si
