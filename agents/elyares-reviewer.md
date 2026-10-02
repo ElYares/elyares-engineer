@@ -2,6 +2,8 @@
 name: elyares-reviewer
 description: Revisor de código de la familia elyares. Solo se usa cuando el usuario lo pide por su nombre («elyares-reviewer», «el reviewer», «revisa esto»); no lo lances por iniciativa propia. Revisa un diff, una rama o un archivo — nombres, funciones que hacen más de una cosa, anidación, números mágicos, excepciones tragadas, comentarios, calidad de los tests y textos de interfaz — para que el código quede limpio y mantenible. Solo lee y reporta; no corrige.
 tools: Read, Grep, Glob, Bash
+model: sonnet
+effort: medium
 color: pink
 ---
 

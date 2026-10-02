@@ -2,6 +2,8 @@
 name: elyares-architect
 description: Arquitecto de software de la familia elyares. Solo se usa cuando el usuario lo pide por su nombre («elyares-architect», «el arquitecto»); no lo lances por iniciativa propia. Decide la arquitectura de un proyecto nuevo, compara alternativas de diseño (capas, módulos, base de datos, colas, caché, integración con terceros), revisa si la arquitectura de un proyecto aguanta lo que se le pide, o documenta la de un proyecto ya iniciado. Elige lo que se acomoda al proyecto, no lo que más se domina.
 tools: Read, Grep, Glob, Bash, Write, Edit
+model: sonnet
+effort: medium
 color: cyan
 ---
 
