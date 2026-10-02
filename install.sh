@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Instala elyares-engineer: enlaces en ~/.local/bin, servicio systemd de usuario, hooks
-# de Claude Code, la envoltura de su barra de estado, el aviso de comandos
-# largos en ~/.bashrc y, en omarchy, el hook de cambio de tema. Se puede correr
-# las veces que sea: reemplaza lo suyo y no toca lo demás.
+# de Claude Code, los agentes de la familia, la envoltura de su barra de
+# estado, el aviso de comandos largos en ~/.bashrc y, en omarchy, el hook de
+# cambio de tema. Se puede correr las veces que sea: reemplaza lo suyo y no
+# toca lo demás.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -47,6 +48,34 @@ if [ -d "$omarchy_hooks" ]; then
   mkdir -p "$omarchy_hooks/theme-set.d"
   ln -sfn "$here/omarchy/theme-set" "$omarchy_hooks/theme-set.d/elyares-engineer"
   echo "✓ hook de tema en $omarchy_hooks/theme-set.d"
+fi
+
+# Los agentes de la familia. Claude Code los lee de ~/.claude/agents al abrir
+# una sesión, y el auditor busca sus catálogos en ~/.claude/elyares/seguridad
+# (no en ~/.claude/rules: ahí se cargarían enteros en cada sesión).
+# Copia y no enlace: son instrucciones para todas las sesiones, y enlazados
+# cambiarían solos con lo que haya en esta carpeta (otra rama, un cambio a
+# medias). Para actualizarlos se vuelve a correr install.sh. Son suyos por el
+# nombre: pisa los `elyares-*.md` que se llamen como los de agents/.
+agents_dir="$HOME/.claude/agents"
+rules_dir="$HOME/.claude/elyares/seguridad"
+shopt -s nullglob
+agents=("$here"/agents/elyares-*.md)
+rules=("$here"/rules/seguridad/*.md)
+shopt -u nullglob
+if [ ${#agents[@]} -gt 0 ]; then
+  mkdir -p "$agents_dir"
+  for f in "${agents[@]}"; do
+    rm -f "$agents_dir/$(basename "$f")"      # si era un enlace, no se escribe a través de él
+    install -m 644 "$f" "$agents_dir/"
+  done
+  echo "✓ ${#agents[@]} agentes en $agents_dir (valen para las sesiones nuevas de Claude)"
+fi
+if [ ${#rules[@]} -gt 0 ]; then
+  [ -L "$rules_dir" ] && rm -f "$rules_dir"
+  mkdir -p "$rules_dir"
+  install -m 644 "${rules[@]}" "$rules_dir/"
+  echo "✓ catálogos del auditor en $rules_dir"
 fi
 
 if [ -f "$settings" ]; then

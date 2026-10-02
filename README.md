@@ -121,17 +121,57 @@ personaje, con todos sus gestos (la antena sigue en rojo al pedir permiso y en
 verde al terminar); cuando termina, vuelve a ser el engineer. Con varios a la
 vez manda el que arrancó al último.
 
+Una sesión se nombra **agente | proyecto**: `elyares-engineer | tl-mas-server`.
+El engineer está siempre; mientras trabaja un subagente de la familia, la
+cabecera pasa a llevar su nombre (`elyares-auditor | tl-mas-server`), en su
+color. Que una sesión pide permiso lo dicen la antena roja y la nota "pide
+permiso" a la derecha.
+
 En la lista, cada subagente sale debajo de su sesión (los de la sesión de la
-cabecera, al principio) con su carita, su nombre, lo que hace y cuánto lleva.
-Salen todos, también los que no son de la familia (`Explore`,
-`general-purpose`…): esos trabajan con la cara del engineer. Un clic en la
-fila lleva al pane de su sesión.
+cabecera, al principio) con su carita, su nombre y el proyecto, lo que hace y
+cuánto lleva. Salen todos, también los que no son de la familia (`Explore`,
+`general-purpose`…): esos trabajan con la cara del engineer y van sin color
+propio. Un clic en la fila lleva al pane de su sesión.
 
 La isla sabe cuál es cuál porque Claude Code manda `agent_id` y `agent_type`
 en cada hook que se dispara dentro de un subagente. Los personajes están en
 `elyares/mascot.py`, por capas (`HATS`, `BACK`, `FRONT`, `PROPS`, `ACCENTS`), y
 qué subagente es cuál, en `AGENT_ROLES` de `elyares/state.py`. Un subagente que
 se calla 20 min se da por terminado.
+
+### Los agentes
+
+Los tres subagentes están en `agents/` y `install.sh` los copia a
+`~/.claude/agents/`, así que valen en cualquier proyecto. Son copias y no
+enlaces: enlazados cambiarían solos con lo que hubiera en esta carpeta (otra
+rama, un cambio a medias), y son instrucciones para todas las sesiones. Para
+actualizarlos se vuelve a correr `install.sh`. Claude Code los lee al abrir una
+sesión: una que ya estaba abierta no los ve hasta que se reinicia o se
+recargan con `/agents`.
+
+| Agente | Para qué | Herramientas | Reglas |
+|---|---|---|---|
+| `elyares-architect` | decidir, revisar o documentar una arquitectura; elige la que se acomoda al proyecto, no la que más se domina | lee, y escribe solo documentación | `E1`–`E7` y `T14` |
+| `elyares-auditor` | seguridad de un diff, de un repo o de la configuración | solo lee | un núcleo de 28 reglas siempre, y los catálogos por demanda |
+| `elyares-reviewer` | código limpio y mantenible: nombres, funciones, tests, textos de interfaz | solo lee | `C1`–`C11`, `T5`–`T13`, `P2`, `P4`, `P7`, `UX1`–`UX6` |
+
+Se usan solo cuando se piden: por nombre ("usa elyares-auditor sobre este
+diff") o con `@`. Su descripción le dice a la sesión que no los lance por
+iniciativa propia. Los tres devuelven un informe con formato fijo, que siempre
+dice qué no revisaron y qué quedó sin verificar.
+
+- Las reglas `E`, `C`, `T`, `P` y `UX` son las de `docs/ESTANDARES-CORE.md`.
+  Cada agente trae el enunciado, y si el proyecto tiene su propia copia o una
+  regla propia, gana la del proyecto.
+- Los catálogos del auditor son las 388 reglas de `rules/seguridad/` (su
+  índice es `INDEX.md`), copiadas a `~/.claude/elyares/seguridad`. No van en
+  `~/.claude/rules`: ahí Claude Code las cargaría enteras en cada sesión. El
+  auditor nunca lee un catálogo entero: carga las áreas que toca el cambio.
+- "Solo lee" quiere decir sin `Edit` ni `Write`. Con Bash todavía podrían
+  escribir: lo impide su instrucción, no un candado.
+- El auditor solo corre escáneres locales (`gitleaks`, `semgrep`,
+  `osv-scanner`…) si ya están instalados; no instala nada, y los que mandan
+  cargas de ataque (nuclei, ZAP, sqlmap) no los corre nunca.
 
 ### Fuentes
 
