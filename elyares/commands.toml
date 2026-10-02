@@ -32,13 +32,16 @@
 "coffe report" = "En qué se te fue el tiempo"
 
 [raton]
-"Clic en el texto" = "Va al pane de la sesión, o abre la alerta"
-"Clic en una fila" = "Va a esa sesión, o sube la alerta a la cabecera"
+"Clic en una pestaña" = "Elige esa sesión; en la elegida, va a su pane"
+"Clic en uno que trabaja" = "Abre su desglose: sus pasos y lo que tardó cada uno"
+"Clic en una alerta" = "Abre su ficha, o su enlace si no tiene"
 "Clic en una pastilla" = "Prende o apaga esa fuente"
 "Clic derecho" = "Modo compacto"
 "Clic central" = "Fija la isla abierta, o la suelta"
 
 [engineer]
+"elyares-ctl tab" = "La pestaña que sigue"
+"elyares-ctl steps" = "El desglose de uno; otra vez, el del que sigue"
 "elyares-ctl status" = "Cómo está cada fuente"
 "elyares-ctl toggle <fuente>" = "Prende o apaga una fuente"
 "elyares-ctl glass" = "Modo vidrio"

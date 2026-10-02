@@ -7,6 +7,8 @@ Uso: elyares-ctl <orden>
     hide      esconde la isla del todo; otra vez, la vuelve a mostrar
     compact   prende o apaga el modo compacto
     pin       fija la isla abierta con todo a la vista; otra vez, la suelta
+    tab       pasa a la pestaña (la sesión) que sigue en el tablero
+    steps     abre el desglose de uno de los cuatro; otra vez, el del que sigue
     theme     vuelve a leer el color de acento del tema de omarchy
     glass     prende o apaga el modo vidrio
     allow     permite lo que pide el permiso que la isla tiene a la vista
@@ -20,7 +22,8 @@ import os
 import socket
 import sys
 
-ORDERS = ('open', 'hide', 'compact', 'pin', 'theme', 'glass', 'allow', 'deny', 'status', 'toggle')
+ORDERS = ('open', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'glass', 'allow', 'deny',
+          'status', 'toggle')
 REPLIES = ('allow', 'deny', 'status')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
 STATES = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
