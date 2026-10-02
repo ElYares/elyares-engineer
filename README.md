@@ -3,10 +3,11 @@
 Una isla que vive en el borde de arriba del monitor, debajo de Waybar, y
 vigila a los agentes con los que trabajas: las sesiones de Claude Code y lo que
 corre a su alrededor (pruebas, contenedores, PRs, el pomodoro). Dentro va
-ElYares, su mascota: se asoma mientras un agente trabaja, se abre cuando pide
-permiso, termina o se queda esperando, y un clic en el texto te lleva al pane
-de tmux de esa sesión. Los permisos se pueden contestar ahí mismo con Permitir
-o Denegar.
+ElYares, su mascota: se asoma mientras un agente trabaja y se abre cuando pide
+permiso, termina o se queda esperando. Abierta es un tablero: una pestaña por
+sesión y, dentro, sus cuatro agentes, con los que trabajan al frente y sus
+pasos a un clic. Un clic en la pestaña te lleva al pane de tmux de esa sesión,
+y los permisos se pueden contestar ahí mismo con Permitir o Denegar.
 
 Antes se llamaba `elyares-mascota`. `install.sh` quita lo que dejó con ese
 nombre (servicio, enlace, bloque de `~/.bashrc`) y pasa sus preferencias a
@@ -57,7 +58,7 @@ Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyar
 | `PostToolUseFailure` | `tool-fail` | si eran pruebas, dice cuáles fallaron |
 | `PreCompact` | `compact` | sigue trabajando: "Compactando el contexto…" |
 | `SubagentStart` | `agent-start` | apunta al subagente; si es de la familia, se vuelve él |
-| `SubagentStop` | `agent-stop` | lo quita de la lista y vuelve a ser el engineer |
+| `SubagentStop` | `agent-stop` | vuelve a la banca, y la mascota vuelve a ser el engineer |
 | `PermissionRequest` | `ask` | antena roja con botones Permitir / Denegar |
 | `Notification` · `permission_prompt` | `permission` | antena roja, isla abierta |
 | `Notification` · `idle_prompt` | `idle` | confundida: lleva un rato esperándote |
@@ -68,23 +69,59 @@ Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyar
 Con varias sesiones muestra la más urgente (permiso > esperando > terminó >
 trabajando) y cuántas hay. Con el No molestar de swaync se duerme.
 
-Al abrirla a mano (clic en la pastilla, `elyares-ctl open` o, en modo normal,
-pasando el ratón) salen debajo las demás sesiones, una por fila: un punto con
-el color del estado, el proyecto y lo que está haciendo. Un clic en la fila
-lleva a su pane de tmux. Caben cuatro filas; si hay más, la última dice
-cuántas faltan. Con los botones de Permitir / Denegar no hay lista.
+### El tablero
 
-La lista incluye las sesiones en reposo (aro gris hueco, "En reposo hace 12 min"):
-las que terminaron su turno y están en el prompt. Si no hay ninguna activa, la
-cabecera dice "Sin sesiones activas". elyares-engineer solo conoce las sesiones que
-le han mandado algún evento; al abrir la lista olvida las que tenían un pane
-de tmux que ya no existe, o cuyo servidor de tmux ya no corre.
+Al abrirla a mano (clic en la pastilla, `elyares-ctl open`, fijada o, en modo
+normal, pasando el ratón) la isla es un tablero: **una pestaña por sesión** y,
+de la elegida, **sus cuatro agentes**.
 
-Dos filas con el mismo proyecto son dos sesiones de Claude Code distintas en
-ese repo. Una que corre en segundo plano (`/bg`, o una conversación que se
-bifurcó a segundo plano) no tiene terminal: su fila lleva la marca "2º plano"
-y, cuando pasa a la cabecera, el nombre que le puso Claude Code ("proyecto ·
-nombre"). Para tener una a mano, Claude Code mantiene además una sesión de
+- **El frente:** los que trabajan, en grande, cada uno con su gesto, cuánto
+  lleva y sus últimos pasos (el de ahora, resaltado). La tarjeta se tiñe con su
+  color; en rojo si pide permiso, en verde si terminó y en amarillo si espera.
+- **La banca:** los que están libres, en chiquito a la derecha. Cambian de
+  sitio solos: el que empieza a trabajar sube al frente y el que termina vuelve.
+- **El frente se parte** según cuántos trabajen: uno lo ocupa todo, dos lo
+  comparten, tres van en columnas y con los cuatro son cuatro cuadros, sin
+  banca. La isla mide lo mismo en todos los casos. Sin nadie trabajando, los
+  cuatro salen en fila, apagados.
+- **El desglose:** un clic en uno que trabaja abre todos sus pasos con lo que
+  tardó cada uno (los últimos 8; arriba dice cuántos hubo antes). Los demás
+  siguen a la vista en miniatura, y un clic en uno de ellos abre el suyo.
+  "‹ volver" regresa al tablero e "ir al pane ›" lleva al pane de tmux.
+- **Las pestañas** van por nombre, para que no cambien de sitio. Su punto es
+  del color de quien trabaja ahí, rojo si pide permiso, amarillo si espera,
+  verde si terminó y hueco en reposo. Un clic elige la sesión; un clic en la
+  ya elegida lleva a su pane. La pestaña se va sola a la sesión que pide
+  permiso o acaba de terminar.
+- **El permiso** se contesta en la tarjeta del que lo pide: sale lo que quiere
+  hacer, entero, con Permitir y Denegar. Solo se contesta el de la pestaña
+  elegida, también con el teclado.
+- **Debajo del tablero** van la vista previa de lo que edita la sesión elegida,
+  las alertas (una fila cada una, hasta tres, con su ficha al abrirla) y las
+  fuentes.
+
+Quién está al frente sale de lo que cuenta Claude Code. Mientras la sesión
+espera a un subagente de la familia que lanzó, el engineer está en la banca
+("esperando"); si lo lanzó en segundo plano, trabajan los dos. Lo que hace un
+subagente que no es de la familia (`Explore`, `general-purpose`…) cuenta como
+trabajo del engineer. Los pasos de cada uno se recuerdan mientras dura su turno
+(los últimos 40) y no se guardan entre reinicios.
+
+Sin abrirla, la isla sigue como siempre: asomada con la mascota y, a su lado,
+las caritas de los demás que trabajan (hasta cuatro); y cuando se abre sola
+por un aviso, con la cabecera `agente | proyecto` y lo que pasa.
+
+Las sesiones en reposo conservan su pestaña: son las que terminaron su turno
+y están en el prompt. Sin ninguna sesión, la isla se abre con la cabecera
+"Sin sesiones" y las fuentes. elyares-engineer solo conoce las sesiones que le
+han mandado algún evento; al abrirla olvida las que tenían un pane de tmux
+que ya no existe, o cuyo servidor de tmux ya no corre.
+
+Dos pestañas con el mismo proyecto son dos sesiones de Claude Code distintas
+en ese repo: la segunda lleva un "2". Una que corre en segundo plano (`/bg`, o
+una conversación que se bifurcó a segundo plano) no tiene terminal: su pestaña
+lleva el nombre que le puso Claude Code ("proyecto · nombre") o, si no tiene,
+"2º plano". Para tener una a mano, Claude Code mantiene además una sesión de
 repuesto que solo pinta su barra de estado: esa no sale ni se cuenta hasta que
 hace algo. Una sesión se olvida cuando avisa de que termina, cuando su pane de
 tmux ya no existe o, cada 15 s, cuando su proceso de Claude ya no existe (es
@@ -96,10 +133,9 @@ Un permiso pendiente vuelve sin botones (el hook que esperaba el clic se fue
 con el servicio anterior) y se contesta en la terminal. Al apagar la máquina
 el archivo se borra, igual que los panes de tmux.
 
-El detalle se corta con "…" cuando la isla se abre sola. Para leerlo entero,
-pasa el ratón por la isla o ábrela a mano: crece y lo muestra en hasta cuatro
-líneas. Cuando pide permiso lo muestra entero siempre, para ver el comando
-completo antes de contestar. Las filas de la lista siguen en una línea.
+El detalle se corta con "…" cuando la isla se abre sola por un aviso. Cuando
+pide permiso lo muestra entero siempre, para ver el comando completo antes de
+contestar. En el tablero, lo que no cabe en una tarjeta se lee en su desglose.
 
 Un clic en la mascota la enoja; tres rápidos la marean.
 
@@ -127,11 +163,7 @@ cabecera pasa a llevar su nombre (`elyares-auditor | tl-mas-server`), en su
 color. Que una sesión pide permiso lo dicen la antena roja y la nota "pide
 permiso" a la derecha.
 
-En la lista, cada subagente sale debajo de su sesión (los de la sesión de la
-cabecera, al principio) con su carita, su nombre y el proyecto, lo que hace y
-cuánto lleva. Salen todos, también los que no son de la familia (`Explore`,
-`general-purpose`…): esos trabajan con la cara del engineer y van sin color
-propio. Un clic en la fila lleva al pane de su sesión.
+En el tablero cada uno tiene su tarjeta (ver "El tablero").
 
 La isla sabe cuál es cuál porque Claude Code manda `agent_id` y `agent_type`
 en cada hook que se dispara dentro de un subagente. Los personajes están en
@@ -260,13 +292,12 @@ pregunta cada 10 s a su API local (`127.0.0.1:9777`) y avisa de esto:
 | Observe dejó de responder (3 consultas) | "Observe no responde" |
 
 Una alerta nueva abre la isla 8 s, con la mascota enojada y la antena roja.
-Después queda como una fila más en la lista (punto rojo), debajo de las
-sesiones activas de Claude, hasta que el problema se resuelve o pasan 10 min
-sin novedades. Un clic abre el panel de Observe y la descarta; descartada, no
+Después queda como una fila (punto rojo) debajo del tablero, hasta que el
+problema se resuelve o pasan 10 min sin novedades. Un clic abre el panel de Observe y la descarta; descartada, no
 vuelve a salir en 15 min. El contador "N sesiones" no cuenta las alertas.
 
 Con el ratón encima, o abierta a mano, la alerta trae su ficha: el detalle y
-sus botones. Si está en la lista, un clic en su fila la sube a la cabecera.
+sus botones. Un clic en su fila abre la ficha debajo del tablero.
 
 | Alerta | Detalle | Botones |
 |---|---|---|
@@ -492,6 +523,8 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
 | `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |
 | `elyares-ctl pin` | fija la isla abierta con todo a la vista; otra vez, la suelta. Como el clic central |
+| `elyares-ctl tab` | pasa a la pestaña (la sesión) que sigue en el tablero |
+| `elyares-ctl steps` | abre el desglose de uno de los cuatro; otra vez, el del que sigue, y al final vuelve al tablero |
 | `elyares-ctl theme` | vuelve a leer el color de acento del tema (lo llama el hook de omarchy) |
 | `elyares-ctl glass` | prende o apaga el modo vidrio |
 | `elyares-ctl allow` | permite lo que pide el permiso que la isla tiene a la vista |
@@ -509,11 +542,13 @@ bindd = SUPER ALT, Y, Engineer: abrir la isla, exec, elyares-ctl open
 bindd = SUPER SHIFT ALT, Y, Engineer: esconder o mostrar, exec, elyares-ctl hide
 bindd = SUPER CTRL ALT, Y, Engineer: modo compacto, exec, elyares-ctl compact
 bindd = SUPER ALT, U, Engineer: fijar o soltar, exec, elyares-ctl pin
+bindd = SUPER ALT, I, Engineer: la pestaña que sigue, exec, elyares-ctl tab
+bindd = SUPER ALT, O, Engineer: el desglose que sigue, exec, elyares-ctl steps
 ```
 
 Fijada, la isla se queda abierta como cuando le pasas el ratón por encima (el
-detalle entero, la lista de sesiones, la ficha de una alerta y las fuentes),
-pero sin tener que dejar el cursor ahí: no se cierra sola ni al irse el ratón,
+tablero, las alertas con su ficha y las fuentes), pero sin tener que dejar el
+cursor ahí: no se cierra sola ni al irse el ratón,
 ni en modo compacto. Arriba a la derecha dice "fijada". Se suelta con el mismo
 atajo, con el clic central o con `elyares-ctl open`, y vuelve a asomarse y
 esconderse como siempre. La preferencia (`pinned` en `settings.json`) se guarda:
