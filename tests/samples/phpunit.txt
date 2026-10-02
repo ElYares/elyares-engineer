@@ -1,0 +1,18 @@
+PHPUnit 11.5.2 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.3.14
+Configuration: /app/phpunit.xml
+
+..F.S...                                                            8 / 8 (100%)
+
+Time: 00:00.412, Memory: 28.00 MB
+
+There was 1 failure:
+
+1) Tests\Feature\OrderTest::test_creates_an_order
+Expected response status code [201] but received 500.
+
+/app/tests/Feature/OrderTest.php:24
+
+FAILURES!
+Tests: 8, Assertions: 14, Failures: 1, Skipped: 1.

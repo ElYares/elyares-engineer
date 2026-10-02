@@ -1,0 +1,18 @@
+=== RUN   TestSuma
+--- PASS: TestSuma (0.00s)
+=== RUN   TestResta
+    a_test.go:4: esperaba 3, salió 1
+--- FAIL: TestResta (0.00s)
+=== RUN   TestSaltada
+    a_test.go:5: luego
+--- SKIP: TestSaltada (0.00s)
+=== RUN   TestSub
+=== RUN   TestSub/caso_uno
+=== RUN   TestSub/caso_dos
+    a_test.go:6: no
+--- FAIL: TestSub (0.00s)
+    --- PASS: TestSub/caso_uno (0.00s)
+    --- FAIL: TestSub/caso_dos (0.00s)
+FAIL
+FAIL	sample	0.002s
+FAIL
