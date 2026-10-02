@@ -205,7 +205,8 @@ class Consulta(IslandCase):
         self.isl.sources = {key: {'ok': True, 'note': '', 'tip': [], 'since': 0, 'polled': 0}
                             for key in sources.LABELS}
         self.isl.pills, self.isl.tip = [], None
-        self.isl.tip_key, self.isl.tip_since, self.isl.tip_ref = None, 0.0, []
+        self.isl.tip_key, self.isl.tip_ref, self.isl.tip_last = None, [], None
+        self.isl.tip_pop, self.isl.tip_at, self.isl.tip_cx = 0.0, 0.0, None
         binds = mock.patch.object(app.hypr, 'binds', lambda: [
             {'modmask': 72, 'key': key, 'description': f'Engineer: orden {key}'} for key in 'YUA'])
         binds.start()
@@ -233,11 +234,34 @@ class Consulta(IslandCase):
     def test_la_burbuja_de_una_fuente_trae_sus_comandos(self):
         title, rows = self.bubble('coffe')
         self.assertEqual(title, 'coffe')
-        self.assertEqual(rows[0][:2], ('text', 'Pomodoro: modo foco y descansos'))
+        self.assertEqual(rows[0], ('status', 'Conectada', 'pass'))
+        self.assertEqual(rows[1][:2], ('text', 'Pomodoro: modo foco y descansos'))
         self.assertIn(('head', 'Comandos'), rows)
         self.assertTrue(any(r[0] == 'cmd' and r[1] == 'coffe pause' for r in rows))
         # Una fuente sin comandos se queda como estaba.
-        self.assertTrue(all(r[0] == 'text' for r in self.bubble('github')[1]))
+        self.assertFalse(any(r[0] in ('head', 'cmd') for r in self.bubble('github')[1]))
+
+    def test_lo_que_trae_una_fuente_va_en_etiquetas_y_fichas(self):
+        self.isl.sources['coffe'].update(note='parado', tip=[
+            '1 pomodoro(s) hoy · 2 para el descanso largo · 33 taza(s) en el bote',
+            'Tarea: Arreglar el flaky'])
+        self.isl.model.handle({'event': 'alert', 'session_id': 'coffe', 'name': 'coffe',
+                               'message': 'Descanso'}, now=T)
+        rows = self.bubble('coffe')[1]
+        # Lo que se sabe de ella, en etiquetas; la alerta que tiene, en ámbar.
+        self.assertIn(('chips', [('parado', 'cmd'), ('1 alerta', 'pct2')]), rows)
+        # Sus cifras, en fichas: todas, también la tercera.
+        self.assertIn(('stats', [('1', 'pomodoro(s) hoy'), ('2', 'para el descanso largo'),
+                                 ('33', 'taza(s) en el bote')]), rows)
+        # Y lo que no es una cifra con su nombre, una frase.
+        self.assertTrue(any(r[:2] == ('text', 'Tarea: Arreglar el flaky') for r in rows))
+        w, h = self.isl.tip_size
+        self.assertLessEqual(h, app.TIP_ROOM - app.TIP_GAP)
+        # Apagada no dice nada de eso.
+        self.isl.settings['coffe'] = False
+        rows = self.bubble('coffe')[1]
+        self.assertEqual(rows[0], ('status', 'Apagada', 'dim'))
+        self.assertFalse(any(r[0] in ('chips', 'stats') for r in rows))
 
     def test_la_de_los_atajos_los_lee_de_hyprland(self):
         title, rows = self.bubble(commands.HELP)
@@ -257,6 +281,34 @@ class Consulta(IslandCase):
         with mock.patch.object(app.commands, 'load', lambda: many):
             self.bubble('coffe')
         self.assertLessEqual(self.isl.tip_size[1], app.TIP_ROOM - app.TIP_GAP)
+
+    def frames(self, tip, start, count=60):
+        """Dibuja la burbuja un segundo, cuadro a cuadro, con el cursor en `tip`."""
+        for i in range(count):
+            self.isl.tip = tip
+            self.isl.draw_tip(self.cr, app.WIN_W, 0, start + i / 60)
+
+    def test_la_burbuja_sale_y_se_va_poco_a_poco(self):
+        over = ('coffe', app.WIN_W / 2, 1.0)
+        self.frames(over, 100.0, count=1)
+        self.assertTrue(0 < self.isl.tip_pop < 1)
+        self.frames(over, 100.0)
+        self.assertEqual(self.isl.tip_pop, 1.0)
+        # Sin el cursor se va encogiendo, con lo último que decía.
+        self.frames(None, 101.0, count=1)
+        self.assertTrue(0 < self.isl.tip_pop < 1)
+        self.assertEqual(self.isl.tip_key, 'coffe')
+        self.frames(None, 101.0)
+        self.assertEqual((self.isl.tip_pop, self.isl.tip_key, self.isl.tip_cx), (0.0, None, None))
+
+    def test_de_una_pastilla_a_otra_la_burbuja_se_desliza(self):
+        self.frames(('coffe', 300.0, 1.0), 100.0)
+        self.frames(('github', 400.0, 1.0), 101.0, count=1)
+        # No vuelve a salir de cero, y su flecha va de camino a la otra pastilla.
+        self.assertGreaterEqual(self.isl.tip_pop, app.TIP_SWAP)
+        self.assertTrue(300 < self.isl.tip_cx < 400)
+        self.frames(('github', 400.0, 1.0), 101.0)
+        self.assertAlmostEqual(self.isl.tip_cx, 400, delta=1)
 
     def test_la_ventana_cabe_en_un_monitor_de_1080(self):
         self.assertLessEqual(app.WIN_H, 1080 - 30)
@@ -297,7 +349,8 @@ class Tablero(IslandCase):
         isl.sources = {key: {'ok': True, 'note': '', 'tip': [], 'since': 0, 'polled': 0}
                        for key in sources.LABELS}
         isl.pills, isl.tip, isl.card_span = [], None, None
-        isl.tip_key, isl.tip_since, isl.tip_ref = None, 0.0, []
+        isl.tip_key, isl.tip_ref, isl.tip_last = None, [], None
+        isl.tip_pop, isl.tip_at, isl.tip_cx = 0.0, 0.0, None
         isl.override, isl.pet_state, isl.pet_since = None, 'idle', 0.0
         isl.title = isl.detail = isl.agent_name = ''
         isl.role, isl.list_layout, isl.wrap = state.MAIN_ROLE, False, (None, 0)
