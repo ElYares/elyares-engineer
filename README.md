@@ -102,6 +102,17 @@ apagarla se van sus alertas y deja de consultarse. Claude no se apaga desde
 ahí. La preferencia se guarda en `settings.json` con la clave de la fuente
 (`devherd`, `coffe`, `github`, `terminal`, `usage`).
 
+Con el cursor sobre una pastilla, sin hacer clic, sale debajo de la isla una
+burbuja con lo que se sabe de esa fuente: qué trae, cómo está, cuántas alertas
+suyas hay en la isla y qué hará el clic. Además:
+
+- **GitHub:** cuántos PRs abiertos tienes y cómo van sus checks, cuántas
+  revisiones te piden, qué cuentas respondieron y hace cuánto se consultó.
+- **coffe:** cuánto queda del pomodoro o del descanso, la tarea en curso,
+  cómo va el día y cuántos avisos esperan al descanso.
+- **Punto rojo:** por qué (Observe no responde, el reloj de coffe está caído,
+  falta `gh` o un enganche de `install.sh`), desde cuándo y qué hacer.
+
 Lo mismo desde la terminal:
 
 ```
@@ -136,6 +147,21 @@ sesiones activas de Claude, hasta que el problema se resuelve o pasan 10 min
 sin novedades. Un clic abre el panel de Observe y la descarta; descartada, no
 vuelve a salir en 15 min. El contador "N sesiones" no cuenta las alertas.
 
+Con el ratón encima, o abierta a mano, la alerta trae su ficha: el detalle y
+sus botones. Si está en la lista, un clic en su fila la sube a la cabecera.
+
+| Alerta | Detalle | Botones |
+|---|---|---|
+| Error | archivo y línea donde revienta, servicio, eventos y la petición | Descartar · Timeline · Abrir |
+| Contenedor reiniciado | sus últimas 8 líneas de log | Descartar · Logs |
+| Contenedor caído | sus últimas 8 líneas de log | Descartar · Logs · Levantar |
+| Observe no responde | | Descartar · Iniciar |
+
+Timeline (`devherd observe timeline`), Logs (`docker logs -f`) y Levantar
+(`devherd up`) abren una terminal nueva. Abrir lleva al panel de Observe e
+Iniciar arranca el colector. Descartar quita la alerta sin abrir nada, y no
+vuelve en 15 min; tras Levantar o Iniciar sí puede volver enseguida.
+
 Al arrancar solo toma la foto: lo que ya estaba roto no se anuncia. Un
 contenedor parado a mano (`docker stop`, `devherd down`) no avisa: solo cuenta
 como caída una salida con código de error. Observe vigila únicamente los
@@ -146,6 +172,12 @@ Las alertas son un evento más del socket (`alert` y `alert-clear`, con `name`,
 Con `tone` cambia el aspecto: sin él es un problema (punto rojo, mascota
 enojada), `ok` es una buena noticia (verde, saltito) e `info` un aviso
 (amarillo, confundida). Con `ttl` dura esos segundos en vez de 10 min.
+
+También pueden traer ficha: `lines` (una lista con hasta 8 líneas de detalle),
+`where` y `note` (el encabezado, a la izquierda y a la derecha) y `actions`
+(hasta dos botones `{"label": "...", "url": "..."}`). Por el socket un botón
+solo puede abrir una URL: los que corren un comando los ponen los vigilantes
+de la propia mascota.
 
 ### Pomodoro (`coffe`)
 

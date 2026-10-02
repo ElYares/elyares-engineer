@@ -8,6 +8,10 @@ compara con la vez anterior:
 
 La primera consulta solo toma la foto. `gh` puede tener varias cuentas: se
 consultan todas, o las que diga la preferencia `github_accounts`.
+
+Tras cada consulta le cuenta a la isla, para la burbuja de su pastilla, cómo
+están las cosas ahora: cuántos PRs abiertos hay y sus checks, cuántas
+revisiones pendientes y qué cuentas respondieron.
 El token de cada una se le pide a `gh` y nunca se guarda ni se muestra.
 """
 
@@ -21,6 +25,7 @@ import time
 POLL_SECS = 120
 GREEN = ('SUCCESS',)
 RED = ('FAILURE', 'ERROR')
+RUNNING = ('PENDING', 'EXPECTED')
 
 QUERY = '''
 {
@@ -88,6 +93,38 @@ def _alert(kind, pr, message, tone):
             'message': message, 'tone': tone, 'url': pr['url']}
 
 
+def _count(n, one, many):
+    return f'{n} {one if n == 1 else many}'
+
+
+def summary(snaps):
+    """Cómo están las cosas ahora, para la burbuja: [líneas].
+
+    snaps: cuenta -> su última foto, o None si no respondió. Un PR que ven
+    dos cuentas se cuenta una vez.
+    """
+    good = {a: s for a, s in snaps.items() if s is not None}
+    prs, reviews = {}, {}
+    for snap in good.values():
+        prs.update(snap['prs'])
+        reviews.update(snap['reviews'])
+    if not prs:
+        lines = ['Sin PRs abiertos']
+    else:
+        checks = [pr['checks'] for pr in prs.values()]
+        parts = [(sum(c in GREEN for c in checks), 'en verde'),
+                 (sum(c in RED for c in checks), 'en rojo'),
+                 (sum(c in RUNNING for c in checks), 'corriendo'),
+                 (sum(c is None for c in checks), 'sin checks')]
+        lines = [_count(len(prs), 'PR abierto', 'PRs abiertos') + ': '
+                 + ', '.join(f'{n} {text}' for n, text in parts if n)]
+    lines.append(_count(len(reviews), 'revisión pendiente', 'revisiones pendientes')
+                 if reviews else 'Sin revisiones pendientes')
+    bad = [a for a, s in snaps.items() if s is None]
+    lines.append('Cuentas: ' + ', '.join(good) + (f' · no respondió {", ".join(bad)}' if bad else ''))
+    return lines
+
+
 class Watcher:
     def __init__(self):
         self.before = {}          # cuenta -> foto anterior
@@ -124,29 +161,38 @@ def watch(emit, enabled=lambda: True, only=lambda: None):
     Mientras enabled() sea falso no consulta, y al volver empieza de cero.
     """
     if not shutil.which('gh'):
-        emit({'event': 'source', 'name': 'github', 'ok': False, 'note': 'falta gh'})
+        emit({'event': 'source', 'name': 'github', 'ok': False, 'note': 'falta gh',
+              'why': 'No está instalado gh, el cliente de GitHub',
+              'fix': 'Instálalo, entra con gh auth login y reinicia la mascota'})
         return
 
     def loop():
-        watcher, state = None, None
+        watcher = None
         while True:
             if not enabled():
-                watcher, state = None, None
+                watcher = None
                 time.sleep(5)
                 continue
             if watcher is None:
                 watcher = Watcher()
             try:
-                good = 0
+                snaps = {}
                 for account in only() or accounts():
-                    snap = snapshot(account)
-                    good += snap is not None
-                    for msg in watcher.step(account, snap):
+                    snaps[account] = snapshot(account)
+                    for msg in watcher.step(account, snaps[account]):
                         emit(msg)
-                now = (good > 0, f'{good} cuenta' + ('' if good == 1 else 's'))
-                if now != state:
-                    state = now
-                    emit({'event': 'source', 'name': 'github', 'ok': now[0], 'note': now[1]})
+                good = sum(s is not None for s in snaps.values())
+                source = {'event': 'source', 'name': 'github', 'ok': good > 0, 'polled': True,
+                          'note': _count(good, 'cuenta', 'cuentas')}
+                if good:
+                    source['tip'] = summary(snaps)
+                elif snaps:
+                    source.update(why='No respondió ninguna cuenta: ' + ', '.join(snaps),
+                                  fix='Revisa la red y la sesión con: gh auth status')
+                else:
+                    source.update(why='gh no tiene ninguna cuenta con sesión iniciada',
+                                  fix='Entra con: gh auth login')
+                emit(source)
             except Exception:
                 # Una respuesta con otra forma no debe matar al vigilante.
                 pass

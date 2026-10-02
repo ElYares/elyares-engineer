@@ -19,11 +19,16 @@ llegada, una alerta abre la isla; después se queda como una fila más hasta
 que se resuelve, se descarta con un clic o caduca. El tono dice si es un
 problema (enojada, rojo), una buena noticia (`ok`) o un aviso (`info`).
 
+Una alerta puede traer una ficha: unas líneas de detalle (`lines`, con `where`
+y `note` de encabezado) y botones propios (`actions`). La isla la muestra
+debajo de la cabecera cuando alguien la está leyendo.
+
 En foco (un pomodoro de `coffe` en curso) la isla solo se abre sola para un
 permiso; lo demás se queda asomado hasta el descanso.
 """
 
 import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -42,6 +47,8 @@ CMD_OK_SECS = 120         # "terminó bien" es una buena noticia: se va pronto
 CONTEXT_WARN = 90         # % de contexto de una sesión a partir del cual avisa
 LIMIT_WARN = (80, 95)     # % del límite de 5 h en los que avisa
 ASK_TIMEOUT = 600         # timeout del hook PermissionRequest en settings.json
+CARD_LINES = 8            # líneas de detalle de una alerta que caben en la isla
+CARD_ACTIONS = 2          # botones propios de una alerta, además de Descartar
 
 DENY_MESSAGE = 'El usuario lo denegó desde la mascota ElYares.'
 
@@ -80,6 +87,36 @@ def project_name(cwd):
 def short(text, n=90):
     text = ' '.join((text or '').split())
     return text if len(text) <= n else text[:n - 1] + '…'
+
+
+_ANSI = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]')
+
+
+def card_lines(lines):
+    """El detalle de una alerta: las últimas líneas, sin colores de terminal."""
+    if not isinstance(lines, list):
+        return []
+    out = [_ANSI.sub('', line).expandtabs(4).rstrip()[:300]
+           for line in lines if isinstance(line, str)]
+    return [line for line in out if line][-CARD_LINES:]
+
+
+def card_actions(items):
+    """Los botones de una alerta: [{label, cmd | url, term, hold, after}].
+
+    `cmd` es una lista de argumentos; con `term` corre en una terminal nueva
+    (y con `hold` espera una tecla al terminar). `after` dice qué pasa con la
+    alerta al pulsarlo: 'dismiss' la descarta, 'clear' la quita sin silenciarla.
+    """
+    out = []
+    for a in items if isinstance(items, list) else []:
+        if not isinstance(a, dict) or not isinstance(a.get('label'), str):
+            continue
+        cmd = a.get('cmd')
+        runs = isinstance(cmd, list) and cmd and all(isinstance(c, str) for c in cmd)
+        if runs or isinstance(a.get('url'), str):
+            out.append(a)
+    return out[:CARD_ACTIONS]
 
 
 def elapsed(secs):
@@ -144,6 +181,10 @@ class Session:
     url: str = ''             # solo en alertas: lo que abre el clic
     tone: str = ''            # solo en alertas: '' problema, 'ok' buena noticia, 'info' aviso
     ttl: float = 0            # solo en alertas: segundos que dura sin novedades (0 = ALERT_SECS)
+    where: str = ''           # solo en alertas: de dónde sale el detalle (archivo:línea, contenedor)
+    note: str = ''            # solo en alertas: lo que va a la derecha de `where`
+    lines: list = field(default_factory=list)     # solo en alertas: el detalle; no se guarda
+    actions: list = field(default_factory=list)   # solo en alertas: sus botones; no se guardan
     context: float = 0        # % de la ventana de contexto que lleva usada la sesión
     preview: object = None    # preview.Preview de lo que está editando; no se guarda
     changed: float = field(default_factory=time.monotonic)
@@ -152,6 +193,11 @@ class Session:
     @property
     def proj(self):
         return self.name or project_name(self.cwd)
+
+    @property
+    def card(self):
+        """¿Es una alerta con ficha (detalle o botones) que mostrar?"""
+        return self.state == 'alert' and bool(self.lines or self.actions)
 
     def set(self, state, detail=None, now=None):
         now = now or time.monotonic()
@@ -258,6 +304,8 @@ class Model:
                 # De rojo a verde (o al revés) es otra noticia: vuelve a abrir.
                 s.tone, s.changed = tone, now
             s.ttl = ttl
+            s.where, s.note = short(msg.get('where'), 120), short(msg.get('note'), 60)
+            s.lines, s.actions = card_lines(msg.get('lines')), card_actions(msg.get('actions'))
             s.set('alert', short(msg.get('message'), 300), now)
             return
         s = self.sessions.get(sid)
@@ -356,9 +404,10 @@ class Model:
         if limit:
             self.limit = limit
 
-    def dismiss(self, s, now=None):
-        """Quita una alerta porque ya se atendió con un clic."""
-        if self.sessions.pop(s.sid, None) is not None:
+    def dismiss(self, s, now=None, cooldown=True):
+        """Quita una alerta porque ya se atendió con un clic. Sin cooldown puede
+        volver enseguida: es lo que toca tras intentar arreglar el problema."""
+        if self.sessions.pop(s.sid, None) is not None and cooldown:
             self.dismissed[s.sid] = now or time.monotonic()
 
     def gone(self, req, now=None):
@@ -406,7 +455,9 @@ class Model:
     def active(self):
         return [s for s in self.sessions.values() if s.state != 'idle']
 
-    def view(self, now=None):
+    def view(self, now=None, pin=''):
+        """Lo que debe mostrar la isla. `pin` es la alerta que se eligió en la
+        lista: pasa a la cabecera mientras se lee, aunque haya algo más urgente."""
         now = now or time.monotonic()
         self._expire(now)
         # La más urgente primero; entre iguales, la que se movió al último.
@@ -419,6 +470,10 @@ class Model:
 
         ranked = sorted(self.sessions.values(), key=lambda s: (-rank(s), -s.updated))
         count = sum(1 for s in ranked if s.state != 'alert')   # "N sesiones": las de Claude
+        chosen = self.sessions.get(pin)
+        if chosen is not None and chosen.state == 'alert':
+            ranked.remove(chosen)
+            ranked.insert(0, chosen)
         if not ranked or not rank(ranked[0]):
             return View(count=count, others=ranked)
         best = ranked[0]

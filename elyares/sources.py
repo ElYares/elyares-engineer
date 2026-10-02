@@ -13,6 +13,9 @@ Cada una es una pastilla al pie de la isla abierta a mano, y una línea de
 
 El estado de una fuente prendida es `on` (responde), `bad` (no responde o le
 falta instalarse) o `unknown` (todavía no se sabe).
+
+Con el cursor sobre su pastilla sale una burbuja con lo que se sabe de ella.
+Una fuente que no responde dice ahí por qué (`why`) y qué hacer (`fix`).
 """
 
 import json
@@ -22,6 +25,20 @@ SOURCES = (('claude', 'Claude'), ('devherd', 'devherd'), ('coffe', 'coffe'),
            ('github', 'GitHub'), ('terminal', 'terminal'), ('usage', 'uso'))
 LABELS = dict(SOURCES)
 STATE_TEXT = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
+# Qué trae cada fuente, para la burbuja que sale al pasar el cursor por su pastilla.
+ABOUT = {'claude': 'Sesiones de Claude Code y sus permisos',
+         'devherd': 'Errores y contenedores de DevHerd Observe',
+         'coffe': 'Pomodoro: modo foco y descansos',
+         'github': 'Checks de tus PRs y revisiones pedidas',
+         'terminal': 'Comandos de bash de 30 s o más',
+         'usage': 'Contexto de cada sesión y límite de 5 h'}
+
+# Por qué está en rojo una fuente a la que le falta su enganche. Las tres las
+# pone install.sh.
+MISSING = {'claude': 'Faltan los hooks de la mascota en ~/.claude/settings.json',
+           'usage': 'La barra de estado de Claude no pasa por elyares-statusline',
+           'terminal': 'Falta el bloque de la mascota en ~/.bashrc'}
+MISSING_FIX = 'Corre install.sh en el repo de la mascota'
 
 # Con qué empieza el id de las alertas de cada fuente, para quitarlas al apagarla.
 PREFIXES = {'devherd': ('devherd:',), 'github': ('gh:',), 'coffe': ('coffe',),
