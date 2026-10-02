@@ -49,6 +49,8 @@ class IslandCase(unittest.TestCase):
         isl.markups = {}
         isl.off = isl.hover = isl.expanded = False
         isl.pin, isl.pointer, isl.buttons = '', None, {}
+        isl.tab, isl.focus, isl.hits, isl.rows = '', None, [], []
+        isl.look, isl.blink_until = [0.0, 0.0], 0.0
         isl.key_since = T
         isl.refresh = lambda: setattr(isl, 'view', isl.model.view(now=T, pin=isl.pin))
         isl.collapse_id = 0
@@ -180,10 +182,14 @@ class Fijada(IslandCase):
         self.assertEqual(self.isl.pin, '')
         self.assertTrue(self.isl.expanded)
 
-    def test_un_permiso_sigue_mostrando_sus_botones(self):
+    def test_un_permiso_se_contesta_en_el_tablero(self):
         self.isl.toggle_pinned()
-        self.ask()
-        self.assertEqual(self.isl.target(), 'ask')
+        req = self.ask()
+        # Fijada no pasa a la cabecera de siempre: los botones van en la tarjeta del que pide.
+        self.assertEqual(self.isl.target(), 'board')
+        self.assertIs(self.isl.asking(), self.isl.model.sessions['a'])
+        self.assertEqual(self.isl.answer(False, HYPRLAND, now=T + 5), '')
+        self.assertEqual(req.answers[0]['behavior'], 'deny')
 
     def test_sin_fijar_el_raton_la_cierra(self):
         self.isl.expand()
@@ -252,24 +258,355 @@ class Consulta(IslandCase):
             self.bubble('coffe')
         self.assertLessEqual(self.isl.tip_size[1], app.TIP_ROOM - app.TIP_GAP)
 
-    def test_una_de_segundo_plano_lleva_su_marca_en_la_lista(self):
-        shown = []
-        layout = self.isl._layout
-        self.isl._layout = lambda cr, text, *a, **kw: shown.append(text) or layout(cr, text, *a, **kw)
-        for sid, extra in (('a', {}), ('b', {'kind': 'bg'})):
-            self.isl.model.handle({'event': 'start', 'session_id': sid, 'cwd': '/x/proj', **extra}, now=T)
-        self.isl.refresh()
-        self.isl.rows = []
-        self.isl.draw_rows(self.cr, 100, 440, app.OPEN_H, 1.0)
-        self.assertEqual(len(self.isl.rows), 1)
-        self.assertEqual(shown.count(app.BG_TAG), 1 if self.isl.rows[0][0].kind == 'bg' else 0)
-        self.isl.view.others = list(self.isl.model.sessions.values())
-        shown.clear()
-        self.isl.draw_rows(self.cr, 100, 440, app.OPEN_H, 1.0)
-        self.assertEqual(shown.count(app.BG_TAG), 1)
-
     def test_la_ventana_cabe_en_un_monitor_de_1080(self):
         self.assertLessEqual(app.WIN_H, 1080 - 30)
+
+    def test_agente_y_proyecto_con_el_agente_en_su_color(self):
+        mascot = app.mascot
+        cases = (('elyares-auditor', 'a & b', mascot.accent('auditor'), mascot.ACCENTS['auditor']),
+                 # El engineer va con el color del tema.
+                 (state.MAIN_AGENT, 'p', mascot.accent(state.MAIN_ROLE), mascot.COLORS['accent']),
+                 # Uno que no es de la familia va sin color propio, y su nombre llega de fuera.
+                 ('a<b', 'p', None, None))
+        for name, project, color, expected in cases:
+            with self.subTest(agent=name):
+                text, markup = self.isl.who(name, project, color)
+                self.assertEqual(text, f'{name} | {project}')
+                # Lo que se pinta es lo mismo que el texto, y el marcado es válido.
+                self.assertEqual(app.Pango.parse_markup(markup, -1, '\0')[2], text)
+                self.assertEqual(f'foreground="{expected}">' in markup.split('|')[0], bool(expected))
+
+    def test_la_cabecera_dice_que_pide_permiso(self):
+        self.isl.model.handle({'event': 'start', 'session_id': 'a', 'cwd': '/x/a'}, now=T)
+        self.isl.refresh()
+        self.assertNotIn('pide permiso', [text for text, _color in self.isl.head_notes()])
+        # Sin el hook `ask` no hay botones: la nota y la antena son lo único que lo dice.
+        self.isl.model.handle({'event': 'permission', 'session_id': 'a', 'cwd': '/x/a'}, now=T)
+        self.isl.refresh()
+        self.assertFalse(self.isl.view.ask)
+        self.assertEqual(self.isl.head_notes()[-1][0], 'pide permiso')
+        self.isl.settings['pinned'] = True
+        self.assertEqual(self.isl.head_notes()[0][0], 'fijada')
+
+class Tablero(IslandCase):
+    """Abierta a mano: una pestaña por sesión y, dentro, sus cuatro."""
+
+    def setUp(self):
+        super().setUp()
+        isl = self.isl
+        isl.sources = {key: {'ok': True, 'note': '', 'tip': [], 'since': 0, 'polled': 0}
+                       for key in sources.LABELS}
+        isl.pills, isl.tip, isl.card_span = [], None, None
+        isl.tip_key, isl.tip_since, isl.tip_ref = None, 0.0, []
+        isl.override, isl.pet_state, isl.pet_since = None, 'idle', 0.0
+        isl.title = isl.detail = isl.agent_name = ''
+        isl.role, isl.list_layout, isl.wrap = state.MAIN_ROLE, False, (None, 0)
+        isl.go = mock.Mock()
+        isl.da = mock.Mock(get_width=lambda: app.WIN_W)
+        isl.settings['compact'] = False     # asomada, y no en la pastilla
+        self.shown = []
+        layout = isl._layout
+        isl._layout = lambda cr, text, *a, **kw: self.shown.append(text) or layout(cr, text, *a, **kw)
+        self.cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, app.WIN_W, app.WIN_H))
+
+    def send(self, event, sid='a', now=T, **extra):
+        self.isl.model.handle({'event': event, 'session_id': sid, 'cwd': f'/x/{sid}', **extra}, now=now)
+        self.isl.refresh()
+
+    def work(self, sid, *kinds, now=T):
+        """Una sesión trabajando, con un subagente en segundo plano de cada tipo."""
+        self.send('start', sid, now=now)
+        for i, kind in enumerate(kinds):
+            self.send('agent-start', sid, now=now + i, agent_id=f'{sid}-{kind}', agent_type=kind)
+            self.send('tool', sid, now=now + i, agent_id=f'{sid}-{kind}', agent_type=kind,
+                      tool_name='Grep', tool_input={'pattern': kind})
+
+    def draw(self):
+        """La isla entera, a su tamaño. Devuelve los clics que deja armados."""
+        self.shown.clear()
+        self.isl.w, self.isl.h = self.isl.goal()
+        self.isl.draw(None, self.cr, app.WIN_W, app.WIN_H)
+        return self.isl.hits
+
+    def hit(self, kind):
+        return [key for k, key, *_ in self.isl.hits if k == kind]
+
+    def test_abierta_a_mano_con_una_sesion_es_el_tablero(self):
+        self.isl.expanded = True
+        self.assertEqual(self.isl.target(), 'open')      # sin sesiones, la cabecera y las fuentes
+        self.isl.expanded = False
+        self.work('a')
+        self.assertEqual(self.isl.target(), 'peek')      # sin abrirla, asomada como siempre
+        self.isl.hover = True
+        self.assertEqual(self.isl.target(), 'board')
+        self.isl.hover, self.isl.expanded = False, True
+        self.assertEqual(self.isl.target(), 'board')
+        self.assertEqual(self.isl.goal()[0], app.BOARD_W)
+
+    def test_los_que_trabajan_al_frente_y_los_libres_a_la_banca(self):
+        self.isl.expanded = True
+        self.send('start')
+        self.send('tool', tool_name='Agent', tool_input={})
+        self.send('agent-start', agent_id='s1', agent_type='elyares-auditor')
+        self.send('tool', agent_id='s1', agent_type='elyares-auditor', tool_name='Bash',
+                  tool_input={'command': 'gitleaks git'})
+        self.draw()
+        # Solo el auditor está al frente; el engineer espera en la banca.
+        self.assertEqual(self.hit('member'), [('a', 'auditor')])
+        for text in ('elyares-auditor', 'Ejecutando gitleaks git', 'esperando', 'libre'):
+            self.assertIn(text, self.shown)
+        self.assertNotIn('elyares-engineer', self.shown)
+
+    def test_mide_lo_mismo_trabajen_uno_dos_o_los_cuatro(self):
+        self.isl.expanded = True
+        sizes, front = set(), []
+        for kinds in ((), ('elyares-reviewer',), ('elyares-architect', 'elyares-auditor', 'elyares-reviewer')):
+            self.isl.model.sessions.clear()
+            self.work('a', *kinds)
+            sizes.add(self.isl.goal())
+            self.draw()
+            front.append(len(self.hit('member')))
+        self.assertEqual(front, [1, 2, 4])
+        self.assertEqual(len(sizes), 1)
+        # En reposo, los cuatro en fila y ninguno se abre.
+        self.send('stop', now=T + 1)
+        self.isl.refresh = lambda: setattr(self.isl, 'view', self.isl.model.view(
+            now=T + 60, pin=self.isl.pin))
+        for kind in ('architect', 'auditor', 'reviewer'):
+            self.send('agent-stop', agent_id=f'a-elyares-{kind}')
+        self.draw()
+        self.assertEqual(self.hit('member'), [])
+        self.assertEqual(self.shown.count('libre'), 3)
+
+    def test_un_clic_en_uno_abre_su_desglose(self):
+        self.isl.expanded = True
+        self.send('start')
+        for i, name in enumerate(('uno', 'dos', 'tres')):
+            self.send('tool', now=T + 1 + i * 4, tool_name='Bash', tool_input={'command': name})
+        self.isl.model.sessions['a'].pane = '%3'
+        board = self.isl.goal()
+        self.draw()
+        self.isl.on_hit('member', self.hit('member')[0])
+        self.assertEqual(self.isl.focus, ('a', 'engineer'))
+        self.assertEqual(self.isl.goal()[1] - board[1], app.FOCUS_H - app.BOARD_H)
+        self.draw()
+        # Todos sus pasos, y lo que tardó cada uno menos el de ahora.
+        for text in ('Pensando…', 'Ejecutando uno', 'Ejecutando dos', 'Ejecutando tres', '1 s', '4 s',
+                     'ahora', '‹ volver', 'ir al pane ›'):
+            self.assertIn(text, self.shown)
+        self.assertTrue(any(text.startswith('4 pasos · ') for text in self.shown))
+        self.isl.on_hit('jump', self.hit('jump')[0])
+        self.isl.go.assert_called_once_with(self.isl.model.sessions['a'])
+        self.isl.on_hit('back', None)
+        self.assertIsNone(self.isl.focused())
+
+    def test_el_desglose_recuerda_cuantos_pasos_hubo_antes(self):
+        self.isl.expanded = True
+        self.send('start')
+        for i in range(app.FOCUS_STEPS + 3):
+            self.send('tool', now=T + i, tool_name='Bash', tool_input={'command': f'paso-{i}'})
+        self.isl.focus = ('a', 'engineer')
+        self.draw()
+        self.assertIn('⋯ 5 pasos antes', self.shown)
+        self.assertEqual(sum(text.startswith('Ejecutando paso-') for text in self.shown),
+                         app.FOCUS_STEPS - 1)
+
+    def test_las_pestanas_van_por_nombre_y_un_clic_elige(self):
+        self.isl.expanded = True
+        self.work('zeta')
+        self.work('alfa')
+        self.draw()
+        self.assertEqual(self.hit('tab'), ['alfa', 'zeta'])
+        chosen = self.isl.tab
+        other = 'alfa' if chosen == 'zeta' else 'zeta'
+        self.isl.focus = (chosen, 'engineer')
+        self.isl.on_hit('tab', other)
+        self.assertEqual((self.isl.tab, self.isl.focus), (other, None))
+        self.isl.go.assert_not_called()
+        # Un clic en la que ya está elegida lleva a su pane.
+        self.isl.on_hit('tab', other)
+        self.isl.go.assert_called_once_with(self.isl.model.sessions[other])
+
+    def test_con_el_teclado_la_pestana_y_el_desglose_que_siguen(self):
+        self.isl.expand = mock.Mock()
+        self.work('alfa', 'elyares-auditor')
+        self.work('zeta')
+        self.isl.tab = 'alfa'
+        self.isl.on_control('tab')
+        self.assertEqual(self.isl.tab, 'zeta')
+        self.isl.on_control('tab')
+        self.assertEqual(self.isl.tab, 'alfa')      # de la última vuelve a la primera
+        # El desglose de cada uno que tiene pasos, y después de vuelta al tablero.
+        seen = []
+        for _ in range(3):
+            self.isl.on_control('steps')
+            seen.append(self.isl.focus)
+        self.assertEqual(seen, [('alfa', 'engineer'), ('alfa', 'auditor'), None])
+        self.assertEqual(self.isl.expand.call_count, 5)
+
+    def test_una_sesion_recuperada_dice_lo_que_hacia(self):
+        self.send('start')
+        self.send('tool', tool_name='Bash', tool_input={'command': 'make test'})
+        other = Model()
+        other.restore(self.isl.model.dump(), now=T)
+        engineer = other.sessions['a'].team()[0]
+        self.assertEqual((engineer.state, engineer.detail), ('working', 'Ejecutando make test'))
+
+    def test_la_pestana_elegida_no_brinca_con_la_urgencia(self):
+        self.isl.expanded = True
+        self.work('a')
+        self.assertEqual(self.isl.tab_session().sid, 'a')
+        # Otra sesión se mueve después y pasa a ser la más urgente.
+        self.send('start', 'b', now=T + 5)
+        self.assertEqual(self.isl.view.session.sid, 'b')
+        self.assertEqual(self.isl.tab_session().sid, 'a')
+        # Si la elegida se va, se queda con la que haya.
+        self.send('session-end', 'a')
+        self.assertEqual(self.isl.tab_session().sid, 'b')
+
+    def test_la_pestana_sigue_al_que_pide_permiso_o_termina(self):
+        self.work('a')
+        self.work('b')
+        self.isl.tab, self.isl.focus = 'a', ('a', 'engineer')
+        old = self.isl.view
+        self.isl.model.handle({'event': 'stop', 'session_id': 'b', 'cwd': '/x/b'}, now=T + 3)
+        new = self.isl.model.view(now=T + 3)
+        self.isl.follow(new)
+        self.assertEqual((self.isl.tab, self.isl.focus), ('b', None))
+        # Sin novedad no se mueve, aunque la más urgente sea otra.
+        self.isl.view, self.isl.tab = new, 'a'
+        self.isl.follow(self.isl.model.view(now=T + 3))
+        self.assertEqual(self.isl.tab, 'a')
+        self.assertNotEqual(old.key, new.key)
+
+    def test_el_permiso_va_en_la_tarjeta_del_que_lo_pide(self):
+        self.isl.expanded = True
+        self.work('b')
+        req = self.ask('a')
+        self.isl.tab = 'a'
+        self.draw()
+        self.assertEqual(set(self.isl.buttons), {'allow', 'deny'})
+        self.assertIn('Ejecutando rm -rf build', self.shown)
+        x, y, w, h = self.isl.buttons['allow']
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.assertEqual(req.answers, [{'behavior': 'allow'}])
+
+    def test_el_permiso_de_otra_pestana_no_se_contesta_desde_esta(self):
+        self.isl.expanded = True
+        self.work('b')
+        req = self.ask('a')
+        self.isl.tab = 'b'
+        self.draw()
+        self.assertEqual(self.isl.buttons, {})
+        self.assertEqual(self.isl.answer(False, HYPRLAND, now=T + 5), 'no hay ningún permiso a la vista')
+        self.assertEqual(req.answers, [])
+        # Pero su pestaña lo dice, en rojo.
+        self.assertEqual(self.isl.tab_dot(self.isl.model.sessions['a']), 'red')
+
+    def test_el_punto_de_la_pestana_dice_como_esta_la_sesion(self):
+        self.work('a', 'elyares-reviewer')
+        a = self.isl.model.sessions['a']
+        self.assertEqual(self.isl.tab_dot(a), app.mascot.accent('reviewer'))
+        self.send('agent-stop', agent_id='a-elyares-reviewer')
+        self.assertEqual(self.isl.tab_dot(a), app.mascot.accent('engineer'))
+        self.send('stop')
+        self.assertEqual(self.isl.tab_dot(a), 'green')
+        self.send('idle')
+        self.assertEqual(self.isl.tab_dot(a), 'yellow')
+
+    def test_una_de_segundo_plano_lo_dice_en_su_pestana(self):
+        self.send('start', 'a', kind='bg')
+        self.send('start', 'b', kind='bg', label='Mejoras')
+        self.send('start', 'c')
+        labels = {sid: self.isl.tab_label(s) for sid, s in self.isl.model.sessions.items()}
+        self.assertEqual(labels, {'a': f'a · {app.BG_TAG}', 'b': 'b · Mejoras', 'c': 'c'})
+
+    def test_dos_sesiones_de_la_misma_carpeta_se_numeran(self):
+        for sid in ('uno', 'dos', 'tres'):
+            self.isl.model.handle({'event': 'start', 'session_id': sid, 'cwd': '/x/proj'}, now=T)
+        self.isl.model.handle({'event': 'start', 'session_id': 'otra', 'cwd': '/x/api'}, now=T)
+        self.isl.refresh()
+        self.assertEqual(sorted(self.isl.tab_labels().values()), ['api', 'proj', 'proj 2', 'proj 3'])
+
+    def test_las_alertas_van_debajo_del_tablero(self):
+        self.isl.expanded = True
+        self.work('a')
+        bare = self.isl.goal()[1]
+        self.alert(lines=['uno', 'dos'], actions=[state.JUMP])
+        self.assertEqual([s.sid for s in self.isl.rows_for('board')], ['x:1'])
+        # Recién llegada manda en la vista, pero el tablero no se va: lleva su ficha debajo.
+        self.assertEqual(self.isl.view.session.sid, 'x:1')
+        self.assertEqual(self.isl.target(), 'board')
+        card = self.isl.card_h('board')
+        self.assertEqual(self.isl.goal()[1], bare + card + app.LIST_PAD + app.ROW_H)
+        self.draw()
+        self.assertEqual([s.sid for s, _y, _h in self.isl.rows], ['x:1'])
+        self.assertEqual(set(self.isl.buttons), {'dismiss', 0})
+        # Con un desglose abierto, la ficha le deja el sitio.
+        self.isl.focus = ('a', 'engineer')
+        self.assertEqual(self.isl.card_h('board'), 0)
+
+    def test_asomada_salen_las_caritas_de_los_demas(self):
+        self.work('a')
+        alone = self.isl.goal()
+        self.assertEqual((self.isl.target(), self.isl.minis(), alone), ('peek', [], app.SIZES['peek']))
+        self.work('b', 'elyares-auditor', 'elyares-reviewer', now=T + 5)
+        big = (self.isl.view.session.sid, self.isl.view.role)
+        self.assertEqual(big, ('b', 'reviewer'))
+        # Los demás que trabajan, sin el que ya es la mascota grande.
+        self.assertEqual(sorted(self.isl.minis()),
+                         [('auditor', 'working'), ('engineer', 'working'), ('engineer', 'working')])
+        self.assertGreater(self.isl.goal()[0], alone[0])
+        self.draw()
+
+    def test_se_dibuja_en_todos_sus_estados(self):
+        self.isl.expanded = True
+        self.work('a', 'elyares-architect', 'elyares-auditor')
+        self.work('b')
+        self.send('stop', 'b', now=T + 1)
+        for tab, focus in (('a', None), ('b', None), ('a', ('a', 'auditor')), ('b', ('b', 'engineer'))):
+            with self.subTest(tab=tab, focus=focus):
+                self.isl.tab, self.isl.focus = tab, focus
+                self.isl.pointer = (app.WIN_W / 2, app.TABS_H + 40)
+                self.assertTrue(self.draw())
+        self.assertLessEqual(self.isl.goal()[1], app.BOARD_MAX + app.PILLS_H + 8)
+
+
+@unittest.skipIf(app is None, 'sin gi: usa /usr/bin/python3')
+class Familia(unittest.TestCase):
+    """Los cuatro personajes de `mascot.py`."""
+
+    STATES = ('idle', 'working', 'permission', 'done', 'confused', 'annoyed', 'dizzy', 'sleep')
+
+    def pixels(self, state, **kw):
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 300, 320)
+        cr = cairo.Context(surface)
+        cr.translate(150, 170)
+        app.mascot.draw(cr, state, .36, .42, **kw)
+        return bytes(surface.get_data())
+
+    def test_cada_uno_tiene_todos_los_gestos(self):
+        for role in app.mascot.ROLES:
+            for st in self.STATES:
+                with self.subTest(role=role, state=st):
+                    self.assertTrue(any(self.pixels(st, role=role)))
+
+    def test_cada_uno_se_distingue_de_los_demas(self):
+        for st in ('idle', 'working'):
+            drawn = {self.pixels(st, role=role) for role in app.mascot.ROLES}
+            self.assertEqual(len(drawn), len(app.mascot.ROLES))
+
+    def test_sin_personaje_o_con_uno_desconocido_es_el_engineer(self):
+        engineer = self.pixels('working', role='engineer')
+        self.assertEqual(self.pixels('working'), engineer)
+        self.assertEqual(self.pixels('working', role='Explore'), engineer)
+
+    def test_todos_tienen_sus_capas(self):
+        for table in (app.mascot.HATS, app.mascot.PROPS):
+            self.assertEqual(set(table), set(app.mascot.ROLES))
+        # El engineer usa el color del tema; los demás, el suyo.
+        self.assertEqual(set(app.mascot.ACCENTS), set(app.mascot.ROLES) - {'engineer'})
+        self.assertEqual(set(state.AGENT_ROLES.values()), set(app.mascot.ACCENTS))
 
 
 class Ficha(IslandCase):

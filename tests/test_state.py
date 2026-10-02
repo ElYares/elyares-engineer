@@ -97,6 +97,223 @@ class Sessions(ModelCase):
         self.assertEqual(self.m.view(now=T).mode, 'open')
 
 
+class Subagentes(ModelCase):
+    def agents(self):
+        return {a.aid: a for a in self.m.sessions['a'].agents.values()}
+
+    def test_arranca_trabaja_y_termina(self):
+        self.send('start')
+        self.send('agent-start', agent_id='s1', agent_type='Explore')
+        self.send('tool', agent_id='s1', agent_type='Explore', tool_name='Read',
+                  tool_input={'file_path': '/x/proj/a.py'})
+        a = self.agents()['s1']
+        self.assertEqual((a.name, a.detail, a.started), ('Explore', 'Leyendo a.py', T))
+        # Lo que hace el subagente es lo que dice la cabecera.
+        self.assertEqual(self.m.view(now=T).detail, 'Leyendo a.py')
+        self.send('agent-stop', agent_id='s1', agent_type='Explore')
+        self.assertEqual(self.agents(), {})
+        self.assertEqual(self.m.sessions['a'].state, 'working')
+
+    def test_uno_de_la_familia_le_cambia_la_cara_a_la_mascota(self):
+        self.send('start')
+        self.assertEqual(self.m.view(now=T).role, 'engineer')
+        self.send('agent-start', agent_id='s1', agent_type='elyares-auditor')
+        self.assertEqual(self.m.view(now=T).role, 'auditor')
+        self.assertEqual(self.agents()['s1'].name, 'elyares-auditor')
+        self.send('agent-stop', agent_id='s1')
+        self.assertEqual(self.m.view(now=T).role, 'engineer')
+
+    def test_la_sesion_se_nombra_por_quien_trabaja(self):
+        self.send('start')
+        v = self.m.view(now=T)
+        self.assertEqual((v.agent_name, v.title), ('elyares-engineer', 'proj'))
+        self.send('agent-start', agent_id='s1', agent_type='elyares-auditor')
+        self.assertEqual(self.m.view(now=T).agent_name, 'elyares-auditor')
+        # Uno que no es de la familia no le quita el nombre al engineer.
+        self.send('agent-stop', agent_id='s1')
+        self.send('agent-start', agent_id='s2', agent_type='Explore')
+        self.assertEqual(self.m.view(now=T).agent_name, 'elyares-engineer')
+
+    def test_una_alerta_no_es_de_ningun_agente(self):
+        self.alert()
+        self.assertEqual(self.m.view(now=T).agent_name, '')
+        self.assertEqual(self.m.sessions['x:1'].agent_name, '')
+
+    def test_manda_el_de_la_familia_que_arranco_al_ultimo(self):
+        self.send('start')
+        self.send('agent-start', agent_id='s1', agent_type='elyares-architect', now=T)
+        self.send('agent-start', agent_id='s2', agent_type='elyares-reviewer', now=T + 1)
+        # Uno que no es de la familia no le quita la cara al que sí.
+        self.send('agent-start', agent_id='s3', agent_type='Explore', now=T + 2)
+        self.assertEqual(self.m.view(now=T + 2).role, 'reviewer')
+        self.send('agent-stop', agent_id='s2', now=T + 3)
+        self.assertEqual(self.m.view(now=T + 3).role, 'architect')
+
+    def test_sin_haber_visto_su_arranque_tambien_sale(self):
+        self.send('tool', agent_id='s1', agent_type='elyares-reviewer', tool_name='Grep',
+                  tool_input={'pattern': 'TODO'})
+        self.assertEqual(self.agents()['s1'].detail, 'Buscando TODO')
+        self.assertEqual(self.m.view(now=T).role, 'reviewer')
+
+    def test_el_agente_de_la_sesion_no_es_un_subagente(self):
+        # Con `claude --agent` todo trae agent_type, pero solo un subagente trae agent_id.
+        self.send('tool', agent_type='elyares-auditor', tool_name='Bash', tool_input={'command': 'ls'})
+        self.assertEqual(self.agents(), {})
+
+    def test_el_que_se_queda_callado_se_olvida(self):
+        self.send('start')
+        self.send('agent-start', agent_id='s1', agent_type='elyares-auditor')
+        self.m.view(now=T + state.AGENT_STALE_SECS - 1)
+        self.assertIn('s1', self.agents())
+        self.m.view(now=T + state.AGENT_STALE_SECS + 1)
+        self.assertEqual(self.agents(), {})
+
+    def test_su_permiso_se_suelta_si_termina(self):
+        req = FakeReq()
+        self.send('ask', req=req, agent_id='s1', agent_type='elyares-auditor', tool_name='Bash',
+                  tool_input={'command': 'semgrep scan'})
+        self.assertEqual(self.agents()['s1'].detail, 'Ejecutando semgrep scan')
+        self.send('agent-stop', agent_id='s1')
+        self.assertEqual(req.answers, [None])
+
+    def test_no_se_guardan_entre_reinicios(self):
+        self.send('start')
+        self.send('agent-start', agent_id='s1', agent_type='elyares-auditor')
+        other = Model()
+        other.restore(self.m.dump(), now=T)
+        self.assertEqual(other.sessions['a'].agents, {})
+
+
+class Equipo(ModelCase):
+    """Cómo están los cuatro de la familia en una sesión: lo que dibuja el tablero."""
+
+    def team(self):
+        return {m.role: m for m in self.m.sessions['a'].team()}
+
+    def states(self):
+        return [m.state for m in self.m.sessions['a'].team()]
+
+    def tool(self, name='Read', now=T, **extra):
+        self.send('tool', now=now, tool_name=name, tool_input={'file_path': f'/x/proj/{name}.py'}, **extra)
+
+    def test_son_los_cuatro_en_el_orden_de_la_familia(self):
+        self.send('start')
+        self.assertEqual([m.role for m in self.m.sessions['a'].team()], list(state.TEAM))
+        self.assertEqual([m.name for m in self.m.sessions['a'].team()],
+                         ['elyares-engineer', 'elyares-architect', 'elyares-auditor', 'elyares-reviewer'])
+        self.assertEqual(self.states(), ['working', 'idle', 'idle', 'idle'])
+
+    def test_los_pasos_del_engineer_son_los_del_turno(self):
+        self.send('start')
+        self.tool('Read', now=T + 1)
+        self.tool('Edit', now=T + 4)
+        self.assertEqual(self.team()['engineer'].steps,
+                         [('Pensando…', T), ('Leyendo Read.py', T + 1), ('Editando Edit.py', T + 4)])
+        self.assertEqual(self.team()['engineer'].detail, 'Editando Edit.py')
+        # Otro turno empieza de cero.
+        self.send('start', now=T + 9)
+        self.assertEqual(self.team()['engineer'].steps, [('Pensando…', T + 9)])
+
+    def test_la_herramienta_y_su_permiso_son_un_solo_paso(self):
+        self.send('start')
+        tool = {'tool_name': 'Bash', 'tool_input': {'command': 'rm -rf build'}}
+        self.send('tool', now=T + 1, **tool)
+        self.send('ask', now=T + 1, req=FakeReq(), **tool)
+        self.assertEqual([text for text, _at in self.team()['engineer'].steps],
+                         ['Pensando…', 'Ejecutando rm -rf build'])
+        self.assertEqual(self.states(), ['permission', 'idle', 'idle', 'idle'])
+
+    def test_no_se_recuerdan_pasos_sin_fin(self):
+        self.send('start')
+        for i in range(state.STEPS_KEPT + 5):
+            self.send('tool', now=T + i, tool_name='Bash', tool_input={'command': f'echo {i}'})
+        steps = self.team()['engineer'].steps
+        self.assertEqual(len(steps), state.STEPS_KEPT)
+        self.assertEqual(steps[-1][0], f'Ejecutando echo {state.STEPS_KEPT + 4}')
+
+    def test_mientras_espera_a_uno_de_la_familia_el_engineer_esta_libre(self):
+        self.send('start')
+        self.send('tool', now=T + 1, tool_name='Agent', tool_input={'subagent_type': 'elyares-auditor'})
+        self.send('agent-start', now=T + 1, agent_id='s1', agent_type='elyares-auditor')
+        self.tool('Grep', now=T + 2, agent_id='s1', agent_type='elyares-auditor')
+        self.assertEqual(self.states(), ['idle', 'idle', 'working', 'idle'])
+        auditor = self.team()['auditor']
+        self.assertEqual((auditor.name, auditor.since), ('elyares-auditor', T + 1))
+        self.assertEqual([text for text, _at in auditor.steps], ['Buscando'])
+        # Lo del auditor no es un paso del engineer.
+        self.assertNotIn('Buscando', [text for text, _at in self.team()['engineer'].steps])
+        # Vuelve el subagente y el engineer sigue.
+        self.send('agent-stop', now=T + 5, agent_id='s1')
+        self.send('tool-done', now=T + 5, tool_name='Agent')
+        self.assertEqual(self.states(), ['working', 'idle', 'idle', 'idle'])
+
+    def test_con_uno_en_segundo_plano_trabajan_los_dos(self):
+        self.send('start')
+        self.send('tool', now=T + 1, tool_name='Agent', tool_input={})
+        self.send('agent-start', now=T + 1, agent_id='s1', agent_type='elyares-reviewer')
+        # Lanzarlo en segundo plano devuelve el control enseguida.
+        self.send('tool-done', now=T + 1, tool_name='Agent')
+        self.tool('Read', now=T + 2)
+        self.assertEqual(self.states(), ['working', 'idle', 'idle', 'working'])
+
+    def test_lo_de_uno_que_no_es_de_la_familia_es_trabajo_del_engineer(self):
+        self.send('start')
+        self.send('tool', now=T + 1, tool_name='Agent', tool_input={'description': 'buscar'})
+        self.send('agent-start', now=T + 1, agent_id='s1', agent_type='Explore')
+        self.tool('Read', now=T + 2, agent_id='s1', agent_type='Explore')
+        self.assertEqual(self.states(), ['working', 'idle', 'idle', 'idle'])
+        self.assertEqual(self.team()['engineer'].detail, 'Leyendo Read.py')
+
+    def test_pide_permiso_el_que_lo_pidio(self):
+        self.send('start')
+        self.send('tool', now=T + 1, tool_name='Agent', tool_input={})
+        self.send('agent-start', now=T + 1, agent_id='s1', agent_type='elyares-auditor')
+        self.send('ask', now=T + 2, req=FakeReq(), agent_id='s1', agent_type='elyares-auditor',
+                  tool_name='Bash', tool_input={'command': 'semgrep scan'})
+        # El aviso de la terminal llega después y sin decir de quién es.
+        self.send('permission', now=T + 2)
+        self.assertEqual(self.states(), ['idle', 'idle', 'permission', 'idle'])
+        self.assertEqual(self.team()['auditor'].detail, 'Ejecutando semgrep scan')
+
+    def test_un_aviso_de_permiso_sin_mas_es_del_engineer(self):
+        self.send('start')
+        self.send('permission', now=T + 1, message='Claude necesita permiso')
+        self.assertEqual(self.states(), ['permission', 'idle', 'idle', 'idle'])
+
+    def test_al_terminar_y_al_esperar_el_engineer_lo_dice(self):
+        self.send('start')
+        self.tool('Read', now=T + 1)
+        self.send('stop', now=T + 5)
+        engineer = self.team()['engineer']
+        self.assertEqual((engineer.state, engineer.detail), ('done', 'Listo en 5 s'))
+        # Lo que hizo sigue ahí, para su desglose.
+        self.assertEqual(len(engineer.steps), 3)
+        self.send('idle', now=T + 6)
+        engineer = self.team()['engineer']
+        self.assertEqual((engineer.state, engineer.detail), ('waiting', 'Esperando tu respuesta'))
+
+    def test_tras_un_reinicio_sigue_esperando_al_que_lanzo(self):
+        self.send('start')
+        self.send('tool', now=T + 1, tool_name='Agent', tool_input={})
+        self.send('agent-start', now=T + 1, agent_id='s1', agent_type='elyares-reviewer')
+        self.m, old = Model(), self.m
+        self.m.restore(old.dump(), now=T + 2)
+        # Ni los subagentes ni los pasos se guardan; vuelven con lo siguiente que haga.
+        self.assertEqual(self.states(), ['working', 'idle', 'idle', 'idle'])
+        self.tool('Read', now=T + 3, agent_id='s1', agent_type='elyares-reviewer')
+        self.assertEqual(self.states(), ['idle', 'idle', 'idle', 'working'])
+        # Lo que hace el reviewer no pasa por un paso del engineer.
+        self.assertEqual(self.team()['engineer'].steps, [])
+        self.assertEqual(self.team()['reviewer'].detail, 'Leyendo Read.py')
+
+    def test_en_reposo_estan_los_cuatro_libres(self):
+        self.send('start')
+        self.send('stop', now=T + 1)
+        self.m.view(now=T + 1 + state.DONE_OPEN_SECS + 1)
+        self.assertEqual(self.states(), ['idle'] * 4)
+        self.assertFalse(any(m.busy for m in self.m.sessions['a'].team()))
+
+
 class SegundoPlano(ModelCase):
     def test_la_de_repuesto_no_sale_hasta_que_se_usa(self):
         # Claude Code tiene lista una sesión que solo pinta su barra de estado.
@@ -125,7 +342,7 @@ class SegundoPlano(ModelCase):
         self.assertEqual((s.kind, s.proc), ('bg', '778688:829925'))
         self.assertEqual(v.others[0].kind, '')
         self.send('permission', sid='fondo', now=T + 2, message='x')
-        self.assertEqual(self.m.view(now=T + 2).title, 'proj · Mejoras e integración necesita permiso')
+        self.assertEqual(self.m.view(now=T + 2).title, 'proj · Mejoras e integración')
 
     def test_olvida_las_de_un_proceso_que_ya_no_existe(self):
         self.send('start', sid='viva', proc='10:1')
@@ -161,7 +378,7 @@ class Permisos(ModelCase):
         self.ask()
         v = self.m.view(now=T)
         self.assertTrue(v.ask)
-        self.assertEqual((v.mode, v.pet, v.title), ('open', 'permission', 'proj necesita permiso'))
+        self.assertEqual((v.mode, v.pet, v.title), ('open', 'permission', 'proj'))
         self.assertEqual(v.detail, 'Ejecutando rm -rf build')
 
     def test_ask_sin_hook_esperando_no_hace_nada(self):

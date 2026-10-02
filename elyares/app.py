@@ -44,9 +44,20 @@ Si la sesión principal está editando un archivo, abierta a mano (o al pedir
 permiso para editarlo) la isla se ensancha y muestra el fragmento que cambia,
 como un diff de pocas líneas (`preview.py`). Es solo para mirar.
 
-Abierta a mano y con varias sesiones, debajo de la más urgente sale una fila
-por cada una de las demás, también las que están en reposo; un clic en la fila
-lleva a su pane de tmux.
+Abierta a mano (o con el ratón encima) y con alguna sesión de Claude, la isla
+es un tablero: una pestaña por sesión y, de la elegida, sus cuatro agentes
+(`state.Session.team`). Los que trabajan van al frente, en grande, con su gesto
+y sus últimos pasos; los libres, en chiquito en la banca. El frente se parte
+según cuántos trabajen, y con los cuatro son cuatro cuadros. Un clic en uno
+abre su desglose: todos sus pasos y lo que tardó cada uno. Un clic en la
+pestaña elegida lleva al pane de tmux de esa sesión. La pestaña se va sola a
+la sesión que pide permiso o acaba de terminar. Debajo del tablero van las
+alertas, una fila cada una.
+
+Sin abrirla, la isla sigue como siempre: asomada, con la mascota (que es el
+personaje del que trabaja: `mascot.py` dibuja a los cuatro) y, a su lado, las
+caritas de los demás que trabajan; y cuando se abre sola por un aviso, con la
+cabecera «agente | proyecto» y lo que pasa.
 """
 
 import html
@@ -68,9 +79,9 @@ from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, coffe, commands, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
                preview, settings, sources, store, testrun, theme)
-from .state import Model  # noqa: E402
+from .state import MAIN_ROLE, Model, elapsed  # noqa: E402
 
-MAX_ROWS = 4          # filas de la lista: las demás sesiones, sin la principal
+MAX_ROWS = 5          # filas de la lista de alertas, con la cabecera de siempre
 ROW_H, LIST_PAD = 28, 10
 OPEN_H = 88
 DETAIL_LINES = 4      # líneas del detalle cuando se muestra entero
@@ -91,11 +102,25 @@ TIP_HEAD_GAP = 7      # aire sobre el título de un bloque de comandos
 TIP_LINES = 3         # líneas propias que puede traer una fuente
 TIP_FADE = .12        # segundos que tarda en aparecer
 # 8: margen del rebote
+# El tablero: una pestaña por sesión y, dentro, sus cuatro.
+BOARD_W = PREVIEW_W
+TABS_H = 34
+BOARD_H = 172         # el frente (los que trabajan) y la banca (los libres)
+BOARD_PAD, BOARD_GAP = 10, 8
+BENCH_W = 132
+FOCUS_H = 236         # el desglose de uno, con sus pasos
+FOCUS_STEPS = 8
+FOCUS_SIDE, FOCUS_MINIS = 150, 34   # a la izquierda, quién es; a la derecha, los demás
+ALERT_ROWS = 3        # filas de alertas que caben debajo del tablero
+MINI, MAX_MINIS = 24, 4             # las caritas de los demás, con la isla asomada
 WIN_W = PREVIEW_W + 40
-WIN_H = (OPEN_H + MAX_EXTRA + PREVIEW_MAX + ASK_TALL + MAX_ROWS * ROW_H + LIST_PAD + PILLS_H + 8
-         + TIP_ROOM)
+# Lo más alto que se puede dibujar, con la cabecera de siempre o con el tablero.
+HEAD_MAX = OPEN_H + MAX_EXTRA + PREVIEW_MAX + ASK_TALL + MAX_ROWS * ROW_H + LIST_PAD
+BOARD_MAX = (TABS_H + max(BOARD_H + PREVIEW_MAX, FOCUS_H) + BOARD_PAD
+             + ALERT_ROWS * ROW_H + LIST_PAD)
+WIN_H = max(HEAD_MAX, BOARD_MAX) + PILLS_H + 8 + TIP_ROOM
 SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
-         'open': (440, OPEN_H), 'ask': (440, 108)}
+         'open': (560, OPEN_H), 'ask': (560, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
@@ -105,13 +130,15 @@ GLASS_ALPHA, GLASS_EDGE = .5, .16    # modo vidrio: fondo translúcido y filo cl
 TIP_GLASS_ALPHA = .82                # la burbuja, en vidrio: se lee más rato que la isla
 TITLE_COLOR = (.95, .96, 1, 1)
 MUTED_COLOR = (.44, .49, .63, 1)
+# La barra entre el agente y el proyecto, en el mismo gris.
+SEP_COLOR = '#%02x%02x%02x' % tuple(round(c * 255) for c in MUTED_COLOR[:3])
 FONT_TITLE = 'Sans Semi-Bold 11'
 FONT_DETAIL = 'JetBrainsMono Nerd Font 9'
 FONT_BUTTON = 'Sans Semi-Bold 10'
 FONT_ROW = 'Sans Semi-Bold 10'
 FONT_PILL = 'Sans Semi-Bold 8'
 FONT_CODE = 'JetBrainsMono Nerd Font 8'
-ROW_NAME_W = 130     # ancho de la columna del proyecto en la lista
+ROW_NAME_W = 130     # ancho de la columna del nombre en la lista de alertas
 STATE_COLORS = {'permission': 'red', 'alert': 'red', 'waiting': 'yellow', 'done': 'green',
                 'working': 'accent'}
 # El punto de una alerta, según su tono.
@@ -131,7 +158,12 @@ IDLE_FPS = 12                      # asomada y quieta: ~3% de CPU en vez de ~8% 
 KEY_OPEN_SECS = 6                  # abierta con el teclado: se cierra sola
 ASK_GUARD_SECS = .6                # un permiso recién salido no se contesta con el teclado
 REAP_SECS = 15                     # cada cuánto se mira si los procesos de Claude siguen ahí
-BG_TAG = '2º plano'                # una sesión de segundo plano, en su fila de la lista
+BG_TAG = '2º plano'                # una sesión de segundo plano sin nombre, en su pestaña
+# El gesto de uno del tablero según cómo está, y el color que tiñe su tarjeta
+# (si no está aquí, el de su personaje).
+MEMBER_PET = {'working': 'working', 'permission': 'permission', 'done': 'done',
+              'waiting': 'confused'}
+MEMBER_TINT = {'permission': 'red', 'done': 'green', 'waiting': 'yellow'}
 
 
 def ago(secs):
@@ -165,6 +197,10 @@ class Island:
         self.view = self.model.view()
         self.key_since = time.monotonic()   # desde cuándo la cabecera muestra lo que muestra
         self.title, self.detail = '', ''
+        self.agent_name, self.role = '', MAIN_ROLE   # de quién es la cabecera
+        self.tab = ''                   # la sesión de la pestaña elegida en el tablero
+        self.focus = None               # (sesión, personaje) del desglose abierto
+        self.hits = []                  # (qué, cuál, x, y, ancho, alto) del tablero, del último dibujo
         self.dnd = False
         self.hover = False
         self.settings = settings.load()
@@ -372,12 +408,15 @@ class Island:
             self.pet_state, self.pet_since = v.pet, time.monotonic()
         if v.title:
             self.title, self.detail = v.title, v.detail
+            self.agent_name, self.role = v.agent_name, v.role
         elif self.expanded and v.others:
             # Abierta a mano sin nada corriendo: la cabecera lo dice y la lista
             # trae las sesiones en reposo.
             self.title, self.detail = 'Sin sesiones activas', f'{len(v.others)} en reposo'
+            self.agent_name = ''
         elif self.expanded:
-            self.title, self.detail = 'Sin sesiones', 'Nada corriendo ahora'
+            self.title, self.detail, self.agent_name = 'Sin sesiones', 'Nada corriendo ahora', ''
+        self.follow(v)
         changed = v.mode != self.view.mode or v.key != self.view.key
         if v.key != self.view.key:
             self.key_since = time.monotonic()
@@ -509,6 +548,14 @@ class Island:
             self.settings['glass'] = not self.settings['glass']
             settings.save(self.settings)
             self.ensure_tick()
+        elif order in ('tab', 'steps'):
+            # Con el teclado: la pestaña que sigue, o el desglose del que sigue.
+            self.off = False
+            if order == 'tab':
+                self.next_tab()
+            else:
+                self.next_focus()
+            self.expand(KEY_OPEN_SECS)
         elif order == 'open':
             if self.expanded and not self.off:
                 # Cerrarla a mano también la desfija: si no, no se cerraría.
@@ -524,20 +571,132 @@ class Island:
         """Contesta con el teclado el permiso que está a la vista. Devuelve por
         qué no lo hizo, o '' si lo contestó.
 
-        Solo el que se ve en la cabecera: no uno tapado por otra sesión, ni
-        con la isla escondida, ni uno que acaba de salir y no dio tiempo de
-        leer. Y permitir no puede pedirlo un proceso lanzado por Claude: se
-        estaría aprobando a sí mismo. Denegar, sí.
+        Solo el que se ve (en la cabecera o, en el tablero, en la pestaña
+        elegida): no uno tapado por otra sesión, ni con la isla escondida, ni
+        uno que acaba de salir y no dio tiempo de leer. Y permitir no puede
+        pedirlo un proceso lanzado por Claude: se estaría aprobando a sí
+        mismo. Denegar, sí.
         """
         if allow and (not peer or 'claude' in peer):
             return 'permitir no se puede pedir desde una sesión de Claude'
-        if self.off or not self.view.ask:
+        s = self.asking()
+        if self.off or s is None:
             return 'no hay ningún permiso a la vista'
         if (now or time.monotonic()) - self.key_since < ASK_GUARD_SECS:
             return 'el permiso acaba de salir: léelo y pulsa otra vez'
-        self.model.decide(self.view.session, allow)
+        self.model.decide(s, allow)
         self.refresh()
         return ''
+
+    @staticmethod
+    def who(agent_name, project, color=None):
+        """«agente | proyecto», como texto y como marcado de Pango. El agente
+        va en su color; sin color (uno que no es de la familia), en blanco
+        como el proyecto."""
+        tint = f' foreground="{color}"' if color else ''
+        return (f'{agent_name} | {project}',
+                f'<span{tint}>{html.escape(agent_name, quote=False)}</span>'
+                f'<span foreground="{SEP_COLOR}"> | </span>{html.escape(project, quote=False)}')
+
+    def head_notes(self):
+        """Lo que va a la derecha del título, como (texto, color) y de derecha
+        a izquierda: si está fijada, cuántas sesiones hay, el contexto de la
+        que se muestra y si pide permiso."""
+        best = self.view.session
+        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] else []
+        if self.view.count > 1:
+            notes.append((f'{self.view.count} sesiones', MUTED_COLOR[:3]))
+        if best and best.context >= CONTEXT_SHOW:
+            notes.append((f'{best.context:.0f}%',
+                          rgb(self.colors[paint.context_role(best.context)])))
+        if best and best.state == 'permission':
+            notes.append(('pide permiso', rgb('red')))
+        return notes
+
+    # ── el tablero ───────────────────────────────────────────────────────────
+
+    def everyone(self):
+        v = self.view
+        return ([v.session] if v.session else []) + v.others
+
+    def claude(self):
+        """Las sesiones de Claude, de la más urgente a la que lleva más en reposo."""
+        return [s for s in self.everyone() if s.state != 'alert']
+
+    def alerts(self):
+        return [s for s in self.everyone() if s.state == 'alert']
+
+    def tabs(self):
+        """Las pestañas del tablero: las sesiones, por nombre para que no cambien de sitio."""
+        return sorted(self.claude(), key=lambda s: (s.proj.lower(), s.sid))
+
+    def tab_session(self):
+        """La sesión de la pestaña elegida. Si no hay ninguna elegida, o se
+        fue, se queda con la más urgente."""
+        sessions = self.claude()
+        chosen = next((s for s in sessions if s.sid == self.tab), None)
+        if chosen is None and sessions:
+            chosen = sessions[0]
+            self.tab = chosen.sid
+        return chosen
+
+    def follow(self, v):
+        """La pestaña se va sola a la sesión que pide permiso o acaba de
+        terminar: es lo que no debe quedarse tapado en otra carpeta."""
+        s = v.session
+        if s is not None and s.state in ('permission', 'done') and v.key != self.view.key:
+            if self.tab != s.sid:
+                self.focus = None
+            self.tab = s.sid
+
+    def focused(self):
+        """(sesión, miembro) del desglose abierto, o None. Se cierra solo si
+        se cambió de pestaña o ya no quedan pasos que leer."""
+        s = self.tab_session()
+        if not self.focus or s is None or s.sid != self.focus[0]:
+            return None
+        member = next((m for m in s.team() if m.role == self.focus[1]), None)
+        return (s, member) if member is not None and member.steps else None
+
+    def next_tab(self):
+        """Pasa a la pestaña que sigue, y de la última a la primera."""
+        tabs = [s.sid for s in self.tabs()]
+        if tabs:
+            here = self.tab_session().sid
+            self.tab, self.focus = tabs[(tabs.index(here) + 1) % len(tabs)], None
+
+    def next_focus(self):
+        """Abre el desglose del primero que tenga pasos, luego el del que
+        sigue, y después del último vuelve al tablero."""
+        s = self.tab_session()
+        if s is None:
+            return
+        roles = [m.role for m in s.team() if m.steps]
+        now = self.focus[1] if self.focused() else None
+        after = roles[roles.index(now) + 1:] if now in roles else roles
+        self.focus = (s.sid, after[0]) if after else None
+
+    def asking(self):
+        """La sesión cuyo permiso se puede contestar desde la isla: la de la
+        cabecera o, en el tablero, la de la pestaña elegida."""
+        s = self.tab_session() if self.target() == 'board' else self.view.session
+        return s if s is not None and s.state == 'permission' and s.ask is not None else None
+
+    def minis(self):
+        """Los demás que trabajan, para la isla asomada: (personaje, gesto) de
+        cada uno, sin el que ya es la mascota grande."""
+        out = [(s.sid, m.role, MEMBER_PET[m.state]) for s in self.claude() for m in s.team() if m.busy]
+        big = self.view.session
+        if big is not None:
+            mine = next((it for it in out if it[:2] == (big.sid, self.view.role)), None)
+            if mine in out:
+                out.remove(mine)
+        return [(role, pet) for _sid, role, pet in out[:MAX_MINIS]]
+
+    def rows_for(self, mode):
+        """Las alertas que van en filas: en el tablero, todas; con la cabecera
+        de siempre, las que no están en ella."""
+        return self.alerts() if mode == 'board' else self.view.others
 
     def expand(self, secs=None):
         """Abre la isla a mano. Con secs se cierra sola si el ratón no está encima."""
@@ -571,6 +730,8 @@ class Island:
         # Fijada no se cierra: solo suelta la alerta que se había elegido en la
         # lista, para que no tape algo más urgente.
         self.expanded = self.settings['pinned']
+        if not self.expanded:
+            self.focus = None           # al volver a abrirla, el tablero y no un desglose
         if self.pin:
             self.pin = ''
             self.refresh()
@@ -602,11 +763,14 @@ class Island:
         if self.off:
             return 'off'
         mode = self.view.mode
+        if self.expanded:
+            # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
+            # la cabecera de siempre: es donde están las fuentes.
+            if self.claude():
+                return 'board'
+            return 'list' if self.view.others else 'open'
         if mode == 'open' and self.view.ask:
             return 'ask'
-        if self.expanded:
-            # Sin ninguna sesión se abre igual: es donde están las fuentes.
-            return 'list' if self.view.others else 'open'
         # Un permiso se abre solo aunque esté compacta: hay que contestarlo.
         if self.settings['compact'] and self.view.pet != 'permission':
             return 'petit' if mode != 'hidden' or self.hover else 'hidden'
@@ -615,8 +779,8 @@ class Island:
                 mode = 'peek'
             elif mode == 'peek' and self.view.session:
                 mode = 'open'
-            if mode == 'open' and self.view.others:
-                mode = 'list'
+            if mode == 'open':
+                mode = 'board' if self.claude() else 'list' if self.view.others else 'open'
         return mode
 
     def extra(self, mode):
@@ -641,16 +805,21 @@ class Island:
         return self.wrap[1]
 
     def preview(self):
-        """Lo que está editando la sesión principal, si edita algo."""
-        return self.view.session.preview if self.view.session else None
+        """Lo que está editando la sesión que se ve (la de la cabecera o la de
+        la pestaña elegida), si edita algo."""
+        s = self.tab_session() if self.target() == 'board' else self.view.session
+        return s.preview if s else None
 
     def preview_h(self, mode):
         """Alto de la vista previa del código: cuando alguien abrió la isla a
-        mano, o cuando piden permiso para esa edición."""
+        mano, o cuando piden permiso para esa edición. En el tablero cede el
+        sitio al desglose y a la ficha de una alerta."""
         p = self.preview()
-        if not p or mode not in ('open', 'list', 'ask'):
+        if not p or mode not in ('open', 'list', 'ask', 'board'):
             return 0
         if not (self.view.ask or self.hover or self.expanded):
+            return 0
+        if mode == 'board' and (self.focused() or self.card_h(mode)):
             return 0
         lines = len(p.lines) + (1 if p.more else 0)
         return PREVIEW_HEAD + lines * CODE_LINE_H + 2 * PREVIEW_PAD
@@ -659,7 +828,9 @@ class Island:
         """Alto de la ficha de una alerta (su detalle y sus botones): cuando
         alguien la está leyendo, con el ratón encima o abierta a mano."""
         s = self.view.session
-        if not s or not s.card or mode not in ('open', 'list'):
+        if not s or not s.card or mode not in ('open', 'list', 'board'):
+            return 0
+        if mode == 'board' and self.focused():
             return 0
         # La de unas pruebas se ve sin pedirla mientras la isla está abierta
         # por ellas: para eso se abrió.
@@ -671,7 +842,7 @@ class Island:
     def pills_h(self, mode):
         """Alto de la franja de fuentes: solo cuando alguien abrió la isla a mano."""
         by_hand = self.expanded or self.hover
-        return PILLS_H if by_hand and mode in ('open', 'list') else 0
+        return PILLS_H if by_hand and mode in ('open', 'list', 'board') else 0
 
     def goal(self):
         """Tamaño al que va la isla: el del modo, más el detalle entero, las
@@ -680,11 +851,22 @@ class Island:
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
+        rows = len(self.rows_for(mode))
+        if mode == 'board':
+            # Mide lo mismo trabajen uno, dos o los cuatro: solo crece el desglose.
+            h = TABS_H + (FOCUS_H if self.focused() else BOARD_H) + BOARD_PAD
+            if rows:
+                h += LIST_PAD + ROW_H * min(ALERT_ROWS, rows)
+            return BOARD_W, h + more
         if mode == 'list':
             w, h = SIZES['open']
-            h += LIST_PAD + ROW_H * min(MAX_ROWS, len(self.view.others))
+            h += LIST_PAD + ROW_H * min(MAX_ROWS, rows)
         else:
             w, h = SIZES[mode]
+        if mode == 'peek':
+            # Asomada, con sitio para las caritas de los demás que trabajan.
+            minis = len(self.minis())
+            w += (6 + (MINI + 4) * ((minis + 1) // 2)) if minis else 0
         if prev:
             w, h = PREVIEW_W, h + (ASK_TALL if mode == 'ask' else 0)
         elif card:
@@ -849,91 +1031,34 @@ class Island:
         cr.clip()
 
         now = time.monotonic()
-        # Con lista o con el detalle entero, la cabecera (mascota y texto) se
-        # queda arriba y lo demás va debajo. El diseño dura hasta que la isla
-        # vuelve a su alto normal, para que la cabecera no brinque al cerrarse.
         mode = self.target()
-        extra = self.extra(mode)
         pills = self.pills_h(mode)
         prev = self.preview_h(mode)
         card = self.card_h(mode)
-        head = OPEN_H + extra           # dónde termina la cabecera
-        if mode == 'list' or (mode == 'open' and (extra or pills)) or prev or card:
-            self.list_layout = True
-        elif mode == 'ask' or h <= OPEN_H + 0.5:
-            self.list_layout = False
-        full_h, h = h, (min(h, OPEN_H) if self.list_layout else h)
-
-        # La mascota crece con la isla: en miniatura en la pastilla compacta,
-        # completa desde que la isla está asomada.
-        pet_size = clamp((h - 6) / (SIZES['peek'][1] - 6))
-        pet_alpha = clamp((h - 10) / 16)
-        if pet_alpha > 0 and pet_size > 0.1:
-            state, age = self.pet(now)
-            cx = x0 + min(w / 2, 12 + PET / 2)
-            # La capa intermedia solo hace falta mientras aparece o desaparece.
-            fading = pet_alpha < 1
-            if fading:
-                cr.push_group()
-            else:
-                cr.save()
-            cr.translate(cx, h / 2 + 5 * pet_size)
-            cr.scale(PET_SCALE * pet_size, PET_SCALE * pet_size)
-            mascot.draw(cr, state, age, now, tuple(self.look), now < self.blink_until)
-            if fading:
-                cr.pop_group_to_source()
-                cr.paint_with_alpha(pet_alpha)
-            else:
-                cr.restore()
-
-        # Con botones, el texto sube y deja la fila de abajo para ellos.
-        ask_alpha = clamp((full_h - SIZES['open'][1]) / 16) if self.view.ask else 0.0
-        mid = h / 2 - (h / 2 - 37) * ask_alpha
-        text_alpha = clamp((w - 220) / 160) * clamp((h - 50) / 30)
-        if text_alpha > 0 and self.title:
-            tx = x0 + 12 + PET + 10
-            right = x0 + w - 18
-            # A la derecha del título: cuántas sesiones hay y, si ya pesa, el
-            # contexto de la que se está mostrando.
-            title_right = right
-            best = self.view.session
-            notes = [(f'{self.view.count} sesiones', MUTED_COLOR[:3])] if self.view.count > 1 else []
-            if self.settings['pinned']:
-                notes.insert(0, ('fijada', rgb('accent')))
-            if best and best.context >= CONTEXT_SHOW:
-                notes.append((f'{best.context:.0f}%',
-                              rgb(self.colors[paint.context_role(best.context)])))
-            for text, color in notes:
-                badge = self._layout(cr, text, FONT_DETAIL)
-                title_right -= badge.get_pixel_size()[0]
-                cr.move_to(title_right, mid - 17)
-                cr.set_source_rgba(*color, text_alpha)
-                PangoCairo.show_layout(cr, badge)
-                title_right -= 12
-            title = self._layout(cr, self.title, FONT_TITLE, title_right - tx)
-            cr.move_to(tx, mid - 21)
-            cr.set_source_rgba(*TITLE_COLOR[:3], text_alpha)
-            PangoCairo.show_layout(cr, title)
-            detail = self._layout(cr, self.detail, FONT_DETAIL, right - tx,
-                                  DETAIL_LINES if extra else 1, self.markup(self.detail))
-            cr.move_to(tx, mid + 3)
-            self._show(cr, detail, text_alpha)
-        self.buttons = {}
-        if ask_alpha > 0 and text_alpha > 0:
-            self.draw_buttons(cr, x0 + w - 18, full_h - 14, ask_alpha * text_alpha)
+        self.buttons, self.rows, self.pills, self.hits = {}, [], [], []
+        self.tip = self.card_span = None
+        if mode == 'board':
+            full_h = h
+            text_alpha = clamp((w - 420) / 120) * clamp((h - 110) / 60)
+            body = FOCUS_H if self.focused() else BOARD_H
+            if text_alpha > 0:
+                self.draw_board(cr, x0, w, body, text_alpha, now)
+            head = TABS_H + body + BOARD_PAD
+            listed = True
+        else:
+            full_h, head, text_alpha = self.draw_head(cr, x0, w, h, mode, bool(prev or card or pills), now)
+            listed = self.list_layout and mode != 'ask'
+        below = clamp((full_h - head) / 20) * text_alpha
         if prev and full_h > head:
-            self.draw_preview(cr, x0, w, head, prev, clamp((full_h - head) / 20) * text_alpha)
-        self.card_span = None
+            self.draw_preview(cr, x0, w, head, prev, below)
         if card and full_h > head:
-            self.draw_card(cr, x0, w, head, card, clamp((full_h - head) / 20) * text_alpha)
+            self.draw_card(cr, x0, w, head, card, below)
         head += prev + card             # la lista va debajo de la vista previa o de la ficha
-        self.rows = []
-        if self.list_layout and self.view.others and mode != 'ask' and full_h > head:
-            self.draw_rows(cr, x0, w, head, clamp((full_h - head) / 20) * text_alpha)
-        self.pills = []
-        self.tip = None
+        rows = self.rows_for(mode)
+        if listed and rows and full_h > head:
+            self.draw_rows(cr, x0, w, head, below, rows, ALERT_ROWS if mode == 'board' else MAX_ROWS)
         if pills and full_h > head:
-            self.draw_pills(cr, x0, w, full_h, clamp((full_h - head) / 20) * text_alpha)
+            self.draw_pills(cr, x0, w, full_h, below)
         cr.restore()
         if edge:
             # El filo claro es lo que hace que el fondo translúcido se lea como vidrio.
@@ -946,17 +1071,415 @@ class Island:
         else:
             self.tip_key = None
 
-    def draw_rows(self, cr, x0, w, top, alpha):
+    def draw_head(self, cr, x0, w, h, mode, below, now):
+        """La cabecera de siempre: la mascota, «agente | proyecto», lo que
+        pasa y, si pide permiso, sus botones. Devuelve el alto de la isla,
+        dónde termina la cabecera y la opacidad del texto."""
+        # Con lista o con el detalle entero, la cabecera (mascota y texto) se
+        # queda arriba y lo demás va debajo. El diseño dura hasta que la isla
+        # vuelve a su alto normal, para que la cabecera no brinque al cerrarse.
+        extra = self.extra(mode)
+        head = OPEN_H + extra           # dónde termina la cabecera
+        if mode == 'list' or (mode == 'open' and extra) or below:
+            self.list_layout = True
+        elif mode == 'ask' or h <= OPEN_H + 0.5:
+            self.list_layout = False
+        full_h, h = h, (min(h, OPEN_H) if self.list_layout else h)
+
+        # La mascota crece con la isla: en miniatura en la pastilla compacta,
+        # completa desde que la isla está asomada.
+        pet_size = clamp((h - 6) / (SIZES['peek'][1] - 6))
+        pet_alpha = clamp((h - 10) / 16)
+        if pet_alpha > 0 and pet_size > 0.1:
+            state, age = self.pet(now)
+            # Asomada va al centro; con las caritas de los demás, a la izquierda.
+            cx = x0 + min(w / 2, 12 + PET / 2) if w > SIZES['peek'][0] + 4 else x0 + w / 2
+            # La capa intermedia solo hace falta mientras aparece o desaparece.
+            fading = pet_alpha < 1
+            if fading:
+                cr.push_group()
+            else:
+                cr.save()
+            cr.translate(cx, h / 2 + 5 * pet_size)
+            cr.scale(PET_SCALE * pet_size, PET_SCALE * pet_size)
+            mascot.draw(cr, state, age, now, tuple(self.look), now < self.blink_until,
+                        role=self.view.role)
+            if fading:
+                cr.pop_group_to_source()
+                cr.paint_with_alpha(pet_alpha)
+            else:
+                cr.restore()
+            if mode == 'peek':
+                self.draw_minis(cr, x0, w, h, pet_alpha * clamp((w - SIZES['peek'][0]) / 20))
+
+        # Con botones, el texto sube y deja la fila de abajo para ellos.
+        ask_alpha = clamp((full_h - SIZES['open'][1]) / 16) if self.view.ask else 0.0
+        mid = h / 2 - (h / 2 - 37) * ask_alpha
+        text_alpha = clamp((w - 220) / 160) * clamp((h - 50) / 30)
+        if text_alpha > 0 and self.title:
+            tx = x0 + 12 + PET + 10
+            right = x0 + w - 18
+            title_right = right
+            for text, color in self.head_notes():
+                badge = self._layout(cr, text, FONT_DETAIL)
+                title_right -= badge.get_pixel_size()[0]
+                cr.move_to(title_right, mid - 17)
+                cr.set_source_rgba(*color, text_alpha)
+                PangoCairo.show_layout(cr, badge)
+                title_right -= 12
+            # Una sesión se nombra «agente | proyecto»; una alerta, con su título.
+            text, markup = (self.who(self.agent_name, self.title, mascot.accent(self.role))
+                            if self.agent_name else (self.title, None))
+            title = self._layout(cr, text, FONT_TITLE, title_right - tx, markup=markup)
+            cr.move_to(tx, mid - 21)
+            # Opaco: la transparencia la pone `_show` sobre el texto entero.
+            cr.set_source_rgba(*TITLE_COLOR[:3], 1)
+            self._show(cr, title, text_alpha)
+            detail = self._layout(cr, self.detail, FONT_DETAIL, right - tx,
+                                  DETAIL_LINES if extra else 1, self.markup(self.detail))
+            cr.move_to(tx, mid + 3)
+            self._show(cr, detail, text_alpha)
+        if ask_alpha > 0 and text_alpha > 0:
+            self.draw_buttons(cr, x0 + w - 18, full_h - 14, ask_alpha * text_alpha)
+        return full_h, head, text_alpha
+
+    def draw_minis(self, cr, x0, w, h, alpha):
+        """Las caritas de los demás que trabajan, a la derecha de la mascota."""
+        minis = self.minis()
+        if alpha <= 0 or not minis:
+            return
+        left = x0 + SIZES['peek'][0] - 4
+        for i, (role, pet) in enumerate(minis):
+            col, row = divmod(i, 2)
+            rows = 2 if len(minis) - col * 2 > 1 else 1
+            y = h / 2 + 2 + (row - (rows - 1) / 2) * (MINI + 3)
+            self.face(cr, role, pet, left + col * (MINI + 4) + MINI / 2, y, MINI, alpha)
+
+    # ── el tablero ───────────────────────────────────────────────────────────
+
+    def face(self, cr, role, pet, x, y, size, alpha, now=None, age=0.0):
+        """Uno de la familia, de `size` de alto y centrado en (x, y). Con
+        `now` se mueve y mira al cursor; sin él, quieto."""
+        cr.push_group()
+        cr.translate(x, y + size * .015)
+        cr.scale(size / 253, size / 253)
+        if now is None:
+            mascot.draw(cr, pet, 0, 0, motion=0, role=role)
+        else:
+            mascot.draw(cr, pet, age, now, tuple(self.look), now < self.blink_until, role=role)
+        cr.pop_group_to_source()
+        cr.paint_with_alpha(alpha)
+
+    def put(self, cr, text, font, x, y, color, alpha, width=None, align=0.0, markup=None, lines=1):
+        """Pinta un texto con (x, y) arriba a la izquierda y devuelve su
+        ancho. `align` lo corre: .5 lo centra en x y 1 lo pega a x por la
+        derecha."""
+        layout = self._layout(cr, text, font, width, lines, markup)
+        tw = layout.get_pixel_size()[0]
+        cr.move_to(x - tw * align, y)
+        if markup:
+            cr.set_source_rgba(*color[:3], 1)
+            self._show(cr, layout, alpha)
+        else:
+            cr.set_source_rgba(*color[:3], alpha)
+            PangoCairo.show_layout(cr, layout)
+        return tw
+
+    def over(self, x, y, w, h):
+        px, py = self.pointer or (-1, -1)
+        return x <= px <= x + w and y <= py <= y + h
+
+    @staticmethod
+    def panel(cr, x, y, w, h, alpha, tint=None, over=False):
+        """Una tarjeta del tablero. Con `tint`, un velo de ese color que sube
+        desde abajo: de qué color es dice cómo está quien va dentro."""
+        mascot.rrect(cr, x, y, w, h, 16)
+        cr.set_source_rgba(1, 1, 1, (.085 if over else .05) * alpha)
+        cr.fill_preserve()
+        if tint:
+            r, g, b, _ = mascot.rgba(tint)
+            veil = cairo.RadialGradient(x + w / 2, y + h * 1.25, 4, x + w / 2, y + h * 1.25, h * 1.05)
+            veil.add_color_stop_rgba(0, r, g, b, .42 * alpha)
+            veil.add_color_stop_rgba(1, r, g, b, 0)
+            cr.set_source(veil)
+            cr.fill_preserve()
+        cr.new_path()
+
+    @staticmethod
+    def tab_dot(s):
+        """El color del punto de una pestaña: rojo si piden permiso, el del
+        que trabaja, amarillo si espera, verde si terminó; None en reposo."""
+        states = {m.state for m in s.team()}
+        if 'permission' in states:
+            return 'red'
+        if 'working' in states:
+            return mascot.accent(s.role)
+        return 'yellow' if 'waiting' in states else 'green' if 'done' in states else None
+
+    @staticmethod
+    def tab_label(s):
+        """El nombre de una sesión en su pestaña: el de su carpeta y, si lo
+        tiene, el que le puso Claude Code."""
+        return f'{s.proj} · {s.label or BG_TAG}' if s.label or s.kind == 'bg' else s.proj
+
+    def tab_labels(self):
+        """El nombre de cada pestaña. Dos sesiones que se llamarían igual (la
+        misma carpeta, sin nombre propio) se numeran desde la segunda."""
+        labels, seen = {}, {}
+        for s in self.tabs():
+            label = self.tab_label(s)
+            seen[label] = seen.get(label, 0) + 1
+            labels[s.sid] = label if seen[label] == 1 else f'{label} {seen[label]}'
+        return labels
+
+    def draw_board(self, cr, x0, w, body, alpha, now):
+        """El tablero: las pestañas y, de la sesión elegida, sus cuatro. Los
+        que trabajan van al frente y los libres a la banca; con los cuatro
+        trabajando son cuatro cuadros, y con ninguno, los cuatro en fila."""
+        s = self.tab_session()
+        self.draw_tabs(cr, x0, w, s, alpha)
+        left, top, width = x0 + BOARD_PAD, TABS_H, w - 2 * BOARD_PAD
+        focus = self.focused()
+        if focus:
+            self.draw_focus(cr, left, top, width, body, focus[1], s, alpha, now)
+            return
+        team = s.team()
+        front = [m for m in team if m.busy]
+        if not front or len(front) == len(team):
+            # Todos igual: en fila si están libres, en cuatro cuadros si trabajan.
+            cols = 2 if front else len(team)
+            cw = (width - (cols - 1) * BOARD_GAP) / cols
+            ch = (body - BOARD_GAP) / 2 if front else body
+            for i, member in enumerate(team):
+                self.draw_member(cr, s, member, left + (i % cols) * (cw + BOARD_GAP),
+                                 top + (i // cols) * (ch + BOARD_GAP), cw, ch, alpha, now)
+            return
+        stage = width - BENCH_W - BOARD_GAP
+        cw = (stage - (len(front) - 1) * BOARD_GAP) / len(front)
+        for i, member in enumerate(front):
+            self.draw_member(cr, s, member, left + i * (cw + BOARD_GAP), top, cw, body, alpha, now)
+        self.draw_bench(cr, s, [m for m in team if not m.busy], left + stage + BOARD_GAP, top,
+                        BENCH_W, body, alpha)
+
+    def draw_tabs(self, cr, x0, w, current, alpha):
+        """Una pestaña por sesión, y a la derecha las notas de la elegida."""
+        right = x0 + w - 18
+        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] else []
+        if current.context >= CONTEXT_SHOW:
+            notes.append((f'{current.context:.0f}%',
+                          rgb(self.colors[paint.context_role(current.context)])))
+        for text, color in notes:
+            right -= self.put(cr, text, FONT_DETAIL, right, 10, color, alpha, align=1) + 12
+        tabs, labels = self.tabs(), self.tab_labels()
+        x, y, th = x0 + 12, 6, 24
+        # Si no caben, se reparten el sitio y el nombre se corta.
+        room = max(40, (right - x) / len(tabs) - 4)
+        for s in tabs:
+            label = self._layout(cr, labels[s.sid], FONT_ROW, room - 28)
+            lw, lh = label.get_pixel_size()
+            tw = lw + 28
+            chosen = s is current
+            if chosen or self.over(x, y, tw, th):
+                mascot.rrect(cr, x, y, tw, th, th / 2)
+                cr.set_source_rgba(1, 1, 1, (.13 if chosen else .06) * alpha)
+                cr.fill()
+            color = self.tab_dot(s)
+            cr.new_sub_path()
+            cr.arc(x + 12, y + th / 2, 3.5 if color else 3, 0, 2 * math.pi)
+            if color:
+                cr.set_source_rgba(*mascot.rgba(color, alpha))
+                cr.fill()
+            else:
+                cr.set_source_rgba(*mascot.rgba('metal', .7 * alpha))
+                cr.set_line_width(1.5)
+                cr.stroke()
+            cr.move_to(x + 21, y + (th - lh) / 2)
+            cr.set_source_rgba(*(TITLE_COLOR if chosen else MUTED_COLOR)[:3], alpha)
+            PangoCairo.show_layout(cr, label)
+            self.hits.append(('tab', s.sid, x, y, tw, th))
+            x += tw + 4
+
+    def draw_member(self, cr, s, member, x, y, cw, ch, alpha, now):
+        """Uno de los cuatro en su tarjeta: su cara con el gesto de cómo está,
+        su nombre y sus últimos pasos. Si pide permiso, lo que quiere hacer
+        entero y los botones. Libre va apagado."""
+        busy, role = member.busy, member.role
+        tint = MEMBER_TINT.get(member.state) or mascot.accent(role)
+        self.panel(cr, x, y, cw, ch, alpha, tint if busy else None, busy and self.over(x, y, cw, ch))
+        if busy:
+            self.hits.append(('member', (s.sid, role), x, y, cw, ch))
+        # Cuatro acomodos según el sitio: en columna (tres al frente, o los
+        # cuatro libres), en cuadro (los cuatro trabajando), a medias (dos) y a
+        # lo ancho (uno). `sx` y `sw` son dónde van sus pasos.
+        quad, column = ch < 100, cw < 200 and ch >= 100
+        wide = cw >= 300 and not quad
+        if column:
+            size, fx, fy = 56, x + cw / 2, y + 42
+            tx, ty, tw = x + 12, y + 78, cw - 24
+            sx, sw = tx, tw
+        elif quad:
+            size, fx, fy = 54, x + 38, y + ch / 2 + 2
+            tx, ty, tw = x + 74, y + 9, cw - 86
+            sx, sw = tx, tw
+        elif wide:
+            size, fx, fy = 84, x + 56, y + ch / 2 + 4
+            tx, ty = x + 112, y + 16
+            tw = x + cw - 14 - tx
+            sx, sw = tx, tw
+        else:
+            # A medias: la cara arriba con el nombre al lado, y los pasos a todo lo ancho.
+            size, fx, fy = 56, x + 38, y + 40
+            tx, ty = x + 72, y + 18
+            tw = x + cw - 12 - tx
+            sx, sw = x + 14, cw - 28
+        asleep = role == MAIN_ROLE and not busy and not s.delegating
+        pet = MEMBER_PET.get(member.state, 'sleep' if asleep else 'idle')
+        self.face(cr, role, pet, fx, fy, size, alpha * (1 if busy else .35), now if busy else None,
+                  now - s.changed)
+        name_color = rgb(mascot.accent(role)) if busy else MUTED_COLOR
+        if column:
+            self.put(cr, member.name, FONT_ROW, x + cw / 2, ty, name_color, alpha, tw, .5)
+        else:
+            cr.new_sub_path()
+            cr.arc(tx + 4, ty + 8, 3.5, 0, 2 * math.pi)
+            cr.set_source_rgba(*mascot.rgba(tint if busy else 'metal', alpha * (1 if busy else .6)))
+            cr.fill()
+            took = elapsed(now - member.since) if member.state == 'working' and member.since else ''
+            if wide or quad:
+                # Cuánto lleva, a la derecha del nombre; a medias no cabe y va debajo.
+                took_w = self.put(cr, took, FONT_DETAIL, tx + tw, ty + 1, MUTED_COLOR, alpha, align=1) \
+                    if took else 0
+                self.put(cr, member.name, FONT_ROW, tx + 14, ty, name_color, alpha, tw - 22 - took_w)
+            else:
+                self.put(cr, member.name, FONT_ROW, tx + 14, ty, name_color, alpha, tw - 14)
+                if took:
+                    self.put(cr, took, FONT_DETAIL, tx + 14, ty + 19, MUTED_COLOR, alpha, tw - 14)
+        if not busy:
+            note = ('esperando' if s.delegating else 'en reposo') if role == MAIN_ROLE else 'libre'
+            self.put(cr, note, FONT_DETAIL, x + cw / 2 if column else tx + 14, ty + 20, MUTED_COLOR,
+                     alpha * .8, tw, .5 if column else 0)
+            return
+        if member.state == 'permission':
+            # Lo que quiere hacer, entero: hay que leerlo antes de contestar.
+            asks = s.ask is not None
+            top = ty + 24 if wide or quad else y + 76 if not column else ty + 22
+            room = y + ch - top - (BUTTON_H + 14 if asks else 8)
+            self.put(cr, member.detail, FONT_DETAIL, sx, top, rgb(self.colors['arg']), alpha, sw,
+                     markup=self.markup(member.detail), lines=max(1, int(room // 15)))
+            if asks:
+                bw = min(BUTTON_W, (cw - 24 - BUTTON_GAP) / 2)
+                self.draw_buttons(cr, x + cw - 12, y + ch - 10, alpha, bw)
+            return
+        self.draw_steps(cr, member, sx, y + ch - 12, sw, 2 if quad else 4 if wide else 3,
+                        19 if quad or column else 24, alpha)
+
+    def draw_steps(self, cr, member, x, bottom, width, count, gap, alpha):
+        """Los últimos pasos de uno, hacia arriba desde `bottom`: los de antes
+        apagados y con palomita, el de ahora resaltado."""
+        steps = [text for text, _at in member.steps[-count:]] or ['Arrancando…']
+        marks = {'done': ('✓', 'green'), 'waiting': ('?', 'yellow')}
+        for i, text in enumerate(steps):
+            y = bottom - (len(steps) - i) * gap
+            last = i == len(steps) - 1
+            mark, color = marks.get(member.state, ('›', None)) if last else ('✓', None)
+            ink = mascot.rgba(color)[:3] if color else (TITLE_COLOR if last else MUTED_COLOR)
+            self.put(cr, mark, FONT_DETAIL, x, y, ink, alpha * (1 if last else .7))
+            if last:
+                self.put(cr, text, FONT_DETAIL, x + 16, y, TITLE_COLOR, alpha, width - 16,
+                         markup=self.markup(text))
+            else:
+                self.put(cr, text, FONT_DETAIL, x + 16, y, MUTED_COLOR, alpha * .8, width - 16)
+
+    def draw_bench(self, cr, s, members, x, y, w, h, alpha):
+        """La banca: los que no trabajan, en chiquito."""
+        self.panel(cr, x, y, w, h, alpha)
+        step = h / len(members)
+        for i, member in enumerate(members):
+            cy = y + step * i + step / 2
+            self.face(cr, member.role, 'idle', x + 26, cy + 1, 34, alpha * .4)
+            self.put(cr, member.role, FONT_ROW, x + 48, cy - 15, MUTED_COLOR, alpha, w - 54)
+            waits = member.role == MAIN_ROLE and s.delegating
+            self.put(cr, 'esperando' if waits else 'libre', FONT_DETAIL, x + 48, cy + 1, MUTED_COLOR,
+                     alpha * .7, w - 54)
+
+    def draw_focus(self, cr, x, y, width, h, member, s, alpha, now):
+        """El desglose de uno: a la izquierda quién es y cuánto lleva; en
+        medio todos sus pasos y lo que tardó cada uno; a la derecha, los
+        demás en miniatura. Un clic a la izquierda vuelve al tablero."""
+        cw = width - FOCUS_MINIS
+        role = member.role
+        tint = MEMBER_TINT.get(member.state) or mascot.accent(role)
+        self.panel(cr, x, y, cw, h, alpha, tint if member.busy else None)
+        cx = x + FOCUS_SIDE / 2
+        pet = MEMBER_PET.get(member.state, 'idle')
+        self.face(cr, role, pet, cx, y + 64, 84, alpha, now, now - s.changed)
+        self.put(cr, member.name, FONT_ROW, cx, y + 116, rgb(mascot.accent(role)), alpha,
+                 FOCUS_SIDE - 12, .5)
+        self.put(cr, self.tab_labels()[s.sid], FONT_DETAIL, cx, y + 134, MUTED_COLOR, alpha,
+                 FOCUS_SIDE - 12, .5)
+        n = len(member.steps)
+        took = f' · {elapsed(now - member.since)}' if member.busy and member.since else ''
+        self.put(cr, f'{n} paso{"" if n == 1 else "s"}{took}', FONT_DETAIL, cx, y + 156,
+                 rgb(self.colors['arg']), alpha, FOCUS_SIDE - 12, .5)
+        # Al pie, dos enlaces: al pane de la sesión y de vuelta al tablero.
+        links = ([('jump', s.sid, 'ir al pane ›')] if s.pane else []) + [('back', None, '‹ volver')]
+        for i, (kind, key, label) in enumerate(reversed(links)):
+            ly = y + h - 32 - i * 24
+            over = self.over(x + 8, ly, FOCUS_SIDE - 16, 22)
+            self.put(cr, label, FONT_DETAIL, cx, ly + 4, TITLE_COLOR if over else MUTED_COLOR, alpha,
+                     FOCUS_SIDE - 16, .5)
+            self.hits.append((kind, key, x + 8, ly, FOCUS_SIDE - 16, 22))
+        self.hits.append(('back', None, x, y, FOCUS_SIDE, h))
+        # Los pasos: los últimos que caben, y arriba cuántos hubo antes.
+        shown = member.steps[-FOCUS_STEPS:]
+        hidden = n - len(shown)
+        if hidden:
+            shown = member.steps[-(FOCUS_STEPS - 1):]
+            hidden = n - len(shown)
+        left, right = x + FOCUS_SIDE + 8, x + cw - 14
+        ty = y + 14
+        if hidden:
+            self.put(cr, f'⋯ {hidden} paso{"" if hidden == 1 else "s"} antes', FONT_DETAIL, left + 20, ty,
+                     MUTED_COLOR, alpha * .8)
+            ty += 26
+        marks = {'done': ('✓', 'green'), 'waiting': ('?', 'yellow'), 'permission': ('›', 'red')}
+        for i, (text, at) in enumerate(shown):
+            last = i == len(shown) - 1
+            if last:
+                mascot.rrect(cr, left - 4, ty - 5, right - left + 8, 24, 8)
+                cr.set_source_rgba(1, 1, 1, .07 * alpha)
+                cr.fill()
+                mark, color = marks.get(member.state, ('›', None))
+                spent = 'ahora' if member.busy else ''
+            else:
+                mark, color = '✓', 'green'
+                spent = elapsed(shown[i + 1][1] - at)
+            ink = mascot.rgba(color)[:3] if color else TITLE_COLOR
+            self.put(cr, mark, FONT_DETAIL, left + 2, ty, ink, alpha * (1 if last else .8))
+            sw = self.put(cr, spent, FONT_DETAIL, right, ty, MUTED_COLOR, alpha, align=1) if spent else 0
+            self.put(cr, text, FONT_DETAIL, left + 20, ty, TITLE_COLOR, alpha * (1 if last else .85),
+                     right - sw - 12 - (left + 20), markup=self.markup(text))
+            ty += 26
+        # Los demás siguen a la vista; un clic en uno abre el suyo.
+        others = [m for m in s.team() if m.role != role]
+        mx = x + cw + FOCUS_MINIS / 2 + 2
+        for i, other in enumerate(others):
+            my = y + 30 + i * 40
+            self.face(cr, other.role, MEMBER_PET.get(other.state, 'idle'), mx, my, 28,
+                      alpha * (1 if other.busy else .35))
+            if other.steps:
+                self.hits.append(('member', (s.sid, other.role), mx - 16, my - 18, 32, 36))
+
+    def draw_rows(self, cr, x0, w, top, alpha, rows, limit):
+        """Una fila por alerta: su punto, de quién es y qué pasa."""
         left, right = x0 + 14, x0 + w - 14
         cr.set_source_rgba(1, 1, 1, .08 * alpha)
         cr.rectangle(left + 4, top - 1, right - left - 8, 1)
         cr.fill()
-        px, py = self.pointer or (-1, -1)
-        others = self.view.others
         # Si no caben todas, la última fila dice cuántas faltan.
-        shown = others if len(others) <= MAX_ROWS else others[:MAX_ROWS - 1]
-        if len(others) > len(shown):
-            more = self._layout(cr, f'y {len(others) - len(shown)} más', FONT_DETAIL)
+        shown = rows if len(rows) <= limit else rows[:limit - 1]
+        if len(rows) > len(shown):
+            more = self._layout(cr, f'y {len(rows) - len(shown)} más', FONT_DETAIL)
             y = top + 3 + len(shown) * ROW_H
             cr.move_to(left + 28, y + (ROW_H - more.get_pixel_size()[1]) / 2)
             cr.set_source_rgba(*MUTED_COLOR[:3], alpha)
@@ -964,7 +1487,8 @@ class Island:
         for i, s in enumerate(shown):
             y = top + 3 + i * ROW_H
             self.rows.append((s, y, ROW_H))
-            if left <= px <= right and y <= py < y + ROW_H:
+            # La que tiene la ficha abierta se queda marcada.
+            if self.over(left, y, right - left, ROW_H - 1) or (s.card and s is self.view.session):
                 mascot.rrect(cr, left, y + 1, right - left, ROW_H - 2, 8)
                 cr.set_source_rgba(1, 1, 1, .07 * alpha)
                 cr.fill()
@@ -987,23 +1511,6 @@ class Island:
             PangoCairo.show_layout(cr, name)
             dx = left + 28 + ROW_NAME_W + 10
             end = right - 10
-            if s.context >= CONTEXT_SHOW:
-                pct = self._layout(cr, f'{s.context:.0f}%', FONT_DETAIL)
-                pw, ph = pct.get_pixel_size()
-                end -= pw
-                cr.move_to(end, y + (ROW_H - ph) / 2)
-                cr.set_source_rgba(*rgb(self.colors[paint.context_role(s.context)]), alpha)
-                PangoCairo.show_layout(cr, pct)
-                end -= 10
-            if s.kind == 'bg':
-                # No tiene terminal: es lo que la distingue de otra del mismo repo.
-                tag = self._layout(cr, BG_TAG, FONT_DETAIL)
-                tw, th = tag.get_pixel_size()
-                end -= tw
-                cr.move_to(end, y + (ROW_H - th) / 2)
-                cr.set_source_rgba(*MUTED_COLOR[:3], alpha)
-                PangoCairo.show_layout(cr, tag)
-                end -= 10
             if s.detail:
                 detail = self._layout(cr, s.detail, FONT_DETAIL, end - dx, markup=self.markup(s.detail))
             else:
@@ -1226,27 +1733,26 @@ class Island:
                 PangoCairo.show_layout(cr, what)
             ty += step
 
-    def draw_buttons(self, cr, right, bottom, alpha):
+    def draw_buttons(self, cr, right, bottom, alpha, bw=BUTTON_W):
         y = bottom - BUTTON_H
-        self.draw_button(cr, 'allow', 'Permitir', right - BUTTON_W, y, True, alpha)
-        self.draw_button(cr, 'deny', 'Denegar', right - 2 * BUTTON_W - BUTTON_GAP, y, False, alpha)
+        self.draw_button(cr, 'allow', 'Permitir', right - bw, y, True, alpha, bw)
+        self.draw_button(cr, 'deny', 'Denegar', right - 2 * bw - BUTTON_GAP, y, False, alpha, bw)
 
-    def draw_button(self, cr, key, label, x, y, primary, alpha):
+    def draw_button(self, cr, key, label, x, y, primary, alpha, bw=BUTTON_W):
         """Un botón de la isla. El principal va relleno; los demás, apenas marcados."""
         bg, fg, fill = (ALLOW_BG, ALLOW_FG, .92) if primary else (DENY_BG, DENY_FG, .10)
-        self.buttons[key] = (x, y, BUTTON_W, BUTTON_H)
-        px, py = self.pointer or (-1, -1)
-        over = x <= px <= x + BUTTON_W and y <= py <= y + BUTTON_H
+        self.buttons[key] = (x, y, bw, BUTTON_H)
+        over = self.over(x, y, bw, BUTTON_H)
         r = BUTTON_H / 2
         cr.new_sub_path()
         cr.arc(x + r, y + r, r, math.pi / 2, 3 * math.pi / 2)
-        cr.arc(x + BUTTON_W - r, y + r, r, -math.pi / 2, math.pi / 2)
+        cr.arc(x + bw - r, y + r, r, -math.pi / 2, math.pi / 2)
         cr.close_path()
         cr.set_source_rgba(*bg, min(1, fill + (.08 if over else 0)) * alpha)
         cr.fill()
-        layout = self._layout(cr, label, FONT_BUTTON, BUTTON_W - 12)
+        layout = self._layout(cr, label, FONT_BUTTON, bw - 12)
         lw, lh = layout.get_pixel_size()
-        cr.move_to(x + (BUTTON_W - lw) / 2, y + (BUTTON_H - lh) / 2)
+        cr.move_to(x + (bw - lw) / 2, y + (BUTTON_H - lh) / 2)
         cr.set_source_rgba(*fg, alpha)
         PangoCairo.show_layout(cr, layout)
 
@@ -1300,9 +1806,10 @@ class Island:
             if not (bx <= x <= bx + bw and by <= y <= by + bh):
                 continue
             if key in ('allow', 'deny'):
-                if not self.view.ask:
+                asking = self.asking()
+                if asking is None:
                     continue
-                self.model.decide(self.view.session, key == 'allow')
+                self.model.decide(asking, key == 'allow')
                 self.refresh()
             else:
                 self.act(self.view.session, key)
@@ -1329,12 +1836,38 @@ class Island:
                 else:
                     self.go(s)
                 return
-        if self.rows and y > self.rows[0][1]:
+        for kind, key, hx, hy, hw, hh in self.hits:
+            if hx <= x <= hx + hw and hy <= y <= hy + hh:
+                self.on_hit(kind, key)
+                return
+        if self.target() == 'board' or (self.rows and y > self.rows[0][1]):
             return
         if x < x0 + 12 + PET + 4:
             self.poke()
         elif self.view.session:
             self.go(self.view.session)
+
+    def on_hit(self, kind, key):
+        """Un clic en el tablero: en una pestaña, en uno de los cuatro o en
+        los enlaces de un desglose."""
+        if kind == 'tab':
+            if key == self.tab:
+                # La elegida ya se ve: el clic lleva a su pane, como antes el de la cabecera.
+                s = self.tab_session()
+                if s is not None:
+                    self.go(s)
+                return
+            self.tab, self.focus = key, None
+        elif kind == 'member':
+            self.focus = key
+        elif kind == 'back':
+            self.focus = None
+        elif kind == 'jump':
+            s = self.model.sessions.get(key)
+            if s is not None:
+                self.go(s)
+            return
+        self.ensure_tick()
 
     def go(self, s):
         """Clic en una sesión: salta a su pane. En una alerta abre su URL y la descarta."""

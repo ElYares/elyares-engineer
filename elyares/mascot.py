@@ -1,8 +1,19 @@
-"""Dibujo de ElYares con cairo.
+"""Dibujo de ElYares y su familia con cairo.
 
 Es el mismo dibujo del prototipo web, pasado de canvas a cairo. Todo está en
 unidades propias: la cara mide unos 160 de ancho y la figura completa, con la
-antena, va de y=-130 a y=+118. Quien llama traslada y escala.
+antena, va de y=-130 a y=+123. Quien llama traslada y escala.
+
+Son cuatro personajes con la misma cara, las mismas gafas, la misma antena y
+los mismos gestos. Cada uno pone lo suyo en capas: lo que lleva en la cabeza
+(`HATS`), lo que asoma detrás de la cara (`BACK`) o delante de las gafas
+(`FRONT`), lo que trae en las manos al trabajar (`PROPS`) y su color
+(`ACCENTS`).
+
+    engineer    el de siempre: gorra al revés y laptop; el color es el del tema
+    architect   casco de obra, lápiz en la oreja y un plano
+    auditor     cachucha de frente con </>, camisa y gafete, y un clipboard
+    reviewer    visera de editor, lápiz rojo y una lupa sobre el código
 """
 
 import math
@@ -21,11 +32,21 @@ COLORS = {
 
 DEFAULT_ACCENT = COLORS['accent']
 
+ROLES = ('engineer', 'architect', 'auditor', 'reviewer')
+# El color de cada personaje: la antena mientras trabaja y su punto en la lista.
+# Ni ámbar, ni rojo, ni verde: esos ya dicen permiso, problema y terminado.
+ACCENTS = {'architect': '#22c7dd', 'auditor': '#9a6bff', 'reviewer': '#ff6fb5'}
+
 
 def set_accent(color):
     """Color de la antena y del foco de la laptop mientras trabaja, y del punto
     de "trabajando" en la lista. None vuelve al azul de siempre."""
     COLORS['accent'] = color or DEFAULT_ACCENT
+
+
+def accent(role):
+    """El color de un personaje, en hexadecimal: el suyo, o el del tema si es el engineer."""
+    return ACCENTS.get(role, COLORS['accent'])
 
 
 def rgba(color, alpha=1.0):
@@ -156,15 +177,19 @@ BLUSH = {'idle': .22, 'working': .12, 'done': .5, 'annoyed': .55, 'confused': .1
          'dizzy': .3, 'sleep': .25, 'permission': 0}
 
 
-def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=1.0):
+def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=1.0,
+         role='engineer'):
     """Dibuja a ElYares centrado en (0, 0).
 
     state: idle | working | permission | done | confused | annoyed | dizzy | sleep
     age:   segundos desde que entró al estado (para saltos y aplastones)
     t:     reloj en segundos (para respirar, parpadear la antena, etc.)
     look:  hacia dónde mira, cada eje en -1..1
+    role:  qué personaje de la familia es (`ROLES`); uno desconocido es el engineer
     """
     st = state
+    if role not in ROLES:
+        role = 'engineer'
     cr.save()
     # arc() une con una línea desde el punto actual: se arranca sin path
     cr.new_path()
@@ -201,6 +226,9 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
     cr.scale(sx, sy)
     cr.translate(0, -100)
 
+    if role in BACK:
+        BACK[role](cr)
+
     # orejas
     for g in (-1, 1):
         ellipse(cr, g * 78, 40, 17, 20)
@@ -230,63 +258,7 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
         cr.close_path()
         fill(cr, 'hair')
 
-    # gorra al revés, de malla
-    cap_path(cr)
-    fill(cr, 'mesh')
-    cr.save()
-    cap_path(cr)
-    cr.clip()
-    cg = cairo.LinearGradient(0, -80, 0, 12)
-    cg.add_color_stop_rgba(0, 1, 1, 1, .38)
-    cg.add_color_stop_rgba(1, 20 / 255, 40 / 255, 110 / 255, .28)
-    cr.set_source(cg)
-    cr.paint()
-    cr.set_source(_mesh_pattern())
-    cr.paint()
-    cr.move_to(0, -72)
-    cr.line_to(0, -30)
-    stroke(cr, 3)
-    cr.move_to(-40, 6)
-    cr.curve_to(-42, -46, 42, -46, 40, 6)
-    cr.close_path()
-    fill(cr, 'hair', preserve=True)
-    stroke(cr, 4)
-    cr.restore()
-    cap_path(cr)
-    stroke(cr, 5.5)
-
-    # copete que sale por la abertura
-    cr.new_path()
-    cr.move_to(-32, -16)
-    quad(cr, -44, -28, -48, -40); quad(cr, -36, -37, -26, -31)
-    quad(cr, -32, -48, -27, -60); quad(cr, -16, -48, -10, -39)
-    quad(cr, -8, -54, -2, -62);   quad(cr, 7, -52, 8, -39)
-    quad(cr, 16, -52, 25, -58);   quad(cr, 26, -44, 22, -33)
-    quad(cr, 34, -38, 43, -43);   quad(cr, 38, -28, 32, -16)
-    cr.close_path()
-    fill(cr, 'hair', preserve=True)
-    stroke(cr, 3)
-    cr.move_to(-22, -34); quad(cr, -24, -46, -26, -55)
-    cr.move_to(-1, -40);  quad(cr, -1, -50, -2, -57)
-    cr.move_to(14, -37);  quad(cr, 18, -46, 22, -52)
-    cr.set_source_rgba(1, 1, 1, .28)
-    cr.set_line_width(2.2)
-    cr.stroke()
-
-    # banda inferior y correa con hoyitos
-    cr.move_to(-78, 8)
-    quad(cr, 0, 20, 78, 8)
-    cr.line_to(76, -4)
-    quad(cr, 0, 8, -76, -4)
-    cr.close_path()
-    fill(cr, 'band', preserve=True)
-    stroke(cr, 4.5)
-    rrect(cr, -40, -13, 80, 13, 5)
-    fill(cr, 'strap', preserve=True)
-    stroke(cr, 3.5)
-    for x in (-30, -16, -6, 4, 14, 24):
-        cr.arc(x, -6.5, 2.8 if x == -30 else 2.1, 0, TAU)
-        fill(cr, 'line')
+    HATS[role](cr)
 
     # antena
     cr.move_to(0, -66)
@@ -300,7 +272,7 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
     stroke(cr, 3.5)
 
     if st in ('permission', 'working'):
-        col = 'red' if st == 'permission' else 'accent'
+        col = 'red' if st == 'permission' else accent(role)
         sp = 1.6 if st == 'permission' else 0.9
         for k in range(3):
             p = (t * sp * motion + k / 3) % 1
@@ -310,7 +282,7 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
 
     ball, glow = 'face', 0.0
     if st == 'working':
-        ball, glow = 'accent', 10 + 8 * math.sin(t * 5)
+        ball, glow = accent(role), 10 + 8 * math.sin(t * 5)
     elif st == 'permission':
         on = (t * 2.6) % 1 < 0.55
         ball, glow = ('red', 22) if on else ('red_dim', 0)
@@ -402,7 +374,8 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
         for x, y in eyes:
             pac(x + ox, y + oy, r, blink_sy)
 
-    # gafas
+    # gafas: el armazón es más delgado en quien lo lleva discreto
+    frame = FRAMES.get(role, 1)
     for x, y in ((-68, 12), (10, 12)):
         rrect(cr, x, y, 58, 44, 13)
         cr.set_source_rgba(200 / 255, 226 / 255, 1, .28)
@@ -418,16 +391,19 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
         cr.fill()
         cr.restore()
         rrect(cr, x, y, 58, 44, 13)
-        stroke(cr, 7)
+        stroke(cr, 7 * frame)
     cr.move_to(-10, 26)
     quad(cr, 0, 21, 10, 26)
-    stroke(cr, 6)
+    stroke(cr, 6 * frame)
     cr.move_to(-68, 24); cr.line_to(-80, 22)
     cr.move_to(68, 24);  cr.line_to(80, 22)
-    stroke(cr, 5)
+    stroke(cr, 5 * frame)
+
+    if role in FRONT:
+        FRONT[role](cr)
 
     # cachetes
-    blush = BLUSH.get(st, .2)
+    blush = BLUSH.get(st, .2) * PALE.get(role, 1)
     if blush > 0:
         for g in (-1, 1):
             ellipse(cr, g * 56, 68, 11, 6.5)
@@ -483,22 +459,9 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
         cr.arc(0, 56, 22, 0.28 * math.pi, 0.72 * math.pi)
         stroke(cr, 5)
 
-    # laptop mini mientras trabaja
+    # lo que trae en las manos mientras trabaja
     if st == 'working':
-        rrect(cr, -32, 86, 64, 22, 4)
-        fill(cr, 'laptop', preserve=True)
-        stroke(cr, 3.5)
-        cr.arc(0, 97, 4, 0, TAU)
-        fill(cr, 'accent')
-        rrect(cr, -42, 106, 84, 8, 3)
-        fill(cr, 'metal', preserve=True)
-        stroke(cr, 3.5)
-        b1 = -abs(math.sin(t * 13)) * 5 * motion
-        b2 = -abs(math.sin(t * 13 + 1.6)) * 5 * motion
-        for x, b in ((-26, b1), (26, b2)):
-            cr.arc(x, 104 + b, 7.5, 0, TAU)
-            fill(cr, 'face', preserve=True)
-            stroke(cr, 3.5)
+        PROPS[role](cr, t, motion)
 
     # extras flotantes
     cr.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
@@ -539,3 +502,413 @@ def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=
 
     cr.new_path()
     cr.restore()
+
+
+# ── engineer ─────────────────────────────────────────────────────────────────
+
+def _hands(cr, t, motion, xs, y=104):
+    """Las manos, tecleando."""
+    for i, x in enumerate(xs):
+        b = -abs(math.sin(t * 13 + i * 1.6)) * 5 * motion
+        cr.arc(x, y + b, 7.5, 0, TAU)
+        fill(cr, 'face', preserve=True)
+        stroke(cr, 3.5)
+
+
+def _cap(cr):
+    # gorra al revés, de malla
+    cap_path(cr)
+    fill(cr, 'mesh')
+    cr.save()
+    cap_path(cr)
+    cr.clip()
+    cg = cairo.LinearGradient(0, -80, 0, 12)
+    cg.add_color_stop_rgba(0, 1, 1, 1, .38)
+    cg.add_color_stop_rgba(1, 20 / 255, 40 / 255, 110 / 255, .28)
+    cr.set_source(cg)
+    cr.paint()
+    cr.set_source(_mesh_pattern())
+    cr.paint()
+    cr.move_to(0, -72)
+    cr.line_to(0, -30)
+    stroke(cr, 3)
+    cr.move_to(-40, 6)
+    cr.curve_to(-42, -46, 42, -46, 40, 6)
+    cr.close_path()
+    fill(cr, 'hair', preserve=True)
+    stroke(cr, 4)
+    cr.restore()
+    cap_path(cr)
+    stroke(cr, 5.5)
+
+    # copete que sale por la abertura
+    cr.new_path()
+    cr.move_to(-32, -16)
+    quad(cr, -44, -28, -48, -40); quad(cr, -36, -37, -26, -31)
+    quad(cr, -32, -48, -27, -60); quad(cr, -16, -48, -10, -39)
+    quad(cr, -8, -54, -2, -62);   quad(cr, 7, -52, 8, -39)
+    quad(cr, 16, -52, 25, -58);   quad(cr, 26, -44, 22, -33)
+    quad(cr, 34, -38, 43, -43);   quad(cr, 38, -28, 32, -16)
+    cr.close_path()
+    fill(cr, 'hair', preserve=True)
+    stroke(cr, 3)
+    cr.move_to(-22, -34); quad(cr, -24, -46, -26, -55)
+    cr.move_to(-1, -40);  quad(cr, -1, -50, -2, -57)
+    cr.move_to(14, -37);  quad(cr, 18, -46, 22, -52)
+    cr.set_source_rgba(1, 1, 1, .28)
+    cr.set_line_width(2.2)
+    cr.stroke()
+
+    # banda inferior y correa con hoyitos
+    cr.move_to(-78, 8)
+    quad(cr, 0, 20, 78, 8)
+    cr.line_to(76, -4)
+    quad(cr, 0, 8, -76, -4)
+    cr.close_path()
+    fill(cr, 'band', preserve=True)
+    stroke(cr, 4.5)
+    rrect(cr, -40, -13, 80, 13, 5)
+    fill(cr, 'strap', preserve=True)
+    stroke(cr, 3.5)
+    for x in (-30, -16, -6, 4, 14, 24):
+        cr.arc(x, -6.5, 2.8 if x == -30 else 2.1, 0, TAU)
+        fill(cr, 'line')
+
+
+def _laptop(cr, t, motion):
+    rrect(cr, -32, 86, 64, 22, 4)
+    fill(cr, 'laptop', preserve=True)
+    stroke(cr, 3.5)
+    cr.arc(0, 97, 4, 0, TAU)
+    fill(cr, 'accent')
+    rrect(cr, -42, 106, 84, 8, 3)
+    fill(cr, 'metal', preserve=True)
+    stroke(cr, 3.5)
+    _hands(cr, t, motion, (-26, 26))
+
+
+# ── architect ────────────────────────────────────────────────────────────────
+
+def _pencil(cr, x, y, rot, body):
+    """Un lápiz detrás de la oreja, con la punta hacia arriba."""
+    cr.save()
+    cr.translate(x, y)
+    cr.rotate(rot)
+    cr.new_path()
+    rrect(cr, -4.5, -22, 9, 46, 2)
+    fill(cr, body, preserve=True)
+    stroke(cr, 3)
+    rrect(cr, -4.5, 22, 9, 8, 2)
+    fill(cr, '#ff9db0', preserve=True)
+    stroke(cr, 3)
+    cr.move_to(-4.5, -22)
+    cr.line_to(0, -37)
+    cr.line_to(4.5, -22)
+    cr.close_path()
+    fill(cr, '#f1d6a8', preserve=True)
+    stroke(cr, 3)
+    cr.move_to(-2, -30.5)
+    cr.line_to(0, -37)
+    cr.line_to(2, -30.5)
+    cr.close_path()
+    fill(cr, 'line')
+    cr.restore()
+
+
+def _hardhat(cr):
+    def dome():
+        cr.new_path()
+        cr.move_to(-76, 4)
+        cr.curve_to(-82, -96, 82, -96, 76, 4)
+        quad(cr, 0, 14, -76, 4)
+        cr.close_path()
+
+    dome()
+    g = cairo.LinearGradient(0, -74, 0, 10)
+    g.add_color_stop_rgba(0, *rgba('#5fe0f0'))
+    g.add_color_stop_rgba(1, *rgba('#149bb3'))
+    cr.set_source(g)
+    cr.fill()
+    cr.save()
+    dome()
+    cr.clip()
+    # las costillas del casco y un brillo
+    for g in (-1, 1):
+        cr.move_to(g * 30, -76)
+        quad(cr, g * 46, -36, g * 44, 10)
+        stroke(cr, 3.5, alpha=.45)
+    rrect(cr, -11, -80, 22, 96, 9)
+    fill(cr, '#9cf0fb', preserve=True)
+    stroke(cr, 4)
+    cr.move_to(-56, -30)
+    quad(cr, -50, -54, -32, -62)
+    cr.set_source_rgba(1, 1, 1, .55)
+    cr.set_line_width(5)
+    cr.stroke()
+    cr.restore()
+    dome()
+    stroke(cr, 5.5)
+    # ala
+    cr.new_path()
+    rrect(cr, -93, -3, 186, 17, 8.5)
+    fill(cr, '#27c3d9', preserve=True)
+    stroke(cr, 5)
+    cr.move_to(-80, 2)
+    cr.line_to(80, 2)
+    cr.set_source_rgba(1, 1, 1, .4)
+    cr.set_line_width(3)
+    cr.stroke()
+
+
+def _blueprint(cr, t, motion):
+    cr.new_path()
+    rrect(cr, -44, 86, 88, 28, 3)
+    fill(cr, '#2a6fdb', preserve=True)
+    stroke(cr, 3.5)
+    cr.rectangle(-30, 92, 26, 16)
+    cr.move_to(-30, 100); cr.line_to(-4, 100)
+    cr.move_to(-17, 92);  cr.line_to(-17, 108)
+    cr.move_to(6, 94);    cr.line_to(34, 94)
+    cr.move_to(6, 100);   cr.line_to(26, 100)
+    cr.move_to(6, 106);   cr.line_to(34, 106)
+    cr.set_source_rgba(1, 1, 1, .85)
+    cr.set_line_width(1.8)
+    cr.stroke()
+    # los rollos de los extremos
+    for g in (-1, 1):
+        ellipse(cr, g * 45, 100, 5.5, 15)
+        fill(cr, '#6ea2f5', preserve=True)
+        stroke(cr, 3.5)
+    _hands(cr, t, motion, (-56, 56))
+
+
+# ── auditor ──────────────────────────────────────────────────────────────────
+
+def _collar(cr):
+    """Cuello de camisa azul claro, con el gafete colgado."""
+    for g in (-1, 1):
+        cr.new_path()
+        cr.move_to(g * 40, 88)
+        cr.line_to(0, 99)
+        cr.line_to(g * 19, 121)
+        cr.line_to(g * 54, 103)
+        cr.close_path()
+        fill(cr, '#cfe2ff', preserve=True)
+        stroke(cr, 4)
+    for g in (-1, 1):
+        cr.move_to(g * 34, 92)
+        cr.line_to(0, 114)
+        stroke(cr, 10, preserve=True)
+        stroke(cr, 6, ACCENTS['auditor'])
+    cr.new_path()
+    rrect(cr, -12, 106, 24, 19, 3.5)
+    fill(cr, 'face', preserve=True)
+    stroke(cr, 3.5)
+    rrect(cr, -12, 106, 24, 7, 3)
+    fill(cr, ACCENTS['auditor'])
+    cr.arc(-5, 119, 2.6, 0, TAU)
+    fill(cr, 'metal')
+    cr.move_to(0, 117.5)
+    cr.line_to(8, 117.5)
+    cr.move_to(0, 121)
+    cr.line_to(6, 121)
+    stroke(cr, 1.6, 'metal')
+
+
+def _front_cap(cr):
+    """Cachucha negra con la visera al frente y el icono </> en la copa."""
+    # sombra de barba, de la patilla al mentón
+    cr.save()
+    squircle(cr, 0, 36, 80, 66, 2.7)
+    cr.clip()
+    cr.rectangle(-90, 30, 180, 100)
+    cr.clip()
+    cr.rectangle(-100, -100, 200, 300)
+    ellipse(cr, 0, 31, 74, 51)
+    cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+    fill(cr, '#6f7d99', .32)
+    cr.restore()
+
+    def crown():
+        cr.new_path()
+        cr.move_to(-79, 2)
+        cr.curve_to(-86, -98, 86, -98, 79, 2)
+        quad(cr, 0, -16, -79, 2)
+        cr.close_path()
+
+    # No es negro puro: arriba aclara, para que la copa no se pierda sobre la isla.
+    crown()
+    g = cairo.LinearGradient(0, -74, 0, 4)
+    g.add_color_stop_rgba(0, *rgba('#434a5c'))
+    g.add_color_stop_rgba(1, *rgba('#1c1f28'))
+    cr.set_source(g)
+    cr.fill()
+    cr.save()
+    crown()
+    cr.clip()
+    # costuras de los paneles y un brillo
+    for g in (-1, 1):
+        cr.move_to(g * 4, -76)
+        quad(cr, g * 44, -58, g * 50, 0)
+    stroke(cr, 3, alpha=.5)
+    cr.move_to(-58, -30)
+    quad(cr, -50, -54, -30, -63)
+    cr.set_source_rgba(1, 1, 1, .2)
+    cr.set_line_width(5)
+    cr.stroke()
+    cr.restore()
+    crown()
+    stroke(cr, 5.5)
+    # </>
+    cr.move_to(-11, -52); cr.line_to(-21, -41); cr.line_to(-11, -30)
+    cr.move_to(11, -52);  cr.line_to(21, -41);  cr.line_to(11, -30)
+    cr.move_to(4.5, -55); cr.line_to(-4.5, -27)
+    stroke(cr, 8.5, preserve=True)
+    stroke(cr, 4.8, '#a47dff')
+    # visera
+    cr.new_path()
+    cr.move_to(-75, 0)
+    quad(cr, 0, -17, 75, 0)
+    cr.curve_to(90, 9, 44, 12, 0, 12)
+    cr.curve_to(-44, 12, -90, 9, -75, 0)
+    cr.close_path()
+    fill(cr, '#262a35', preserve=True)
+    stroke(cr, 5)
+    cr.move_to(-58, 2)
+    quad(cr, 0, -9, 58, 2)
+    stroke(cr, 3, '#a47dff', .85)
+
+
+def _clipboard(cr, t, motion):
+    """La lista de la auditoría: dos palomitas y un hallazgo."""
+    cr.new_path()
+    rrect(cr, -30, 82, 60, 40, 5)
+    fill(cr, '#4a5370', preserve=True)
+    stroke(cr, 3.5)
+    rrect(cr, -25, 88, 50, 31, 2.5)
+    fill(cr, 'face', preserve=True)
+    stroke(cr, 2.2)
+    rrect(cr, -10, 78, 20, 9, 3)
+    fill(cr, 'metal', preserve=True)
+    stroke(cr, 3)
+    for i, ok in enumerate((True, True, False)):
+        y = 95 + i * 8
+        cr.new_path()
+        if ok:
+            cr.move_to(-20, y); cr.line_to(-17.5, y + 2.6); cr.line_to(-13, y - 2.8)
+            stroke(cr, 2.4, 'green')
+        else:
+            cr.move_to(-20, y - 2.6); cr.line_to(-14, y + 2.6)
+            cr.move_to(-14, y - 2.6); cr.line_to(-20, y + 2.6)
+            stroke(cr, 2.4, 'red')
+        cr.move_to(-8, y)
+        cr.line_to(18 - i * 5, y)
+        stroke(cr, 2.4, 'metal')
+    _hands(cr, t, motion, (-34, 34), 106)
+
+
+# ── reviewer ─────────────────────────────────────────────────────────────────
+
+def _hair_path(cr):
+    cr.new_path()
+    cr.move_to(-78, 8)
+    quad(cr, -90, -30, -68, -52)
+    quad(cr, -76, -64, -72, -78)
+    quad(cr, -56, -70, -46, -64)
+    quad(cr, -46, -78, -40, -90)
+    quad(cr, -28, -78, -18, -70)
+    quad(cr, -22, -82, -22, -92)
+    quad(cr, -6, -78, 12, -70)
+    quad(cr, 22, -82, 34, -88)
+    quad(cr, 36, -74, 46, -64)
+    quad(cr, 58, -70, 70, -74)
+    quad(cr, 66, -60, 68, -50)
+    quad(cr, 90, -30, 78, 8)
+    quad(cr, 0, 20, -78, 8)
+    cr.close_path()
+
+
+def _eyeshade(cr):
+    """Pelo suelto y la banda de la visera de editor."""
+    # Tampoco es negro puro: sobre la isla el pelo no se vería.
+    _hair_path(cr)
+    g = cairo.LinearGradient(0, -92, 0, 10)
+    g.add_color_stop_rgba(0, *rgba('#4a5370'))
+    g.add_color_stop_rgba(1, *rgba('#1b1e27'))
+    cr.set_source(g)
+    cr.fill_preserve()
+    stroke(cr, 5)
+    for x0, y0, cx, cy, x1, y1 in ((-52, -30, -56, -48, -60, -62), (-30, -34, -32, -56, -34, -74),
+                                   (22, -34, 26, -56, 30, -72), (48, -30, 54, -46, 58, -58)):
+        cr.move_to(x0, y0)
+        quad(cr, cx, cy, x1, y1)
+    cr.set_source_rgba(1, 1, 1, .26)
+    cr.set_line_width(2.4)
+    cr.stroke()
+    # banda
+    cr.move_to(-79, 8)
+    quad(cr, 0, 20, 79, 8)
+    cr.line_to(77, -8)
+    quad(cr, 0, 4, -77, -8)
+    cr.close_path()
+    fill(cr, '#e0468f', preserve=True)
+    stroke(cr, 4.5)
+    cr.move_to(-70, -2)
+    quad(cr, 0, 9, 70, -2)
+    cr.set_source_rgba(1, 1, 1, .35)
+    cr.set_line_width(2.5)
+    cr.stroke()
+
+
+def _visor(cr):
+    """La visera translúcida, sobre las gafas."""
+    cr.new_path()
+    cr.move_to(-74, 10)
+    quad(cr, 0, 22, 74, 10)
+    cr.curve_to(90, 22, 50, 29, 0, 29)
+    cr.curve_to(-50, 29, -90, 22, -74, 10)
+    cr.close_path()
+    fill(cr, ACCENTS['reviewer'], .34, preserve=True)
+    stroke(cr, 4)
+
+
+def _magnifier(cr, t, motion):
+    """Una hoja de código y la lupa sobre lo que hay que corregir."""
+    cr.new_path()
+    rrect(cr, -44, 88, 72, 26, 3)
+    fill(cr, 'face', preserve=True)
+    stroke(cr, 3.5)
+    for i, (x0, w) in enumerate(((-37, 26), (-31, 40), (-31, 22))):
+        cr.move_to(x0, 95 + i * 6.5)
+        cr.line_to(x0 + w, 95 + i * 6.5)
+    stroke(cr, 2.4, 'metal')
+    cr.move_to(42, 108)
+    cr.line_to(57, 121)
+    stroke(cr, 9, preserve=True)
+    stroke(cr, 4, ACCENTS['reviewer'])
+    cr.new_path()
+    cr.arc(31, 97, 15, 0, TAU)
+    fill(cr, '#ffd9ec', .78, preserve=True)
+    stroke(cr, 5)
+    cr.move_to(22, 94)
+    cr.line_to(40, 94)
+    cr.move_to(22, 101)
+    cr.line_to(34, 101)
+    stroke(cr, 3.2, 'red')
+    cr.new_path()
+    cr.arc(24, 90, 3, 0, TAU)
+    cr.set_source_rgba(1, 1, 1, .9)
+    cr.fill()
+    _hands(cr, t, motion, (-54,))
+
+
+# ── las capas de cada personaje ──────────────────────────────────────────────
+
+HATS = {'engineer': _cap, 'architect': _hardhat, 'auditor': _front_cap, 'reviewer': _eyeshade}
+PROPS = {'engineer': _laptop, 'architect': _blueprint, 'auditor': _clipboard, 'reviewer': _magnifier}
+BACK = {'architect': lambda cr: _pencil(cr, 89, 4, 0.24, 'yellow'),
+        'auditor': _collar,
+        'reviewer': lambda cr: _pencil(cr, -89, 4, -0.24, 'red')}
+FRONT = {'reviewer': _visor}
+FRAMES = {'auditor': .64}     # grosor del armazón de las gafas, sobre el de siempre
+PALE = {'auditor': .3}        # cuánto se le notan los cachetes
