@@ -479,6 +479,25 @@ class Tablero(IslandCase):
         self.assertEqual(self.isl.tab, 'a')
         self.assertNotEqual(old.key, new.key)
 
+    def test_la_pestana_no_se_queda_en_una_en_reposo_si_otra_trabaja(self):
+        # `a` termina mientras `b` sigue trabajando: la pestaña se va a `a`…
+        self.work('b')
+        self.work('a')
+        self.isl.model.handle({'event': 'stop', 'session_id': 'a', 'cwd': '/x/a'}, now=T + 3)
+        done = self.isl.model.view(now=T + 3)
+        self.isl.follow(done)
+        self.assertEqual(self.isl.tab, 'a')
+        # …y cuando `a` pasa a reposo, vuelve sola a la que trabaja.
+        self.isl.view = done
+        rest = self.isl.model.view(now=T + 3 + state.DONE_OPEN_SECS + 1)
+        self.isl.follow(rest)
+        self.assertEqual(self.isl.model.sessions['a'].state, 'idle')
+        self.assertEqual(self.isl.tab, 'b')
+        # Elegida a mano una en reposo, se queda mientras no haya novedad.
+        self.isl.view, self.isl.tab = rest, 'a'
+        self.isl.follow(self.isl.model.view(now=T + 20))
+        self.assertEqual(self.isl.tab, 'a')
+
     def test_el_permiso_va_en_la_tarjeta_del_que_lo_pide(self):
         self.isl.expanded = True
         self.work('b')
