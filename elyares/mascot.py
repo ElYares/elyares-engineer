@@ -76,6 +76,22 @@ def rrect(cr, x, y, w, h, r):
     cr.close_path()
 
 
+def balloon(cr, x, y, w, h, r, base, half, tx, ty):
+    """Una burbuja con flecha, como un popover de macOS: un rectángulo
+    redondeado con la flecha en el borde de arriba. La flecha nace en `base`
+    (y `half` a cada lado), apunta a (tx, ty) y es toda curva: sale del borde
+    sin esquina y acaba en una punta redonda."""
+    cr.new_sub_path()
+    cr.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
+    cr.line_to(base - half, y)
+    cr.curve_to(base - half * .45, y, tx - half * .3, ty, tx, ty)
+    cr.curve_to(tx + half * .3, ty, base + half * .45, y, base + half, y)
+    cr.arc(x + w - r, y + r, r, -math.pi / 2, 0)
+    cr.arc(x + w - r, y + h - r, r, 0, math.pi / 2)
+    cr.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
+    cr.close_path()
+
+
 def ellipse(cr, cx, cy, rx, ry, a0=0.0, a1=TAU):
     # El path se guarda en coordenadas de dispositivo, así que sobrevive al restore
     # y el trazo sale con el grosor normal, no deformado por el scale.

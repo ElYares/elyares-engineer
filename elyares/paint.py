@@ -11,6 +11,7 @@ fijos y no salen del tema: son semánticos, y en algunos temas el "amarillo" de
 la paleta es un azul grisáceo y el "verde", un gris.
 """
 
+import colorsys
 import re
 
 ISLAND = '#050608'
@@ -25,6 +26,7 @@ ROLES = {
     'var': ('color11', '#e0af68'),     # VAR=valor, $VAR
     'num': ('color9', '#ff9e64'),      # números sueltos
     'arg': ('foreground', '#c0caf5'),  # el resto de los argumentos
+    'head': ('color12', '#7aa2f7'),    # el título de un bloque, en la burbuja de una fuente
 }
 VERBS = ('Ejecutando', 'Leyendo', 'Editando', 'Escribiendo', 'Buscando')
 DONE = re.compile(r'(Terminó|Falló \(código \d+\))( en .+?: )(.*)', re.S)
@@ -42,6 +44,15 @@ def mix(a, b, w):
     """Mezcla dos #rrggbb; w es cuánto pesa b, de 0 a 1."""
     pa, pb = (int(a[i:i + 2], 16) for i in (1, 3, 5)), (int(b[i:i + 2], 16) for i in (1, 3, 5))
     return '#' + ''.join(f'{round(x * (1 - w) + y * w):02x}' for x, y in zip(pa, pb))
+
+
+def vivid(color, sat, light):
+    """Un #rrggbb con el mismo tono, más saturado (`sat` veces) y al menos así
+    de claro: para que un tema apagado no se pierda sobre un fondo translúcido."""
+    r, g, b = (int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    rgb = colorsys.hls_to_rgb(h, max(l, light), min(1.0, s * sat))
+    return '#' + ''.join(f'{round(c * 255):02x}' for c in rgb)
 
 
 def colors(palette=None):
@@ -63,6 +74,67 @@ def colors(palette=None):
         'pct2': AMBER,
         'pct3': RED,
     })
+    return out
+
+
+def command(text):
+    """Un comando para consultar, como [(texto, papel)]: el programa, lo que
+    se le pide, sus opciones y lo que hay que poner (`<tarea>`, `[ruta]`)."""
+    out = []
+    for tok in re.split(r'(\s+)', text or ''):
+        if not tok:
+            continue
+        if tok.isspace() or not out:
+            role = 'arg' if out else 'cmd'
+        else:
+            role = 'var' if tok[0] in '<[' else 'flag' if tok[0] == '-' else 'arg'
+        out.append((tok, role))
+    return out
+
+
+# Una cifra con su nombre ("3 pomodoros hoy", "Quedan 12:40") o un rato ("1 h 15 min").
+NUMBER = r'\d[\d:.,]*%?'
+SPAN = r'\d+ h(?: \d+ min)?|\d+ min'
+STAT = re.compile(rf'(?P<span>{SPAN})|(?P<value>{NUMBER})\s+(?P<label>\D.*)|(?P<name>\D+?)\s+(?P<last>{NUMBER})')
+STAT_LABEL = 28           # un nombre más largo que esto ya no es el de una cifra: es una frase
+NOTE = re.compile(rf'(?P<num>{SPAN}|{NUMBER})|(?P<pass>en verde)|(?P<bad>en rojo|no respondió)'
+                  r'|(?P<pct2>corriendo)')
+
+
+def stats(line):
+    """Una línea de datos como [(cifra, su nombre)] si toda ella son cifras
+    con su nombre, separadas por " · "; None si no, y entonces es una frase."""
+    out = []
+    for part in (line or '').split(' · '):
+        m = STAT.fullmatch(part.strip())
+        if not m:
+            return None
+        if m['span']:
+            value, label = m['span'], ''
+        elif m['value']:
+            value, label = m['value'], m['label']
+        else:
+            value, label = m['last'], m['name'].lower()
+        if len(label) > STAT_LABEL or ':' in label:
+            return None
+        out.append((value, label))
+    return out
+
+
+def note(text):
+    """Una frase de datos como [(texto, papel)]: su nombre ("Tarea:") más
+    suave, las cifras resaltadas, y en su color lo que va bien o mal."""
+    key, sep, rest = (text or '').partition(': ')
+    out = []
+    for chunk, base in ((key + sep, 'text'), (rest, 'arg')) if sep else ((text or '', 'arg'),):
+        pos = 0
+        for m in NOTE.finditer(chunk):
+            if m.start() > pos:
+                out.append((chunk[pos:m.start()], base))
+            out.append((m.group(), m.lastgroup))
+            pos = m.end()
+        if pos < len(chunk):
+            out.append((chunk[pos:], base))
     return out
 
 

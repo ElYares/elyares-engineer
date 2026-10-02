@@ -30,8 +30,9 @@ en la lista, un clic en su fila la sube a la cabecera para leerla.
 
 Abierta a mano lleva al pie una pastilla por fuente (`sources.py`): dice si
 está conectada y un clic la prende o la apaga. Con el cursor sobre una
-pastilla sale debajo de la isla una burbuja con lo que se sabe de esa fuente
-y, para consultar, sus comandos (`commands.py`). Al final de la franja, la
+pastilla sale debajo de la isla una burbuja (un popover, con la flecha hacia
+la pastilla) con lo que se sabe de esa fuente y, para consultar, sus
+comandos (`commands.py`). Al final de la franja, la
 pastilla "?" trae los del propio elyares-engineer: atajos de teclado, clics y órdenes.
 
 Mientras corren unas pruebas en una terminal la isla se queda abierta con su
@@ -96,12 +97,44 @@ PREVIEW_MAX = PREVIEW_HEAD + (preview.MAX_LINES + 1) * CODE_LINE_H + 2 * PREVIEW
 ASK_TALL = 24         # con vista previa, los botones bajan debajo de ella
 PREVIEW_OPEN_SECS = 20    # abierta con el teclado y con código que leer
 CARD_BUTTONS = 40     # la fila de botones de la ficha de una alerta
-TIP_W, TIP_PAD, TIP_GAP = 400, 11, 6   # la burbuja de una fuente, debajo de la isla
+TIP_W, TIP_PAD, TIP_GAP = 400, 14, 14  # la burbuja de una fuente, debajo de la isla; en el hueco va su flecha
 TIP_ROOM = 440        # el alto que se le reserva en la ventana
 TIP_COL_GAP = 16      # entre un comando y lo que hace
-TIP_HEAD_GAP = 7      # aire sobre el título de un bloque de comandos
+TIP_HEAD_GAP = 15     # aire sobre el título de un bloque de comandos, con una raya en medio
 TIP_LINES = 3         # líneas propias que puede traer una fuente
-TIP_FADE = .12        # segundos que tarda en aparecer
+TIP_R = 14            # lo redondo de sus esquinas: un popover de macOS
+TIP_TAIL = 13         # medio ancho de la flecha, donde nace de la burbuja
+TIP_TAIL_GAP = 2      # entre la punta de la flecha y el borde de la isla
+TIP_IN, TIP_OUT = .2, .14     # segundos que tarda en salir y en irse
+TIP_SWAP = .55        # de una pastilla a la de al lado no vuelve a salir de cero
+TIP_GLIDE = 16        # qué tan rápido se desliza hasta la otra pastilla (1/s)
+TIP_SMALL = .92       # el tamaño con el que nace, desde la punta de la flecha
+TIP_BACK = 1.1        # cuánto se pasa de su tamaño antes de asentarse: apenas
+TIP_EDGE = (.26, .07) # su filo: claro arriba, donde le da la luz, y casi nada abajo
+TIP_SHEEN = .07       # en vidrio, el brillo que baja desde arriba hasta la mitad
+# Sus colores son los del tema, avivados: sobre vidrio, tal cual se pierden.
+# Cuánto más saturados, y lo claro que va lo principal y lo secundario.
+TIP_VIVID, TIP_LIGHT, TIP_SOFT = 2.2, .76, .68
+TIP_FIXED = ('pass', 'bad', 'pct2', 'pct3')   # los de aviso no son del tema: van como son
+TIP_INK_SHADOW = .6   # en vidrio, la sombra de cada texto: lo despega de lo que haya detrás
+# Las etiquetas de la burbuja (cómo está la fuente y lo que se sabe de ella):
+# cápsulas teñidas de su color. Relleno a los lados y arriba, hueco entre
+# ellas, sitio para el punto de la primera, y lo que tiñen el fondo y el filo.
+TIP_CHIP_PAD, TIP_CHIP_PAD_Y, TIP_CHIP_GAP, TIP_CHIP_DOT = 8, 3, 6, 10
+TIP_CHIP_FILL, TIP_CHIP_EDGE = .16, .38
+# Las fichas de sus cifras: cuántas por fila, relleno, hueco, lo redondo de
+# sus esquinas y lo que tiñen. Cada una va en un color de la paleta, por turno.
+TIP_STATS_ROW, TIP_STAT_PAD, TIP_STAT_GAP, TIP_STAT_R = 3, 9, 7, 10
+TIP_STAT_FILL, TIP_STAT_EDGE = .11, .26
+TIP_STAT_ROLES = ('cmd', 'path', 'flag', 'num')
+TIP_TEXT_LINES = 3    # líneas en las que se parte una frase larga antes de cortarse
+# Los bloques de la burbuja de los atajos que no son comandos: van de un solo color.
+TIP_PLAIN = {'Teclado': 'var', 'Ratón': 'str'}
+TIP_RULE = .09        # la raya que separa un bloque de comandos de lo de arriba
+# La sombra: cuánto se abre, cuánto cae y lo que oscurece cada capa. Entre
+# todas no pasan de .20: es el `ignore_alpha` de la regla de Hyprland, y por
+# debajo de él la sombra no desenfoca lo que tiene detrás.
+TIP_SHADOW, TIP_SHADOW_DROP, TIP_SHADOW_ALPHA = 14, 5, .013
 # 8: margen del rebote
 # El tablero: una pestaña por sesión y, dentro, sus cuatro.
 BOARD_W = PREVIEW_W
@@ -128,7 +161,7 @@ PET_SCALE = PET / 260
 TEXT_INSET = 12 + PET + 10 + 18   # lo que le quitan al texto la mascota y los márgenes
 ISLAND_BG = (5 / 255, 6 / 255, 8 / 255, .97)
 GLASS_ALPHA, GLASS_EDGE = .5, .16    # modo vidrio: fondo translúcido y filo claro
-TIP_GLASS_ALPHA = .82                # la burbuja, en vidrio: se lee más rato que la isla
+TIP_GLASS_ALPHA = .7                 # la burbuja, en vidrio: más opaca que la isla, que se lee más rato
 TITLE_COLOR = (.95, .96, 1, 1)
 MUTED_COLOR = (.44, .49, .63, 1)
 # La barra entre el agente y el proyecto, en el mismo gris.
@@ -139,6 +172,8 @@ FONT_BUTTON = 'Sans Semi-Bold 10'
 FONT_ROW = 'Sans Semi-Bold 10'
 FONT_PILL = 'Sans Semi-Bold 8'
 FONT_CODE = 'JetBrainsMono Nerd Font 8'
+FONT_TIP = 'JetBrainsMono Nerd Font Medium 9'    # la burbuja: un punto más gruesa, que va sobre vidrio
+FONT_STAT = 'Sans Bold 15'         # la cifra de una ficha de la burbuja
 ROW_NAME_W = 130     # ancho de la columna del nombre en la lista de alertas
 STATE_COLORS = {'permission': 'red', 'alert': 'red', 'waiting': 'yellow', 'done': 'green',
                 'working': 'accent'}
@@ -236,8 +271,11 @@ class Island:
         self.wrap = (None, 0)           # (detalle, alto de más que pide entero)
         self.pills = []                 # (fuente, x, y, ancho, alto), del último dibujo
         self.tip = None                 # (fuente, centro, opacidad) de la pastilla bajo el cursor
-        self.tip_key, self.tip_since = None, 0.0
+        self.tip_key = None
         self.tip_ref = []               # los comandos de la burbuja que se está viendo
+        self.tip_last = None            # la última burbuja a la vista: con ella se va
+        self.tip_pop, self.tip_at = 0.0, 0.0   # cuánto ha salido (0 a 1) y cuándo se dibujó
+        self.tip_cx = None              # dónde va su flecha: se desliza de una pastilla a otra
         # Lo que se sabe de cada fuente: si responde, una nota y lo que dirá
         # su burbuja. Las que dependen de install.sh arrancan con lo que haya
         # instalado.
@@ -250,7 +288,11 @@ class Island:
                                 'why': sources.MISSING[key], 'fix': sources.MISSING_FIX})
         self.focus_seen = False         # lo último que dijo coffe, aunque esté apagada
         self.pointer = None
-        self.monitor = hypr.focused_monitor()
+        self.monitor = self.start_monitor()
+        if self.settings['pinned'] and self.monitor and not self.settings['pinned_monitor']:
+            # Fijada de antes de que se guardara el monitor: se queda en este.
+            self.settings['pinned_monitor'] = self.monitor['name']
+            settings.save(self.settings)
 
         win = Gtk.ApplicationWindow(application=app)
         LayerShell.init_for_window(win)
@@ -460,47 +502,80 @@ class Island:
 
     def source_tip(self, key):
         """Lo que dice la burbuja de una pastilla: (título, filas). Una fila es
-        ('text', texto, color), ('head', título de un bloque) o
-        ('cmd', comando, qué hace)."""
-        text, dim = rgb(self.colors['text']), rgb(self.colors['dim'])
+
+            ('status', cómo está, papel)   la etiqueta que va junto al título
+            ('text', texto, color)         una frase; puede traer su marcado
+            ('chips', [(texto, papel)])    lo que se sabe de ella, en etiquetas
+            ('stats', [(cifra, nombre)])   sus cifras, en fichas
+            ('head', título de un bloque) y ('cmd', comando, qué hace)
+
+        Los colores salen de la paleta del tema, cada uno con su papel. Cómo
+        está va en el color de su punto: verde, rojo o ámbar. Lo que trae
+        ahora la fuente son cifras con su nombre (fichas) o frases, con las
+        cifras resaltadas (`paint.stats`, `paint.note`)."""
+        text, soft = rgb(self.ink('arg')), rgb(self.ink('text', TIP_SOFT))
         if key == commands.HELP:
-            return 'Atajos de elyares-engineer', [('text', 'Para consultar: nada de aquí se ejecuta', dim)
+            return 'Atajos de elyares-engineer', [('text', 'Para consultar: nada de aquí se ejecuta', soft)
                                             ] + self.tip_ref
         state, now = self.source_state(key), time.monotonic()
         src = self.sources.get(key) or {}
-        facts = [sources.STATE_TEXT[state].capitalize()]
+        tone = {'on': 'pass', 'bad': 'bad', 'unknown': 'pct2'}.get(state, 'dim')
+        status = sources.STATE_TEXT[state].capitalize()
         # En rojo, la nota es la de la avería, no el número de sesiones.
         note = src.get('note', '') if state == 'bad' else self.source_note(key)
+        chips = []
         if state == 'bad' and src.get('why') and key not in sources.MISSING:
             # Lo que falta instalar falta desde siempre; lo que dejó de
             # responder, desde un momento que vale la pena saber.
-            facts[0] += f' desde {ago(now - src["since"])}'
+            status += f' desde {ago(now - src["since"])}'
         elif note and state != 'off':
-            facts.append(note)
+            chips.append((note, 'cmd'))
         if key == 'usage' and state == 'on' and self.model.limit:
-            facts.append(f'límite de 5 h al {self.model.limit:.0f}%')
+            chips.append((f'límite de 5 h al {self.model.limit:.0f}%', paint.context_role(self.model.limit)))
         if key != 'claude' and state == 'on':
             n = sum(1 for sid in self.model.sessions if sid.startswith(sources.PREFIXES[key]))
-            facts.append('sin alertas' if not n else '1 alerta' if n == 1 else f'{n} alertas')
-        lines = [(sources.ABOUT[key], text),
-                 (' · '.join(facts), rgb(paint.RED) if state == 'bad' else dim)]
+            # Las alertas que tenga, en ámbar; sin ninguna, más suave.
+            chips.append(('sin alertas', 'text') if not n
+                         else ('1 alerta' if n == 1 else f'{n} alertas', 'pct2'))
+        rows = [('status', status, tone), ('text', sources.ABOUT[key], text)]
+        if chips:
+            rows.append(('chips', chips))
+
+        def phrase(line):
+            return ('text', line, text, self.tip_markup(paint.note(line)))
+
         if state == 'bad':
             # Por qué está en rojo y qué hacer.
-            lines += [(line, text) for line in (src.get('why') or note, src.get('fix')) if line]
+            if src.get('why') or note:
+                rows.append(phrase(src.get('why') or note))
+            if src.get('fix'):
+                rows.append(('text', src['fix'], rgb(self.ink('var'))))
         elif state == 'on':
-            lines += [(line, text) for line in src.get('tip') or []]
+            for line in src.get('tip') or []:
+                stats = paint.stats(line)
+                rows.append(('stats', stats) if stats else phrase(line))
             if key == 'coffe' and self.model.focus:
                 held = sum(1 for s in self.model.sessions.values() if s.state in ('waiting', 'alert'))
                 if held:
-                    lines.append(('1 aviso espera al descanso' if held == 1
-                                  else f'{held} avisos esperan al descanso', text))
+                    rows.append(('text', '1 aviso espera al descanso' if held == 1
+                                 else f'{held} avisos esperan al descanso', rgb(self.ink('pct2'))))
             if src.get('polled'):
-                lines.append((f'Consultado {ago(now - src["polled"])}', dim))
+                rows.append(('text', f'Consultado {ago(now - src["polled"])}', soft))
         if key != 'claude':
             # Claude no se apaga desde aquí: sin sus hooks no hay nada que mostrar.
-            lines.append(('Clic para prenderla' if state == 'off' else 'Clic para apagarla',
-                          MUTED_COLOR[:3]))
-        return sources.LABELS[key], [('text', *line) for line in lines] + self.tip_ref
+            rows.append(('text', 'Clic para prenderla' if state == 'off' else 'Clic para apagarla',
+                         rgb(self.ink('flag'))))
+        return sources.LABELS[key], rows + self.tip_ref
+
+    def ink(self, role, light=TIP_LIGHT):
+        """El color de un papel (`paint.colors`) para la burbuja: avivado."""
+        color = self.colors[role]
+        return color if role in TIP_FIXED else paint.vivid(color, TIP_VIVID, light)
+
+    def tip_markup(self, parts):
+        """[(texto, papel)] como marcado de Pango, con los colores de la burbuja."""
+        return ''.join(f'<span foreground="{self.ink(role)}">{html.escape(text, quote=False)}</span>'
+                       for text, role in parts)
 
     def toggle_source(self, key):
         """Prende o apaga una fuente. Al apagarla se van sus alertas."""
@@ -764,14 +839,20 @@ class Island:
         return GLib.SOURCE_REMOVE
 
     def toggle_pinned(self):
-        """Fija la isla abierta, o la suelta para que vuelva a cerrarse sola."""
-        self.settings['pinned'] = not self.settings['pinned']
+        """Fija la isla abierta, o la suelta para que vuelva a cerrarse sola.
+        Fijada se queda además en el monitor donde se fijó; suelta vuelve a
+        seguir al enfocado, que puede ser otro."""
+        pinned = self.settings['pinned'] = not self.settings['pinned']
+        self.settings['pinned_monitor'] = (self.monitor or {}).get('name', '') if pinned else ''
         settings.save(self.settings)
-        if self.settings['pinned']:
+        if pinned:
             self.off = False
             self.expand()
         else:
             self.collapse()
+            focused = hypr.focused_monitor()
+            if focused:
+                self.on_focused_monitor(focused['name'])
 
     def toggle_compact(self):
         self.settings['compact'] = not self.settings['compact']
@@ -931,11 +1012,28 @@ class Island:
                 return True
         return False
 
+    def start_monitor(self):
+        """El monitor donde arranca la isla: el enfocado o, si quedó fijada,
+        aquel en el que se fijó, mientras siga conectado."""
+        monitors = hypr.monitors()
+        name = self.settings['pinned'] and self.settings['pinned_monitor']
+        return (next((m for m in monitors if name and m.get('name') == name), None)
+                or next((m for m in monitors if m.get('focused')), None))
+
     def on_focused_monitor(self, name):
+        """La isla se va al monitor enfocado. Fijada no se mueve del suyo,
+        salvo que lo desconecten: entonces se va al enfocado y se queda ahí."""
         if self.monitor and self.monitor.get('name') == name:
             return GLib.SOURCE_REMOVE
+        monitors = hypr.monitors()
+        here = (self.monitor or {}).get('name')
+        if self.settings['pinned'] and any(m.get('name') == here for m in monitors):
+            return GLib.SOURCE_REMOVE
         if self._set_monitor(name):
-            self.monitor = next((m for m in hypr.monitors() if m.get('name') == name), None)
+            self.monitor = next((m for m in monitors if m.get('name') == name), None)
+            if self.settings['pinned']:
+                self.settings['pinned_monitor'] = name
+                settings.save(self.settings)
             self.region = None
             self.update_region()
         return GLib.SOURCE_REMOVE
@@ -974,7 +1072,8 @@ class Island:
         self.update_region()
 
         widget.queue_draw()
-        if settled and not self.hover and not self.override:
+        # Una burbuja a medio irse sigue pidiendo cuadros hasta que termina.
+        if settled and not self.hover and not self.override and not self.tip_pop:
             # Quieta: escondida no dibuja nada y asomada basta con IDLE_FPS. El
             # reloj de GTK despierta al proceso 60 veces por segundo aunque no
             # haya nada que redibujar.
@@ -1033,6 +1132,7 @@ class Island:
 
         x0, w, h = self.island_rect(width)
         if h < 0.5 or w < 1:
+            self.tip_pop = 0.0
             return
         r = min(26, h / 2, w / 2) if h > 12 else min(8, h)
         cr.move_to(x0, 0)
@@ -1085,10 +1185,8 @@ class Island:
             cr.set_source_rgba(1, 1, 1, GLASS_EDGE)
             cr.set_line_width(1)
             cr.stroke()
-        if self.tip:
+        if self.tip or self.tip_pop:
             self.draw_tip(cr, width, full_h, now)
-        else:
-            self.tip_key = None
 
     def draw_head(self, cr, x0, w, h, mode, below, now):
         """La cabecera de siempre: la mascota, «agente | proyecto», lo que
@@ -1689,68 +1787,262 @@ class Island:
             self.tip = (commands.HELP, x + pw / 2, alpha)
 
     def draw_tip(self, cr, width, top, now):
-        """La burbuja de una pastilla: sale debajo de la isla mientras el
-        cursor está sobre ella, sin clic. Arriba, cómo está la fuente; debajo,
-        sus comandos en dos columnas."""
-        key, cx, alpha = self.tip
+        """La burbuja de una pastilla: un popover como los de macOS, que sale
+        debajo de la isla mientras el cursor está sobre ella, sin clic, con
+        la flecha hacia la pastilla. Arriba, cómo está la fuente; debajo, sus
+        comandos en dos columnas. Lleva sombra y un filo claro arriba; en
+        modo vidrio es translúcida, con un brillo que baja desde arriba.
+
+        No sale ni se va de golpe: nace un poco más chica en la punta de la
+        flecha y crece hasta asentarse, y al quitar el cursor se encoge con
+        lo último que decía. De una pastilla a la de al lado se desliza."""
+        showing = self.tip is not None
+        if showing:
+            self.tip_last = self.tip
+        key, cx, alpha = self.tip_last
         if key != self.tip_key:
-            self.tip_key, self.tip_since = key, now
+            self.tip_key = key
+            self.tip_pop = min(self.tip_pop, TIP_SWAP)
             # Los comandos se leen al salir la burbuja: un cambio en el archivo
             # o en los atajos de Hyprland se ve sin reiniciar nada.
             self.tip_ref = commands.reference(
                 key, commands.load(), hypr.binds() if key == commands.HELP else None)
-        alpha *= clamp((now - self.tip_since) / TIP_FADE)
+        # El primer cuadro no sabe cuánto pasó desde el anterior: avanza uno.
+        dt = clamp(now - self.tip_at, 0, .05) if self.tip_pop else 1 / 60
+        self.tip_at = now
+        self.tip_pop = clamp(self.tip_pop + (dt / TIP_IN if showing else -dt / TIP_OUT))
+        if not self.tip_pop:
+            self.tip_key = self.tip_cx = None
+            return
+        if self.tip_cx is None:
+            self.tip_cx = cx
+        self.tip_cx += (cx - self.tip_cx) * (1 - math.exp(-TIP_GLIDE * dt))
+        cx = self.tip_cx
+        pop = self.tip_pop
+        alpha *= clamp(pop * 1.6)
+        back = 1 + (TIP_BACK + 1) * (pop - 1) ** 3 + TIP_BACK * (pop - 1) ** 2
+        scale = TIP_SMALL + (1 - TIP_SMALL) * back
         title, rows = self.source_tip(key)
         room = width - 8 - 2 * TIP_PAD          # lo más ancha que puede ser por dentro
         inner = TIP_W - 2 * TIP_PAD
-        cmds = [self._layout(cr, row[1], FONT_DETAIL) for row in rows if row[0] == 'cmd']
-        col = max((layout.get_pixel_size()[0] for layout in cmds), default=0) + TIP_COL_GAP
-        # Cada fila: (lo que se pinta a la izquierda, color, lo de la derecha, aire arriba).
-        drawn = [(self._layout(cr, title, FONT_ROW, inner), TITLE_COLOR[:3], None, 0)]
-        cmds = iter(cmds)
-        for row in rows:
-            if row[0] == 'text':
-                # Una causa o un resumen largo se parte en dos líneas antes que cortarse.
-                drawn.append((self._layout(cr, row[1], FONT_DETAIL, inner, 2), row[2], None, 0))
-            elif row[0] == 'head':
-                drawn.append((self._layout(cr, row[1].upper(), FONT_PILL), MUTED_COLOR[:3], None,
-                              TIP_HEAD_GAP))
-            else:
-                what = self._layout(cr, row[2], FONT_DETAIL, room - col)
-                drawn.append((next(cmds), rgb(self.colors['cmd']), what, 0))
-        # Lo que ocupa cada fila hacia abajo: los comandos van más juntos.
-        steps = [gap + layout.get_pixel_size()[1] + (1 if what else 3)
-                 for layout, _, what, gap in drawn]
-        while sum(steps) + 2 * TIP_PAD > TIP_ROOM - TIP_GAP and len(drawn) > 2:
+        blocks = self.tip_blocks(cr, title, rows, inner, room)
+        # Lo que ocupa cada bloque hacia abajo, con su aire.
+        steps = [gap + bh + after for _, bh, gap, after, _ in blocks]
+        while sum(steps) + 2 * TIP_PAD > TIP_ROOM - TIP_GAP and len(blocks) > 2:
             # Más comandos de los que caben en la ventana: se dice que hay más.
-            drawn[-2:] = [(self._layout(cr, '…', FONT_DETAIL), MUTED_COLOR[:3], None, 0)]
-            steps[-2:] = [drawn[-1][0].get_pixel_size()[1] + 3]
-        w = max([layout.get_pixel_size()[0] for layout, *_ in drawn]
-                + [col + what.get_pixel_size()[0] for _, _, what, _ in drawn if what]) + 2 * TIP_PAD
-        h = sum(steps) - 3 + 2 * TIP_PAD
+            more = self._layout(cr, '…', FONT_TIP)
+            blocks[-2:] = [self.tip_line(cr, more, rgb(self.ink('text', TIP_SOFT)))]
+            steps[-2:] = [blocks[-1][1] + 3]
+        w = max(bw for bw, *_ in blocks) + 2 * TIP_PAD
+        h = sum(steps) - blocks[-1][3] + 2 * TIP_PAD
         x, y = clamp(cx - w / 2, 4, width - w - 4), top + TIP_GAP
         self.tip_size = (w, h)
         glass = self.settings['glass']
-        mascot.rrect(cr, x, y, w, h, 12)
+        # La flecha apunta a la pastilla aunque la burbuja no quepa centrada en ella.
+        tx, tip_y = clamp(cx, 12, width - 12), top + TIP_TAIL_GAP
+        base = clamp(tx, x + TIP_R + TIP_TAIL, x + w - TIP_R - TIP_TAIL)
+        cr.save()
+        cr.translate(tx, tip_y)
+        cr.scale(scale, scale)
+        cr.translate(-tx, -tip_y)
+        mascot.balloon(cr, x, y, w, h, TIP_R, base, TIP_TAIL, tx, tip_y)
+        shape = cr.copy_path()
+        cr.new_path()
+        self.tip_shadow(cr, shape, top, width, alpha)
+        cr.append_path(shape)
         # Con comandos se lee más rato: en vidrio va más opaca que la isla.
         cr.set_source_rgba(*ISLAND_BG[:3], (TIP_GLASS_ALPHA if glass else ISLAND_BG[3]) * alpha)
+        cr.fill_preserve()
         if glass:
+            sheen = cairo.LinearGradient(0, y, 0, y + h / 2)
+            sheen.add_color_stop_rgba(0, 1, 1, 1, TIP_SHEEN * alpha)
+            sheen.add_color_stop_rgba(1, 1, 1, 1, 0)
+            cr.set_source(sheen)
             cr.fill_preserve()
-            cr.set_source_rgba(1, 1, 1, GLASS_EDGE * alpha)
+        edge = cairo.LinearGradient(0, tip_y, 0, y + h)
+        for stop, light in enumerate(TIP_EDGE):
+            edge.add_color_stop_rgba(stop, 1, 1, 1, light * alpha)
+        cr.set_source(edge)
+        cr.set_line_width(1)
+        cr.stroke()
+        ty = y + TIP_PAD
+        for (_, _, gap, _, draw), step in zip(blocks, steps):
+            if gap >= TIP_HEAD_GAP:
+                cr.set_source_rgba(1, 1, 1, TIP_RULE * alpha)
+                cr.rectangle(x + TIP_PAD, ty + gap // 2 - 2, w - 2 * TIP_PAD, 1)
+                cr.fill()
+            draw(x + TIP_PAD, ty + gap, w - 2 * TIP_PAD, alpha, glass)
+            ty += step
+        cr.restore()
+
+    def tip_blocks(self, cr, title, rows, inner, room):
+        """Las filas de la burbuja, medidas y listas para pintar, de arriba
+        abajo: [(ancho, alto, aire arriba, aire abajo, pinta)], donde
+        `pinta(x, y, ancho, alpha, vidrio)` dibuja el bloque."""
+        soft = rgb(self.ink('text', TIP_SOFT))
+        # Un comando lleva cada parte en su color; un atajo o un clic, uno solo.
+        cmds, plain = [], None
+        for row in rows:
+            if row[0] == 'head':
+                plain = TIP_PLAIN.get(row[1])
+            elif row[0] == 'cmd':
+                parts = [(row[1], plain)] if plain else paint.command(row[1])
+                cmds.append(self._layout(cr, row[1], FONT_TIP, markup=self.tip_markup(parts)))
+        col = max((layout.get_pixel_size()[0] for layout in cmds), default=0) + TIP_COL_GAP
+        cmds = iter(cmds)
+        status = next((row for row in rows if row[0] == 'status'), None)
+        blocks = [self.tip_title(cr, title, status, inner)]
+        for row in rows:
+            if row[0] == 'text':
+                # Una causa o un resumen largo se parte en líneas antes que cortarse.
+                markup = row[3] if len(row) > 3 else None
+                layout = self._layout(cr, row[1], FONT_TIP, inner, TIP_TEXT_LINES, markup=markup)
+                blocks.append(self.tip_line(cr, layout, None if markup else row[2]))
+            elif row[0] == 'chips':
+                blocks.append(self.tip_chips(cr, row[1], inner))
+            elif row[0] == 'stats':
+                blocks += [self.tip_stats(cr, row[1][i:i + TIP_STATS_ROW], i, inner)
+                           for i in range(0, len(row[1]), TIP_STATS_ROW)]
+            elif row[0] == 'head':
+                layout = self._layout(cr, row[1].upper(), FONT_PILL)
+                blocks.append(self.tip_line(cr, layout, rgb(self.ink('head')), gap=TIP_HEAD_GAP))
+            elif row[0] == 'cmd':
+                # Los comandos van más juntos.
+                what = self._layout(cr, row[2], FONT_TIP, room - col)
+                blocks.append(self.tip_line(cr, next(cmds), None, after=1, right=(what, col, soft)))
+        return blocks
+
+    def tip_line(self, cr, layout, color, gap=0, after=3, right=None):
+        """Un texto de la burbuja como bloque. `right` es lo que va en la
+        segunda columna: (texto, dónde empieza, color)."""
+        w, h = layout.get_pixel_size()
+        if right:
+            w = right[1] + right[0].get_pixel_size()[0]
+
+        def draw(x, y, _width, alpha, glass):
+            self.tip_text(cr, layout, x, y, color, alpha, glass)
+            if right:
+                self.tip_text(cr, right[0], x + right[1], y, right[2], alpha, glass)
+        return w, h, gap, after, draw
+
+    def tip_title(self, cr, title, status, inner):
+        """El título de la burbuja y, al otro lado, cómo está la fuente."""
+        layout = self._layout(cr, title, FONT_TITLE, inner)
+        tw, th = layout.get_pixel_size()
+        if not status:
+            return self.tip_line(cr, layout, TITLE_COLOR[:3], after=5)
+        cw, ch, chip = self.tip_chip(cr, status[1], status[2], dot=True)
+        h = max(th, ch)
+
+        def draw(x, y, width, alpha, glass):
+            self.tip_text(cr, layout, x, y + (h - th) / 2, TITLE_COLOR[:3], alpha, glass)
+            chip(x + width - cw, y + (h - ch) / 2, alpha, glass)
+        return tw + TIP_COL_GAP + cw, h, 0, 6, draw
+
+    def tip_chip(self, cr, label, role, dot=False):
+        """Una etiqueta de la burbuja, teñida de su color: (ancho, alto,
+        pinta). Con `dot` lleva delante el punto de la fuente."""
+        layout = self._layout(cr, label, FONT_PILL)
+        lw, lh = layout.get_pixel_size()
+        color = rgb(self.ink(role))
+        lead = TIP_CHIP_DOT if dot else 0
+        w, h = lw + 2 * TIP_CHIP_PAD + lead, lh + 2 * TIP_CHIP_PAD_Y
+
+        def draw(x, y, alpha, glass):
+            mascot.rrect(cr, x, y, w, h, h / 2)
+            cr.set_source_rgba(*color, TIP_CHIP_FILL * alpha)
+            cr.fill_preserve()
+            cr.set_source_rgba(*color, TIP_CHIP_EDGE * alpha)
             cr.set_line_width(1)
             cr.stroke()
+            if dot:
+                cr.arc(x + TIP_CHIP_PAD + 3, y + h / 2, 3, 0, 2 * math.pi)
+                cr.set_source_rgba(*color, alpha)
+                cr.fill()
+            self.tip_text(cr, layout, x + TIP_CHIP_PAD + lead, y + TIP_CHIP_PAD_Y, color, alpha, glass)
+        return w, h, draw
+
+    def tip_chips(self, cr, chips, inner):
+        """Unas etiquetas en fila; las que no caben pasan a la fila de abajo."""
+        placed, x, y, h, wide = [], 0, 0, 0, 0
+        for label, role in chips:
+            cw, h, chip = self.tip_chip(cr, label, role)
+            if x and x + cw > inner:
+                x, y = 0, y + h + TIP_CHIP_GAP
+            placed.append((x, y, chip))
+            wide = max(wide, x + cw)
+            x += cw + TIP_CHIP_GAP
+
+        def draw(x0, y0, _width, alpha, glass):
+            for dx, dy, chip in placed:
+                chip(x0 + dx, y0 + dy, alpha, glass)
+        return wide, y + h, 1, 7, draw
+
+    def tip_stats(self, cr, stats, first, inner):
+        """Una fila de fichas, cada una con su cifra en grande y debajo su
+        nombre, todas del mismo ancho: se reparten el de la burbuja, y una
+        sola se queda con la mitad. `first` es el turno de color de la primera."""
+        cols = max(len(stats), 2)
+        room = (inner - (cols - 1) * TIP_STAT_GAP) / cols - 2 * TIP_STAT_PAD
+        tiles = [(self._layout(cr, value, FONT_STAT, room),
+                  self._layout(cr, label, FONT_PILL, room, 2) if label else None,
+                  rgb(self.ink(TIP_STAT_ROLES[(first + i) % len(TIP_STAT_ROLES)])))
+                 for i, (value, label) in enumerate(stats)]
+        big = max(value.get_pixel_size()[1] for value, _, _ in tiles)
+        small = max((label.get_pixel_size()[1] for _, label, _ in tiles if label), default=0)
+        h = 2 * TIP_STAT_PAD + big + small - 3
+        name = rgb(self.ink('arg'))
+
+        def draw(x, y, width, alpha, glass):
+            tw = (width - (cols - 1) * TIP_STAT_GAP) / cols
+            for i, (value, label, color) in enumerate(tiles):
+                tx = x + i * (tw + TIP_STAT_GAP)
+                mascot.rrect(cr, tx, y, tw, h, TIP_STAT_R)
+                cr.set_source_rgba(*color, TIP_STAT_FILL * alpha)
+                cr.fill_preserve()
+                cr.set_source_rgba(*color, TIP_STAT_EDGE * alpha)
+                cr.set_line_width(1)
+                cr.stroke()
+                self.tip_text(cr, value, tx + TIP_STAT_PAD, y + TIP_STAT_PAD - 3, color, alpha, glass)
+                if label:
+                    self.tip_text(cr, label, tx + TIP_STAT_PAD, y + TIP_STAT_PAD - 3 + big, name, alpha, glass)
+        return inner, h, 2, 7, draw
+
+    def tip_text(self, cr, layout, x, y, color, alpha, shadow):
+        """Un texto de la burbuja; con `color` None, el que trae sus colores.
+        Sobre vidrio lleva debajo su sombra: sin ella se pierde contra lo que
+        haya detrás de la burbuja."""
+        if shadow:
+            under = layout.copy()
+            under.set_attributes(None)
+            cr.move_to(x, y + 1)
+            cr.set_source_rgba(0, 0, 0, TIP_INK_SHADOW * alpha)
+            PangoCairo.show_layout(cr, under)
+        cr.move_to(x, y)
+        if color is None:
+            self._show(cr, layout, alpha)
         else:
-            cr.fill()
-        ty = y + TIP_PAD
-        for (layout, color, what, gap), step in zip(drawn, steps):
-            cr.move_to(x + TIP_PAD, ty + gap)
             cr.set_source_rgba(*color, alpha)
             PangoCairo.show_layout(cr, layout)
-            if what:
-                cr.move_to(x + TIP_PAD + col, ty + gap)
-                cr.set_source_rgba(*rgb(self.colors['text']), alpha)
-                PangoCairo.show_layout(cr, what)
-            ty += step
+
+    @staticmethod
+    def tip_shadow(cr, shape, top, width, alpha):
+        """La sombra de la burbuja: suave y caída hacia abajo. Solo por fuera
+        de ella, para no oscurecer el vidrio, y de la isla para abajo."""
+        cr.save()
+        cr.rectangle(0, top, width, WIN_H)
+        cr.append_path(shape)
+        cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+        cr.clip()
+        cr.translate(0, TIP_SHADOW_DROP)
+        cr.append_path(shape)
+        cr.set_line_join(cairo.LINE_JOIN_ROUND)
+        cr.set_source_rgba(0, 0, 0, TIP_SHADOW_ALPHA * alpha)
+        for spread in range(TIP_SHADOW, 0, -1):
+            cr.set_line_width(2 * spread)
+            cr.stroke_preserve()
+        cr.new_path()
+        cr.restore()
 
     def draw_buttons(self, cr, right, bottom, alpha, bw=BUTTON_W):
         y = bottom - BUTTON_H
