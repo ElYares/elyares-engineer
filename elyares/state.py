@@ -33,6 +33,12 @@ trae el resultado. Las que corre Claude con Bash llegan al terminar, en
 
 En foco (un pomodoro de `coffe` en curso) la isla solo se abre sola para un
 permiso; lo demás se queda asomado hasta el descanso.
+
+Una sesión lleva además la cuenta de sus subagentes (`Session.agents`): los
+hooks SubagentStart y SubagentStop avisan cuándo arranca y termina cada uno
+(`agent-start`, `agent-stop`), y lo que hace una herramienta dentro de uno llega
+con su `agent_id` y su `agent_type`. Si alguno es de la familia (`AGENT_ROLES`),
+la mascota se vuelve ese personaje mientras trabaja (`View.role`).
 """
 
 import os
@@ -56,6 +62,7 @@ RUN_SECS = 3600           # unas pruebas corriendo sin novedades: se da por perd
 CONTEXT_WARN = 90         # % de contexto de una sesión a partir del cual avisa
 LIMIT_WARN = (80, 95)     # % del límite de 5 h en los que avisa
 ASK_TIMEOUT = 600         # timeout del hook PermissionRequest en settings.json
+AGENT_STALE_SECS = 1200   # un subagente tanto rato sin eventos: terminó sin avisar
 CARD_LINES = 10           # líneas de detalle de una alerta que caben en la isla
 CARD_ACTIONS = 2          # botones propios de una alerta, además de Descartar
 # El botón de una alerta que viene de una terminal o de una sesión: lleva a su pane.
@@ -74,6 +81,13 @@ SAVED_TEXT = ('cwd', 'pane', 'tmux', 'state', 'detail', 'last_tool', 'name', 'ur
               'label', 'kind', 'proc')
 SAVED_NUM = ('ttl', 'context')
 SAVED_TIMES = ('started', 'changed', 'updated')
+
+# Los subagentes de la familia y el personaje de `mascot.ROLES` que le toca a
+# cada uno. Cualquier otro (Explore, general-purpose…) trabaja con la cara del
+# engineer.
+AGENT_ROLES = {'elyares-architect': 'architect', 'elyares-auditor': 'auditor',
+               'elyares-reviewer': 'reviewer'}
+AGENT_PREFIX = 'elyares-'
 
 _root_cache = {}
 
@@ -207,6 +221,27 @@ def describe_tool(name, ti, root):
 
 
 @dataclass
+class Agent:
+    """Un subagente que una sesión tiene trabajando."""
+    aid: str
+    kind: str = ''            # el nombre del agente: Explore, elyares-auditor…
+    detail: str = ''          # lo último que hizo
+    started: float = 0.0
+    updated: float = 0.0
+
+    @property
+    def role(self):
+        return AGENT_ROLES.get(self.kind, 'engineer')
+
+    @property
+    def name(self):
+        """Como sale en la lista: los de la familia, sin el prefijo."""
+        if self.kind in AGENT_ROLES:
+            return self.kind[len(AGENT_PREFIX):]
+        return self.kind or 'subagente'
+
+
+@dataclass
 class Session:
     sid: str
     cwd: str = ''
@@ -237,6 +272,7 @@ class Session:
     # pinta su barra de estado: hasta que alguien la usa, no es de nadie.
     used: bool = False
     preview: object = None    # preview.Preview de lo que está editando; no se guarda
+    agents: dict = field(default_factory=dict)    # sus subagentes trabajando, por id; no se guardan
     changed: float = field(default_factory=time.monotonic)
     updated: float = field(default_factory=time.monotonic)
 
@@ -248,6 +284,13 @@ class Session:
     def card(self):
         """¿Es una alerta con ficha (detalle o botones) que mostrar?"""
         return self.state == 'alert' and bool(self.lines or self.actions)
+
+    @property
+    def role(self):
+        """El personaje que le toca a la mascota: el del subagente de la
+        familia que arrancó al último y sigue trabajando, o el engineer."""
+        family = [a for a in self.agents.values() if a.kind in AGENT_ROLES]
+        return max(family, key=lambda a: a.started).role if family else 'engineer'
 
     def set(self, state, detail=None, now=None):
         now = now or time.monotonic()
@@ -275,6 +318,7 @@ class View:
     session: Session | None = None
     key: tuple = ()
     others: list = field(default_factory=list)   # las demás sesiones, por urgencia; al final las en reposo
+    role: str = 'engineer'    # el personaje de la mascota: el del subagente que trabaja
 
 
 class Model:
@@ -409,10 +453,23 @@ class Model:
         root = project_root(s.cwd)
 
         if s.ask is not None and agent == s.ask_agent and (
-                ev in ('start', 'stop', 'failure')
+                ev in ('start', 'stop', 'failure', 'agent-stop')
                 or (ev == 'tool-done' and msg.get('tool_name') == s.ask_tool)):
             # Se contestó en la terminal, o el turno siguió sin esperar.
             s.release()
+
+        if agent and ev in ('agent-stop', 'stop'):
+            # Terminó un subagente: el turno de la sesión sigue.
+            s.agents.pop(agent, None)
+            s.updated = now
+            return
+        if agent:
+            # Lo que pasa dentro de un subagente lo da de alta, aunque su
+            # arranque no se haya visto (los hooks se instalaron después).
+            a = s.agents.get(agent)
+            if a is None:
+                a = s.agents[agent] = Agent(agent, short(msg.get('agent_type'), 40), started=now)
+            a.updated = now
 
         if ev == 'ask':
             s.release()
@@ -421,6 +478,8 @@ class Model:
             s.ask, s.ask_tool, s.ask_agent = req, msg.get('tool_name', ''), agent
             s.last_tool = describe_tool(s.ask_tool, msg.get('tool_input'), root)
             s.preview = preview.build(s.ask_tool, msg.get('tool_input'))
+            if agent:
+                s.agents[agent].detail = s.last_tool
             s.set('permission', s.last_tool, now)
         elif ev == 'start':
             s.started = now
@@ -431,7 +490,11 @@ class Model:
             s.last_tool = describe_tool(msg.get('tool_name', ''), msg.get('tool_input'), root)
             # La vista previa dura lo que dura la edición: otra herramienta la quita.
             s.preview = preview.build(msg.get('tool_name', ''), msg.get('tool_input'))
+            if agent:
+                s.agents[agent].detail = s.last_tool
             s.set('working', s.last_tool, now)
+        elif ev == 'agent-start':
+            s.updated = now
         elif ev in ('tool-done', 'tool-fail'):
             # Tras aprobar un permiso no llega otro aviso hasta la siguiente
             # herramienta: esto baja la antena roja en cuanto la herramienta corre.
@@ -450,8 +513,6 @@ class Model:
         elif ev == 'idle':
             s.set('waiting', 'Esperando tu respuesta', now)
         elif ev == 'stop':
-            if msg.get('agent_id'):
-                return
             took = f' en {elapsed(now - s.started)}' if s.started else ''
             s.preview = None
             s.set('done', f'Listo{took}', now)
@@ -549,6 +610,8 @@ class Model:
         self.dismissed = {sid: t for sid, t in self.dismissed.items()
                           if now - t < ALERT_COOLDOWN_SECS}
         for sid, s in list(self.sessions.items()):
+            s.agents = {aid: a for aid, a in s.agents.items()
+                        if now - a.updated < AGENT_STALE_SECS}
             if now - s.updated > FORGET_SECS:
                 s.release()
                 del self.sessions[sid]
@@ -643,4 +706,4 @@ class Model:
             mode = 'peek'
         ask = st == 'permission' and best.ask is not None
         return View(mode, pet, title, best.detail, count, ask, best, (best.sid, st, ask),
-                    ranked[1:])
+                    ranked[1:], best.role)

@@ -271,6 +271,82 @@ class Consulta(IslandCase):
     def test_la_ventana_cabe_en_un_monitor_de_1080(self):
         self.assertLessEqual(app.WIN_H, 1080 - 30)
 
+    def test_los_subagentes_salen_bajo_su_sesion(self):
+        handle = self.isl.model.handle
+        for sid in 'ab':
+            handle({'event': 'start', 'session_id': sid, 'cwd': f'/x/{sid}'}, now=T)
+        for sid, aid, kind in (('a', 's1', 'elyares-auditor'), ('a', 's2', 'Explore'),
+                               ('b', 's3', 'elyares-reviewer')):
+            handle({'event': 'agent-start', 'session_id': sid, 'cwd': f'/x/{sid}', 'agent_id': aid,
+                    'agent_type': kind}, now=T + len(self.isl.model.sessions[sid].agents))
+        self.isl.refresh()
+        best, other = self.isl.view.session, self.isl.view.others[0]
+        rows = self.isl.listing()
+        # Los de la sesión de la cabecera, al principio; luego la otra y los suyos.
+        self.assertEqual([(s.sid, a and a.name) for s, a in rows],
+                         [(best.sid, a.name) for a in best.agents.values()]
+                         + [(other.sid, None)] + [(other.sid, a.name) for a in other.agents.values()])
+        self.assertEqual(len(rows), 4)
+        self.isl.expanded = True
+        self.assertEqual(self.isl.target(), 'list')
+        self.assertEqual(self.isl.view.role, best.role)
+        shown = []
+        layout = self.isl._layout
+        self.isl._layout = lambda cr, text, *a, **kw: shown.append(text) or layout(cr, text, *a, **kw)
+        self.isl.rows = []
+        self.isl.draw_rows(self.cr, 100, 440, app.OPEN_H, 1.0)
+        # La fila de un subagente lleva a su sesión.
+        self.assertEqual([s.sid for s, _y, _h in self.isl.rows], [s.sid for s, _a in rows])
+        for name in ('auditor', 'Explore', 'reviewer', 'Arrancando…'):
+            self.assertIn(name, shown)
+
+    def test_un_solo_subagente_ya_abre_la_lista(self):
+        self.isl.model.handle({'event': 'start', 'session_id': 'a', 'cwd': '/x/a'}, now=T)
+        self.isl.refresh()
+        self.isl.expanded = True
+        self.assertEqual(self.isl.target(), 'open')
+        self.isl.model.handle({'event': 'agent-start', 'session_id': 'a', 'cwd': '/x/a',
+                               'agent_id': 's1', 'agent_type': 'elyares-architect'}, now=T)
+        self.isl.refresh()
+        self.assertEqual(self.isl.target(), 'list')
+
+
+@unittest.skipIf(app is None, 'sin gi: usa /usr/bin/python3')
+class Familia(unittest.TestCase):
+    """Los cuatro personajes de `mascot.py`."""
+
+    STATES = ('idle', 'working', 'permission', 'done', 'confused', 'annoyed', 'dizzy', 'sleep')
+
+    def pixels(self, state, **kw):
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 300, 320)
+        cr = cairo.Context(surface)
+        cr.translate(150, 170)
+        app.mascot.draw(cr, state, .36, .42, **kw)
+        return bytes(surface.get_data())
+
+    def test_cada_uno_tiene_todos_los_gestos(self):
+        for role in app.mascot.ROLES:
+            for st in self.STATES:
+                with self.subTest(role=role, state=st):
+                    self.assertTrue(any(self.pixels(st, role=role)))
+
+    def test_cada_uno_se_distingue_de_los_demas(self):
+        for st in ('idle', 'working'):
+            drawn = {self.pixels(st, role=role) for role in app.mascot.ROLES}
+            self.assertEqual(len(drawn), len(app.mascot.ROLES))
+
+    def test_sin_personaje_o_con_uno_desconocido_es_el_engineer(self):
+        engineer = self.pixels('working', role='engineer')
+        self.assertEqual(self.pixels('working'), engineer)
+        self.assertEqual(self.pixels('working', role='Explore'), engineer)
+
+    def test_todos_tienen_sus_capas(self):
+        for table in (app.mascot.HATS, app.mascot.PROPS):
+            self.assertEqual(set(table), set(app.mascot.ROLES))
+        # El engineer usa el color del tema; los demás, el suyo.
+        self.assertEqual(set(app.mascot.ACCENTS), set(app.mascot.ROLES) - {'engineer'})
+        self.assertEqual(set(state.AGENT_ROLES.values()), set(app.mascot.ACCENTS))
+
 
 class Ficha(IslandCase):
     def test_por_el_socket_un_boton_no_corre_comandos(self):

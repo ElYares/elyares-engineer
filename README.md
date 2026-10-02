@@ -56,6 +56,8 @@ Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyar
 | `PostToolUse` | `tool-done` | baja la antena roja tras aprobar un permiso |
 | `PostToolUseFailure` | `tool-fail` | si eran pruebas, dice cuáles fallaron |
 | `PreCompact` | `compact` | sigue trabajando: "Compactando el contexto…" |
+| `SubagentStart` | `agent-start` | apunta al subagente; si es de la familia, se vuelve él |
+| `SubagentStop` | `agent-stop` | lo quita de la lista y vuelve a ser el engineer |
 | `PermissionRequest` | `ask` | antena roja con botones Permitir / Denegar |
 | `Notification` · `permission_prompt` | `permission` | antena roja, isla abierta |
 | `Notification` · `idle_prompt` | `idle` | confundida: lleva un rato esperándote |
@@ -100,6 +102,36 @@ líneas. Cuando pide permiso lo muestra entero siempre, para ver el comando
 completo antes de contestar. Las filas de la lista siguen en una línea.
 
 Un clic en la mascota la enoja; tres rápidos la marean.
+
+### La familia
+
+ElYares no trabaja solo. La sesión es el **engineer**, y hay tres subagentes de
+Claude Code con su propio personaje: misma cara, mismas gafas y misma antena,
+pero cada uno con su atuendo, lo que trae en las manos al trabajar y su color.
+
+| Personaje | Subagente | Lleva | Al trabajar | Color |
+|---|---|---|---|---|
+| engineer | la sesión | gorra al revés | laptop | el acento del tema |
+| architect | `elyares-architect` | casco de obra y lápiz en la oreja | un plano | cian |
+| auditor | `elyares-auditor` | cachucha negra con `</>`, camisa y gafete | un clipboard con su checklist | morado |
+| reviewer | `elyares-reviewer` | visera de editor y lápiz rojo | una lupa sobre el código | rosa |
+
+Mientras trabaja un subagente de la familia, la mascota grande es ese
+personaje, con todos sus gestos (la antena sigue en rojo al pedir permiso y en
+verde al terminar); cuando termina, vuelve a ser el engineer. Con varios a la
+vez manda el que arrancó al último.
+
+En la lista, cada subagente sale debajo de su sesión (los de la sesión de la
+cabecera, al principio) con su carita, su nombre, lo que hace y cuánto lleva.
+Salen todos, también los que no son de la familia (`Explore`,
+`general-purpose`…): esos trabajan con la cara del engineer. Un clic en la
+fila lleva al pane de su sesión.
+
+La isla sabe cuál es cuál porque Claude Code manda `agent_id` y `agent_type`
+en cada hook que se dispara dentro de un subagente. Los personajes están en
+`elyares/mascot.py`, por capas (`HATS`, `BACK`, `FRONT`, `PROPS`, `ACCENTS`), y
+qué subagente es cuál, en `AGENT_ROLES` de `elyares/state.py`. Un subagente que
+se calla 20 min se da por terminado.
 
 ### Fuentes
 
