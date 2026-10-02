@@ -1,12 +1,12 @@
 """Los comandos y atajos que la isla enseña para consultar.
 
 Con el cursor sobre la pastilla de una fuente, su burbuja trae además sus
-comandos (los de devherd, los de coffe…). La pastilla "?" trae los de la
-propia mascota: los atajos de teclado, lo que hace cada clic y sus órdenes de
+comandos (los de devherd, los de coffe…). La pastilla "?" trae los del
+propio elyares-engineer: los atajos de teclado, lo que hace cada clic y sus órdenes de
 terminal.
 
 Los comandos salen de `commands.toml`, junto a este archivo, y de
-`~/.config/elyares-mascota/commands.toml` si existe: una sección de ahí
+`~/.config/elyares-engineer/commands.toml` si existe: una sección de ahí
 reemplaza a la de aquí. Los atajos de teclado no se escriben en ningún lado:
 se le preguntan a Hyprland, así que siempre son los que de verdad hay.
 
@@ -17,7 +17,7 @@ import os
 import tomllib
 
 HELP = 'help'             # la pastilla "?": no es una fuente
-BIND_PREFIX = 'Mascota:'  # con esto empieza la descripción de sus atajos en Hyprland
+BIND_PREFIX = 'Engineer:'  # con esto empieza la descripción de sus atajos en Hyprland
 # Los modificadores de un atajo de Hyprland, en el orden en que se dicen.
 MODS = ((64, 'SUPER'), (1, 'SHIFT'), (4, 'CTRL'), (8, 'ALT'))
 
@@ -28,7 +28,7 @@ def default_path():
 
 def user_path():
     base = os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
-    return os.path.join(base, 'elyares-mascota', 'commands.toml')
+    return os.path.join(base, 'elyares-engineer', 'commands.toml')
 
 
 def _read(path):
@@ -54,10 +54,10 @@ def combo(modmask, key):
 
 
 def shortcuts(binds):
-    """Los atajos de la mascota que hay en Hyprland: [(atajo, qué hace)].
+    """Los atajos de elyares-engineer que hay en Hyprland: [(atajo, qué hace)].
 
     `binds` es lo que contesta `hyprctl binds -j`. Son los que llevan
-    "Mascota:" en su descripción (`bindd`), en el orden del archivo.
+    "Engineer:" en su descripción (`bindd`), en el orden del archivo.
     """
     out = []
     for b in binds if isinstance(binds, list) else []:
@@ -75,7 +75,7 @@ def reference(key, sections, binds=None):
         blocks = [('Comandos', sections.get(key) or [])]
     else:
         blocks = [('Teclado', shortcuts(binds)), ('Ratón', sections.get('raton') or []),
-                  ('Terminal', sections.get('mascota') or [])]
+                  ('Terminal', sections.get('engineer') or [])]
     rows = []
     for title, items in blocks:
         if items:

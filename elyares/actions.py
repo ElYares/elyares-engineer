@@ -1,4 +1,4 @@
-"""Lo que la mascota hace fuera de sí misma: saltar al pane, correr el botón
+"""Lo que elyares-engineer hace fuera de sí mismo: saltar al pane, correr el botón
 de una alerta y leer No Molestar."""
 
 import shlex

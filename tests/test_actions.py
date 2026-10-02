@@ -1,4 +1,4 @@
-"""Lo que la mascota hace fuera de sí misma, sin lanzar nada de verdad."""
+"""Lo que elyares-engineer hace fuera de sí mismo, sin lanzar nada de verdad."""
 
 import types
 import unittest

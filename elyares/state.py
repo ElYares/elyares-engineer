@@ -61,7 +61,7 @@ CARD_ACTIONS = 2          # botones propios de una alerta, además de Descartar
 # El botón de una alerta que viene de una terminal o de una sesión: lleva a su pane.
 JUMP = {'label': 'Ir al pane', 'jump': True, 'after': 'dismiss'}
 
-DENY_MESSAGE = 'El usuario lo denegó desde la mascota ElYares.'
+DENY_MESSAGE = 'El usuario lo denegó desde elyares-engineer.'
 
 # Una alerta vieja queda debajo de cualquier sesión activa: si no, taparía
 # durante minutos los avisos de Claude. Recién llegada vale ALERT_FRESH.

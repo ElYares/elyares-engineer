@@ -6,7 +6,7 @@ import unittest
 from elyares import coffe
 from elyares.coffe import Tracker
 
-TOOLTIP = 'Pomodoro · 12:40 restantes\n\nArreglar el flaky\nelyares-mascota\n\n3 pomodoros hoy\n1 h 15 min'
+TOOLTIP = 'Pomodoro · 12:40 restantes\n\nArreglar el flaky\nelyares-engineer\n\n3 pomodoros hoy\n1 h 15 min'
 
 
 def line(phase, tooltip=TOOLTIP):

@@ -1,10 +1,16 @@
-# ElYares
+# elyares-engineer
 
-Mascota que vive en el borde de arriba del monitor, debajo de Waybar, y vigila
-las sesiones de Claude Code. Se asoma mientras Claude trabaja, se abre cuando
-pide permiso, termina o se queda esperando, y un clic en el texto te lleva al
-pane de tmux de esa sesión. Los permisos se pueden contestar ahí mismo con
-Permitir o Denegar.
+Una isla que vive en el borde de arriba del monitor, debajo de Waybar, y
+vigila a los agentes con los que trabajas: las sesiones de Claude Code y lo que
+corre a su alrededor (pruebas, contenedores, PRs, el pomodoro). Dentro va
+ElYares, su mascota: se asoma mientras un agente trabaja, se abre cuando pide
+permiso, termina o se queda esperando, y un clic en el texto te lleva al pane
+de tmux de esa sesión. Los permisos se pueden contestar ahí mismo con Permitir
+o Denegar.
+
+Antes se llamaba `elyares-mascota`. `install.sh` quita lo que dejó con ese
+nombre (servicio, enlace, bloque de `~/.bashrc`) y pasa sus preferencias a
+`~/.config/elyares-engineer`.
 
 Está hecha para omarchy (Hyprland + Waybar + tmux + ghostty), pero no toca
 nada de `~/.local/share/omarchy/`: es una capa de Wayland propia.
@@ -28,12 +34,12 @@ Requisitos (en omarchy ya vienen): `gtk4`, `gtk4-layer-shell`,
 ## Cómo funciona
 
 ```
-Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyares-mascota
+Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyares-engineer
                                               $XDG_RUNTIME_DIR/elyares.sock
 ```
 
 - **`bin/elyares-hook <evento>`** lee el payload del hook, se queda con lo que
-  hace falta y lo manda al socket. Si la mascota no está corriendo sale en
+  hace falta y lo manda al socket. Si elyares-engineer no está corriendo sale en
   silencio. Los hooks van con `async: true`: nunca frenan a Claude.
 - **`elyares-hook ask`** es la excepción: es síncrono y se queda esperando en
   el socket a que pulses Permitir o Denegar (ver abajo).
@@ -68,7 +74,7 @@ cuántas faltan. Con los botones de Permitir / Denegar no hay lista.
 
 La lista incluye las sesiones en reposo (aro gris hueco, "En reposo hace 12 min"):
 las que terminaron su turno y están en el prompt. Si no hay ninguna activa, la
-cabecera dice "Sin sesiones activas". La mascota solo conoce las sesiones que
+cabecera dice "Sin sesiones activas". elyares-engineer solo conoce las sesiones que
 le han mandado algún evento; al abrir la lista olvida las que tenían un pane
 de tmux que ya no existe, o cuyo servidor de tmux ya no corre.
 
@@ -128,11 +134,11 @@ suyas hay en la isla y qué hará el clic. Además:
 
 La burbuja de una fuente trae además sus comandos, en dos columnas: el comando
 y qué hace. La de devherd, los de `devherd`; la de coffe, los de `coffe`. Al
-otro extremo de la franja, la pastilla **?** trae los de la propia mascota:
+otro extremo de la franja, la pastilla **?** trae los del propio elyares-engineer:
 
 - **Teclado:** los atajos que hay en Hyprland. No están escritos en ningún
   lado: se leen de `hyprctl binds` (los `bindd` cuya descripción empieza con
-  "Mascota:"), así que siempre son los de verdad.
+  "Engineer:"), así que siempre son los de verdad.
 - **Ratón:** lo que hace cada clic.
 - **Terminal:** las órdenes de `elyares-ctl`.
 
@@ -140,10 +146,10 @@ Es solo para mirar: nada de ahí se ejecuta ni se copia.
 
 Los comandos salen de `elyares/commands.toml`. Para cambiarlos sin tocar el
 repo, copia las secciones que quieras a
-`~/.config/elyares-mascota/commands.toml`: una sección de ahí reemplaza a la
+`~/.config/elyares-engineer/commands.toml`: una sección de ahí reemplaza a la
 del repo y una vacía la quita. Cada sección lleva la clave de su pastilla
 (`devherd`, `coffe`, `github`, `terminal`, `usage`, `claude`), y `raton` y
-`mascota` son las de la pastilla **?**. Se relee cada vez que sale la burbuja.
+`engineer` son las de la pastilla **?**. Se relee cada vez que sale la burbuja.
 
 ```toml
 [devherd]
@@ -171,7 +177,7 @@ las fuentes.
 
 ### Alertas de DevHerd
 
-Si corre [DevHerd](https://github.com/ElYares/devherd) Observe, la mascota le
+Si corre [DevHerd](https://github.com/ElYares/devherd) Observe, elyares-engineer le
 pregunta cada 10 s a su API local (`127.0.0.1:9777`) y avisa de esto:
 
 | Qué pasó | En la isla |
@@ -218,12 +224,12 @@ una que empieza con `✓ `, `✗ ` u `○ ` lleva la marca a color),
 `where` y `note` (el encabezado, a la izquierda y a la derecha) y `actions`
 (hasta dos botones `{"label": "...", "url": "..."}`, o con `"jump": true` en
 vez de la URL para que lleve al `pane` de la alerta). Por el socket un botón
-no puede correr un comando: esos los ponen los vigilantes de la propia mascota.
+no puede correr un comando: esos los ponen los vigilantes del propio elyares-engineer.
 
 ### Pomodoro (`coffe`)
 
-Si está instalado [coffe](https://github.com/ElYares/omarchy-coffe-pomo), la
-mascota lee `coffe bar --watch`, lo mismo que Waybar. Mientras corre un
+Si está instalado [coffe](https://github.com/ElYares/omarchy-coffe-pomo),
+elyares-engineer lee `coffe bar --watch`, lo mismo que Waybar. Mientras corre un
 pomodoro la isla solo se abre sola para un permiso: "terminó", "esperando" y
 las alertas se quedan asomadas (la mascota sí cambia de gesto, y con el ratón
 encima se abre como siempre). Al empezar el descanso avisa, y si algo se quedó
@@ -233,7 +239,7 @@ esperando abre la lista. También avisa cuando el descanso se acaba.
 
 `install.sh` envuelve la barra de estado de Claude Code (`bin/elyares-statusline`
 corre la que ya tenías y guarda su comando en
-`~/.config/elyares-mascota/statusline.cmd`). Es el único sitio donde Claude
+`~/.config/elyares-engineer/statusline.cmd`). Es el único sitio donde Claude
 dice cuánto contexto lleva una sesión y cuánto del límite de 5 h. Con eso:
 
 - Junto a cada sesión sale el porcentaje de contexto que lleva usado: gris,
@@ -300,7 +306,7 @@ Lo que se ve depende de lo que el programa imprime:
 
 Para seguirlas en vivo, `shell/elyares.bash` le pide a tmux que copie lo que
 imprime el pane a `$XDG_RUNTIME_DIR/elyares-tests-<pane>.log` (`pipe-pane`)
-mientras dura el comando; la mascota lo relee cada medio segundo y lo borra al
+mientras dura el comando; elyares-engineer lo relee cada medio segundo y lo borra al
 terminar. tmux lleva una sola copia por pane: si el pane ya se está copiando a
 otro sitio (un plugin de registro), no se toca y esas pruebas avisan solo al
 final, como un comando largo. Fuera de tmux, lo mismo.
@@ -372,16 +378,16 @@ punto de "trabajando" en la lista, toman el color de acento del tema activo
 (`accent` en `~/.config/omarchy/current/theme/colors.toml`). Los demás estados
 conservan su color: rojo para permiso, amarillo para esperando y verde para
 terminó. `install.sh` deja un hook en `~/.config/omarchy/hooks/theme-set.d/`
-que avisa a la mascota al cambiar de tema, así que el color cambia sin
+que avisa a elyares-engineer al cambiar de tema, así que el color cambia sin
 reiniciar nada. Sin omarchy se queda con su azul.
 
 ### Modo vidrio
 
 Viene apagado. Con `elyares-ctl glass` el fondo de la isla pasa de negro casi
 opaco a translúcido, con un filo claro en el borde. La preferencia se guarda
-en `~/.config/elyares-mascota/settings.json` (`"glass": true`).
+en `~/.config/elyares-engineer/settings.json` (`"glass": true`).
 
-El desenfoque de lo que queda detrás lo hace Hyprland, no la mascota. Sin
+El desenfoque de lo que queda detrás lo hace Hyprland, no elyares-engineer. Sin
 estas reglas el fondo queda translúcido pero nítido (`~/.config/hypr/looknfeel.conf`):
 
 ```
@@ -402,11 +408,11 @@ que contestarlo.
 
 Clic derecho en la isla prende o apaga el modo compacto. Sin él, se asoma con
 la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
-`~/.config/elyares-mascota/settings.json`.
+`~/.config/elyares-engineer/settings.json`.
 
 ### Atajos de teclado
 
-`elyares-ctl` manda órdenes a la mascota por el mismo socket:
+`elyares-ctl` manda órdenes a elyares-engineer por el mismo socket:
 
 | Orden | Qué hace |
 |---|---|
@@ -427,10 +433,10 @@ de escondida no se guarda; al reiniciar el servicio vuelve a aparecer.
 En Hyprland (`~/.config/hypr/bindings.conf`):
 
 ```
-bindd = SUPER ALT, Y, Mascota: abrir la isla, exec, elyares-ctl open
-bindd = SUPER SHIFT ALT, Y, Mascota: esconder o mostrar, exec, elyares-ctl hide
-bindd = SUPER CTRL ALT, Y, Mascota: modo compacto, exec, elyares-ctl compact
-bindd = SUPER ALT, U, Mascota: fijar o soltar, exec, elyares-ctl pin
+bindd = SUPER ALT, Y, Engineer: abrir la isla, exec, elyares-ctl open
+bindd = SUPER SHIFT ALT, Y, Engineer: esconder o mostrar, exec, elyares-ctl hide
+bindd = SUPER CTRL ALT, Y, Engineer: modo compacto, exec, elyares-ctl compact
+bindd = SUPER ALT, U, Engineer: fijar o soltar, exec, elyares-ctl pin
 ```
 
 Fijada, la isla se queda abierta como cuando le pasas el ratón por encima (el
@@ -445,8 +451,8 @@ tras reiniciar sigue fijada. Un permiso sigue mostrando sus botones, y
 Para contestar un permiso sin soltar el teclado:
 
 ```
-bindd = SUPER ALT, A, Mascota: permitir, exec, elyares-ctl allow
-bindd = SUPER ALT, BackSpace, Mascota: denegar, exec, elyares-ctl deny
+bindd = SUPER ALT, A, Engineer: permitir, exec, elyares-ctl allow
+bindd = SUPER ALT, BackSpace, Engineer: denegar, exec, elyares-ctl deny
 ```
 
 ### Permitir / Denegar
@@ -457,7 +463,7 @@ puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
 
 - **Permitir o Denegar en la isla:** el hook imprime la decisión y el prompt de
   la terminal se cierra solo. Al denegar, Claude recibe "El usuario lo denegó
-  desde la mascota ElYares." y el turno se corta, como con el No de la
+  desde elyares-engineer." y el turno se corta, como con el No de la
   terminal: la decisión lleva `interrupt: true` y la isla pasa a "Esperando tu
   respuesta".
 - **Con el teclado:** `elyares-ctl allow` y `elyares-ctl deny` hacen lo mismo
@@ -480,10 +486,10 @@ puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
 - **Python del sistema.** El lanzador usa `/usr/bin/python3` a propósito: el
   de mise no trae PyGObject.
 - **`LD_PRELOAD`.** gtk4-layer-shell tiene que cargarse antes que
-  libwayland-client, y desde Python solo se logra así. Lo pone `bin/elyares-mascota`.
+  libwayland-client, y desde Python solo se logra así. Lo pone `bin/elyares-engineer`.
 - **CPU.** Escondida no dibuja nada (0%). Asomada y quieta va a 12 fps, ~3% de
   un núcleo; solo las transiciones van a 60 fps.
-- **Logs:** `journalctl --user -u elyares-mascota`.
+- **Logs:** `journalctl --user -u elyares-engineer`.
 - **Pruebas.** `make test` corre `tests/` con `unittest` y el python del
   sistema. No abren ninguna ventana ni llaman a nada de fuera: los vigilantes
   reciben fotos inventadas, el socket corre en una carpeta temporal con

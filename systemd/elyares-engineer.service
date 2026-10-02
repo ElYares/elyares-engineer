@@ -1,10 +1,10 @@
 [Unit]
-Description=ElYares, la mascota de Claude Code
+Description=elyares-engineer, la isla que vigila a tus agentes de código
 PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-ExecStart=%h/.local/bin/elyares-mascota
+ExecStart=%h/.local/bin/elyares-engineer
 Restart=on-failure
 RestartSec=2
 

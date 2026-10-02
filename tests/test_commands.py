@@ -10,11 +10,11 @@ from elyares import commands
 
 BINDS = [
     {'modmask': 64, 'key': 'RETURN', 'description': 'Terminal', 'arg': 'x'},
-    {'modmask': 72, 'key': 'Y', 'description': 'Mascota: abrir la isla', 'arg': 'elyares-ctl open'},
-    {'modmask': 73, 'key': 'Y', 'description': 'Mascota: esconder o mostrar'},
-    {'modmask': 76, 'key': 'Y', 'description': 'Mascota: modo compacto'},
-    {'modmask': 72, 'key': 'BackSpace', 'description': 'Mascota: denegar'},
-    {'modmask': 0, 'key': 'F9', 'description': 'Mascota:fijar'},
+    {'modmask': 72, 'key': 'Y', 'description': 'Engineer: abrir la isla', 'arg': 'elyares-ctl open'},
+    {'modmask': 73, 'key': 'Y', 'description': 'Engineer: esconder o mostrar'},
+    {'modmask': 76, 'key': 'Y', 'description': 'Engineer: modo compacto'},
+    {'modmask': 72, 'key': 'BackSpace', 'description': 'Engineer: denegar'},
+    {'modmask': 0, 'key': 'F9', 'description': 'Engineer:fijar'},
     {'modmask': 72, 'key': 'T'}, 'basura',
 ]
 
@@ -25,7 +25,7 @@ class Atajos(unittest.TestCase):
         self.assertEqual(commands.combo(64 | 1 | 4 | 8, 'Y'), 'SUPER SHIFT CTRL ALT + Y')
         self.assertEqual(commands.combo(0, 'F9'), 'F9')
 
-    def test_solo_los_de_la_mascota_y_en_su_orden(self):
+    def test_solo_los_de_engineer_y_en_su_orden(self):
         self.assertEqual(commands.shortcuts(BINDS), [
             ('SUPER ALT + Y', 'Abrir la isla'), ('SUPER SHIFT ALT + Y', 'Esconder o mostrar'),
             ('SUPER CTRL ALT + Y', 'Modo compacto'), ('SUPER ALT + BackSpace', 'Denegar'),
@@ -42,13 +42,13 @@ class Archivo(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def user(self, text):
-        os.makedirs(os.path.join(self.dir, 'elyares-mascota'), exist_ok=True)
+        os.makedirs(os.path.join(self.dir, 'elyares-engineer'), exist_ok=True)
         with open(commands.user_path(), 'w') as f:
             f.write(text)
 
     def test_lo_del_repo(self):
         sections = commands.load()
-        self.assertLessEqual({'devherd', 'coffe', 'raton', 'mascota'}, set(sections))
+        self.assertLessEqual({'devherd', 'coffe', 'raton', 'engineer'}, set(sections))
         self.assertIn(('coffe pause', 'Al refri: anula el pomodoro y aparca la tarea'), sections['coffe'])
         for name, items in sections.items():
             self.assertTrue(items, name)
@@ -76,14 +76,14 @@ class Archivo(unittest.TestCase):
 
 class Burbuja(unittest.TestCase):
     SECTIONS = {'coffe': [('coffe pause', 'Al refri')], 'raton': [('Clic derecho', 'Compacto')],
-                'mascota': [('elyares-ctl status', 'Fuentes')]}
+                'engineer': [('elyares-ctl status', 'Fuentes')]}
 
     def test_la_de_una_fuente_trae_sus_comandos(self):
         self.assertEqual(commands.reference('coffe', self.SECTIONS),
                          [('head', 'Comandos'), ('cmd', 'coffe pause', 'Al refri')])
         self.assertEqual(commands.reference('github', self.SECTIONS), [])
 
-    def test_la_de_la_mascota_trae_teclado_raton_y_terminal(self):
+    def test_la_de_engineer_trae_teclado_raton_y_terminal(self):
         rows = commands.reference(commands.HELP, self.SECTIONS, BINDS)
         self.assertEqual([r[1] for r in rows if r[0] == 'head'], ['Teclado', 'Ratón', 'Terminal'])
         self.assertIn(('cmd', 'SUPER ALT + Y', 'Abrir la isla'), rows)

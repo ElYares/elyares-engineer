@@ -1,12 +1,12 @@
 # Los comandos que la isla enseña para consultar. Cada sección sale en la
 # burbuja de una pastilla, al pasarle el cursor: las de una fuente (devherd,
-# coffe, github, terminal, usage, claude) en la suya, y `raton` y `mascota` en
+# coffe, github, terminal, usage, claude) en la suya, y `raton` y `engineer` en
 # la de la pastilla "?", junto a los atajos de teclado, que se leen de Hyprland.
 #
 #     "comando" = "qué hace"
 #
 # Para cambiarlos sin tocar el repo, copia las secciones que quieras a
-# ~/.config/elyares-mascota/commands.toml: una sección de ahí reemplaza a la
+# ~/.config/elyares-engineer/commands.toml: una sección de ahí reemplaza a la
 # de aquí, y una sección vacía la quita. Se relee cada vez que sale la burbuja.
 
 [devherd]
@@ -38,7 +38,7 @@
 "Clic derecho" = "Modo compacto"
 "Clic central" = "Fija la isla abierta, o la suelta"
 
-[mascota]
+[engineer]
 "elyares-ctl status" = "Cómo está cada fuente"
 "elyares-ctl toggle <fuente>" = "Prende o apaga una fuente"
 "elyares-ctl glass" = "Modo vidrio"

@@ -6,18 +6,21 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 settings="$HOME/.claude/settings.json"
 statusline='$HOME/.local/bin/elyares-statusline'
-conf_dir="${XDG_CONFIG_HOME:-$HOME/.config}/elyares-mascota"
+conf_dir="${XDG_CONFIG_HOME:-$HOME/.config}/elyares-engineer"
 bashrc="$HOME/.bashrc"
 
-systemctl --user disable --now elyares-mascota.service 2>/dev/null || true
-rm -f "$HOME/.config/systemd/user/elyares-mascota.service"
+# También lo que haya quedado del nombre anterior, elyares-mascota.
+for name in elyares-engineer elyares-mascota; do
+  systemctl --user disable --now "$name.service" 2>/dev/null || true
+  rm -f "$HOME/.config/systemd/user/$name.service" "$HOME/.local/bin/$name" \
+    "$HOME/.config/omarchy/hooks/theme-set.d/$name"
+  [ -f "$bashrc" ] \
+    && sed -i --follow-symlinks "/^# >>> $name >>>/,/^# <<< $name <<</d" "$bashrc"
+done
 systemctl --user daemon-reload
-for f in elyares-mascota elyares-hook elyares-ctl elyares-demo elyares-statusline; do
+for f in elyares-hook elyares-ctl elyares-demo elyares-statusline; do
   rm -f "$HOME/.local/bin/$f"
 done
-[ -f "$bashrc" ] \
-  && sed -i --follow-symlinks '/^# >>> elyares-mascota >>>/,/^# <<< elyares-mascota <<</d' "$bashrc"
-rm -f "$HOME/.config/omarchy/hooks/theme-set.d/elyares-mascota"
 
 if [ -f "$settings" ]; then
   cp "$settings" "$settings.elyares-bak-$(date +%F-%H%M%S)"
@@ -34,4 +37,4 @@ if [ -f "$settings" ]; then
     rm -f "$orig"
   fi
 fi
-echo "✓ ElYares desinstalado"
+echo "✓ elyares-engineer desinstalado"

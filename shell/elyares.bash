@@ -1,4 +1,4 @@
-# Avisa a la mascota ElYares cuando un comando largo de la terminal termina.
+# Avisa a elyares-engineer cuando un comando largo de la terminal termina.
 # install.sh lo carga desde ~/.bashrc; solo hace algo en shells interactivas.
 #
 # PS0 anota la hora al lanzar cada comando y PROMPT_COMMAND la compara cuando
@@ -11,8 +11,8 @@
 #
 # Las pruebas van aparte. Si el comando corre pruebas (pytest, pest, vitest,
 # go test, make test...) y la shell está dentro de tmux, PS0 le pide a tmux
-# que copie a un archivo lo que imprima el pane y avisa de que empiezan: la
-# mascota lee ese archivo y va mostrando cuáles pasan y cuáles fallan. Al
+# que copie a un archivo lo que imprima el pane y avisa de que empiezan:
+# elyares-engineer lee ese archivo y va mostrando cuáles pasan y cuáles fallan. Al
 # volver el prompt se cierra la copia y se avisa del final, tarde lo que tarde.
 
 [[ $- == *i* ]] || return 0

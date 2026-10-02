@@ -1,6 +1,6 @@
 """Preferencias que sobreviven al reinicio del daemon.
 
-Viven en `~/.config/elyares-mascota/settings.json`. Si el archivo no existe o
+Viven en `~/.config/elyares-engineer/settings.json`. Si el archivo no existe o
 está roto se usan los valores por defecto.
 """
 
@@ -13,7 +13,7 @@ DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'devherd': True, '
 
 def path():
     base = os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
-    return os.path.join(base, 'elyares-mascota', 'settings.json')
+    return os.path.join(base, 'elyares-engineer', 'settings.json')
 
 
 def load():

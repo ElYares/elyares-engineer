@@ -32,7 +32,7 @@ Abierta a mano lleva al pie una pastilla por fuente (`sources.py`): dice si
 está conectada y un clic la prende o la apaga. Con el cursor sobre una
 pastilla sale debajo de la isla una burbuja con lo que se sabe de esa fuente
 y, para consultar, sus comandos (`commands.py`). Al final de la franja, la
-pastilla "?" trae los de la propia mascota: atajos de teclado, clics y órdenes.
+pastilla "?" trae los del propio elyares-engineer: atajos de teclado, clics y órdenes.
 
 Mientras corren unas pruebas en una terminal la isla se queda abierta con su
 ficha a la vista: la lista de las que van pasando (✓) y fallando (✗), que
@@ -261,7 +261,7 @@ class Island:
                   lambda req: GLib.idle_add(self.on_gone, req))
         hypr.listen(lambda name: GLib.idle_add(self.on_focused_monitor, name))
         # Los vigilantes corren siempre y miran la preferencia en cada vuelta:
-        # así una fuente se prende y se apaga sin reiniciar la mascota.
+        # así una fuente se prende y se apaga sin reiniciar elyares-engineer.
         emit = lambda msg: GLib.idle_add(self.on_message, msg, None)  # noqa: E731
         self.tests = testrun.Follower(emit)
         devherd.watch(emit, lambda: self.settings['devherd'])
@@ -279,8 +279,8 @@ class Island:
     # ── estado ───────────────────────────────────────────────────────────────
 
     def on_socket(self, msg, req):
-        # Un botón que corre un comando solo lo ponen los vigilantes de la
-        # propia mascota. Por el socket una alerta puede traer ficha y botones
+        # Un botón que corre un comando solo lo ponen los vigilantes del
+        # propio elyares-engineer. Por el socket una alerta puede traer ficha y botones
         # que abren una URL, pero no comandos: quien pueda escribir aquí no
         # debe poder disfrazar de "Logs" lo que quiera correr.
         if isinstance(msg.get('actions'), list):
@@ -424,7 +424,7 @@ class Island:
         ('cmd', comando, qué hace)."""
         text, dim = rgb(self.colors['text']), rgb(self.colors['dim'])
         if key == commands.HELP:
-            return 'Atajos de la mascota', [('text', 'Para consultar: nada de aquí se ejecuta', dim)
+            return 'Atajos de elyares-engineer', [('text', 'Para consultar: nada de aquí se ejecuta', dim)
                                             ] + self.tip_ref
         state, now = self.source_state(key), time.monotonic()
         src = self.sources.get(key) or {}
@@ -457,7 +457,7 @@ class Island:
             if src.get('polled'):
                 lines.append((f'Consultado {ago(now - src["polled"])}', dim))
         if key != 'claude':
-            # Claude no se apaga desde aquí: sin sus hooks no hay mascota.
+            # Claude no se apaga desde aquí: sin sus hooks no hay nada que mostrar.
             lines.append(('Clic para prenderla' if state == 'off' else 'Clic para apagarla',
                           MUTED_COLOR[:3]))
         return sources.LABELS[key], [('text', *line) for line in lines] + self.tip_ref
@@ -1110,7 +1110,7 @@ class Island:
 
     def draw_pills(self, cr, x0, w, bottom, alpha):
         """Una pastilla por fuente, pegadas al borde de abajo, y al final la
-        de los atajos de la mascota."""
+        de los atajos de elyares-engineer."""
         left, right = x0 + 18, x0 + w - 18
         top = bottom - PILLS_H
         cr.set_source_rgba(1, 1, 1, .08 * alpha)
@@ -1313,7 +1313,7 @@ class Island:
             return
         for key, bx, by, bw, bh in self.pills:
             if bx <= x <= bx + bw and by <= y <= by + bh:
-                # Claude no se apaga desde aquí: sin sus hooks no hay mascota.
+                # Claude no se apaga desde aquí: sin sus hooks no hay nada que mostrar.
                 # Y la de los atajos no es una fuente.
                 if key in sources.PREFIXES:
                     self.toggle_source(key)
@@ -1375,8 +1375,8 @@ class Island:
 
 
 def main(argv):
-    # gtk4-layer-shell ya está cargada (la precarga bin/elyares-mascota): que
-    # no la hereden los programas que lanza la mascota. Firefox es GTK 3 y
+    # gtk4-layer-shell ya está cargada (la precarga bin/elyares-engineer): que
+    # no la hereden los programas que lanza elyares-engineer. Firefox es GTK 3 y
     # aborta al arrancar con una biblioteca de GTK 4 dentro.
     preload = [lib for lib in os.environ.get('LD_PRELOAD', '').split(':')
                if lib and 'gtk4-layer-shell' not in lib]
@@ -1384,7 +1384,7 @@ def main(argv):
         os.environ['LD_PRELOAD'] = ':'.join(preload)
     else:
         os.environ.pop('LD_PRELOAD', None)
-    app = Gtk.Application(application_id='dev.elyares.Mascota')
+    app = Gtk.Application(application_id='dev.elyares.Engineer')
 
     def activate(app):
         if not getattr(app, 'island', None):

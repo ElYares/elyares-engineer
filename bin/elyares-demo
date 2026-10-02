@@ -1,5 +1,5 @@
 #!/bin/sh
-# Recorre los estados de la mascota con eventos falsos, sin Claude Code.
+# Recorre los estados de elyares-engineer con eventos falsos, sin Claude Code.
 # Uso: elyares-demo [proyecto]
 proj="${1:-devherd}"
 cwd="$HOME/develop/personal/$proj"

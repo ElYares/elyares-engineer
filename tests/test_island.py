@@ -201,7 +201,7 @@ class Consulta(IslandCase):
         self.isl.pills, self.isl.tip = [], None
         self.isl.tip_key, self.isl.tip_since, self.isl.tip_ref = None, 0.0, []
         binds = mock.patch.object(app.hypr, 'binds', lambda: [
-            {'modmask': 72, 'key': key, 'description': f'Mascota: orden {key}'} for key in 'YUA'])
+            {'modmask': 72, 'key': key, 'description': f'Engineer: orden {key}'} for key in 'YUA'])
         binds.start()
         self.addCleanup(binds.stop)
         self.cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, app.WIN_W, app.WIN_H))
@@ -235,7 +235,7 @@ class Consulta(IslandCase):
 
     def test_la_de_los_atajos_los_lee_de_hyprland(self):
         title, rows = self.bubble(commands.HELP)
-        self.assertEqual(title, 'Atajos de la mascota')
+        self.assertEqual(title, 'Atajos de elyares-engineer')
         self.assertIn(('cmd', 'SUPER ALT + U', 'Orden U'), rows)
         self.assertEqual([r[1] for r in rows if r[0] == 'head'], ['Teclado', 'Ratón', 'Terminal'])
 

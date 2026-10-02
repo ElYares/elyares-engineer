@@ -257,7 +257,7 @@ def results(run):
 def log_path(pane):
     """El archivo donde tmux copia lo que imprime un pane mientras corren pruebas.
 
-    Sale del id del pane y nunca de lo que diga un mensaje: la mascota lee y
+    Sale del id del pane y nunca de lo que diga un mensaje: elyares-engineer lee y
     borra este archivo, y quien escriba en el socket no debe elegir cuál.
     """
     if not re.fullmatch(r'%\d+', pane or ''):

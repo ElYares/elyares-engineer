@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Manda un evento de Claude Code a la mascota.
+"""Manda un evento de Claude Code a elyares-engineer.
 
 Uso (desde settings.json):  elyares-hook <evento>   con el payload del hook por stdin
 Eventos: start tool tool-done tool-fail permission idle stop failure session-end
@@ -11,7 +11,7 @@ Cuando Claude corre pruebas con Bash, `tool-done` y `tool-fail` (hooks
 PostToolUse y PostToolUseFailure: unas pruebas en rojo salen con error) llevan
 además lo que imprimió el comando, para que la isla diga cuáles pasaron.
 
-Nunca falla: si la mascota no está corriendo, sale en silencio.
+Nunca falla: si elyares-engineer no está corriendo, sale en silencio.
 
 Todos los eventos son de una sola vía menos `ask` (hook PermissionRequest), que
 espera a que se pulse Permitir o Denegar en la isla y lo imprime en stdout. En
@@ -82,7 +82,7 @@ SHELLS = ('sh', 'bash', 'dash', 'zsh', 'fish')
 
 def session_proc():
     """El proceso de la sesión de Claude que lanzó este hook: ("pid:arranque",
-    su entorno). Lo primero es para que la mascota sepa cuándo deja de
+    su entorno). Lo primero es para que elyares-engineer sepa cuándo deja de
     existir; el arranque distingue a otro proceso que más tarde reciba el
     mismo pid. ('', {}) si no se pudo saber."""
     pid = os.getppid()

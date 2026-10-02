@@ -133,7 +133,7 @@ class Socket(unittest.TestCase):
             self.assertNotIn('output', msg)
             self.assertNotIn('CLAVE', json.dumps(msg))
 
-    def test_el_hook_sin_mascota_sale_callado(self):
+    def test_el_hook_sin_engineer_sale_callado(self):
         r = subprocess.run([sys.executable, os.path.join(BIN, 'elyares-hook'), 'tool'], input='{}',
                            capture_output=True, text=True, timeout=10,
                            env={**self.env, 'XDG_RUNTIME_DIR': os.path.join(self.dir, 'nada')})
@@ -186,7 +186,7 @@ class Socket(unittest.TestCase):
         self.assertEqual(self.run_bin('elyares-ctl', 'toggle', 'nada').returncode, 2)
         self.assertTrue(self.msgs.empty())
 
-    def test_ctl_sin_mascota(self):
+    def test_ctl_sin_engineer(self):
         r = subprocess.run([sys.executable, os.path.join(BIN, 'elyares-ctl'), 'open'],
                            capture_output=True, text=True, timeout=10,
                            env={**self.env, 'XDG_RUNTIME_DIR': os.path.join(self.dir, 'nada')})

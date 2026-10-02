@@ -265,7 +265,7 @@ def watch(emit, enabled=lambda: True, only=lambda: None):
     if not shutil.which('gh'):
         emit({'event': 'source', 'name': 'github', 'ok': False, 'note': 'falta gh',
               'why': 'No está instalado gh, el cliente de GitHub',
-              'fix': 'Instálalo, entra con gh auth login y reinicia la mascota'})
+              'fix': 'Instálalo, entra con gh auth login y reinicia elyares-engineer'})
         return
 
     def loop():
