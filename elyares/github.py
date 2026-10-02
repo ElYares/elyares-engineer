@@ -9,6 +9,10 @@ compara con la vez anterior:
 La primera consulta solo toma la foto. `gh` puede tener varias cuentas: se
 consultan todas, o las que diga la preferencia `github_accounts`.
 
+Un PR con los checks en rojo lleva su ficha: qué check falló, el final de su
+log si es de GitHub Actions, y los botones Reintentar (`gh run rerun --failed`)
+y Abrir PR. Eso se pregunta aparte y solo cuando un PR se pone en rojo.
+
 Tras cada consulta le cuenta a la isla, para la burbuja de su pastilla, cómo
 están las cosas ahora: cuántos PRs abiertos hay y sus checks, cuántas
 revisiones pendientes y qué cuentas respondieron.
@@ -17,6 +21,7 @@ El token de cada una se le pide a `gh` y nunca se guarda ni se muestra.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -26,6 +31,9 @@ POLL_SECS = 120
 GREEN = ('SUCCESS',)
 RED = ('FAILURE', 'ERROR')
 RUNNING = ('PENDING', 'EXPECTED')
+# Con estas conclusiones un check cuenta como caído. Uno cancelado o saltado no.
+FAILED = ('FAILURE', 'ERROR', 'TIMED_OUT', 'STARTUP_FAILURE')
+LOG_LINES = 8             # líneas de log que van en la ficha de un PR en rojo
 
 QUERY = '''
 {
@@ -43,6 +51,25 @@ QUERY = '''
   }
 }
 '''
+
+
+CHECKS_QUERY = '''
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 50) { nodes {
+        __typename
+        ... on CheckRun { name conclusion checkSuite { workflowRun { databaseId } } }
+        ... on StatusContext { context state }
+      } } } } } }
+    }
+  }
+}
+'''
+
+# `gh run view --log-failed` da "job<TAB>paso<TAB>fecha mensaje" por línea.
+_STAMP = re.compile(r'^\ufeff?\d{4}-\d\d-\d\dT[\d:.]+Z ?')
+_MARK = re.compile(r'^##\[(\w+)\]')
 
 
 def _run(cmd, env=None, timeout=20):
@@ -63,13 +90,17 @@ def accounts():
     return [h['login'] for h in hosts if h.get('login') and h.get('state') == 'success']
 
 
-def snapshot(account):
-    """PRs abiertos y revisiones pedidas de una cuenta, o None si no se pudo."""
+def _gh(account, *args):
+    """Corre `gh` como una cuenta, sin cambiar la activa. None si no se pudo."""
     token = (_run(['gh', 'auth', 'token', '--user', account], timeout=5) or '').strip()
     if not token:
         return None
-    out = _run(['gh', 'api', 'graphql', '-f', f'query={QUERY}'],
-               env={**os.environ, 'GH_TOKEN': token})
+    return _run(['gh', *args], env={**os.environ, 'GH_TOKEN': token})
+
+
+def snapshot(account):
+    """PRs abiertos y revisiones pedidas de una cuenta, o None si no se pudo."""
+    out = _gh(account, 'api', 'graphql', '-f', f'query={QUERY}')
     try:
         data = json.loads(out or '')['data']
         prs = {}
@@ -84,13 +115,79 @@ def snapshot(account):
 
 
 def _brief(pr):
+    slug = pr['repository']['nameWithOwner']
     return {'url': pr['url'], 'number': pr['number'], 'title': pr['title'],
-            'repo': pr['repository']['nameWithOwner'].split('/')[-1]}
+            'repo': slug.split('/')[-1], 'slug': slug}
 
 
-def _alert(kind, pr, message, tone):
+def failed_checks(account, pr):
+    """Los checks caídos de un PR: [(nombre, id de su run de Actions o None)].
+
+    Primero los de GitHub Actions, que son los que tienen log y se pueden
+    reintentar. [] si no se pudo preguntar.
+    """
+    owner, _, name = pr['slug'].partition('/')
+    out = _gh(account, 'api', 'graphql', '-f', f'query={CHECKS_QUERY}',
+              '-f', f'owner={owner}', '-f', f'name={name}', '-F', f'number={pr["number"]}')
+    try:
+        commit = json.loads(out or '')['data']['repository']['pullRequest']['commits']['nodes'][0]
+        nodes = commit['commit']['statusCheckRollup']['contexts']['nodes']
+    except (ValueError, KeyError, TypeError, IndexError):
+        return []
+    checks = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if node.get('__typename') == 'CheckRun' and node.get('conclusion') in FAILED:
+            run = ((node.get('checkSuite') or {}).get('workflowRun') or {}).get('databaseId')
+            checks.append((node.get('name') or 'check', run))
+        elif node.get('__typename') == 'StatusContext' and node.get('state') in FAILED:
+            checks.append((node.get('context') or 'check', None))
+    return sorted(checks, key=lambda c: c[1] is None)
+
+
+def clean_log(text):
+    """Lo que imprimieron los pasos caídos de un run, sin job, paso ni fecha."""
+    lines = []
+    for line in (text or '').splitlines():
+        line = _STAMP.sub('', line.split('\t', 2)[-1])
+        mark = _MARK.match(line)
+        if mark:
+            # ##[group] y compañía son del visor de GitHub; el error sí se queda.
+            if mark[1] != 'error':
+                continue
+            line = line[mark.end():]
+        if line.strip():
+            lines.append(line)
+    return lines
+
+
+def log_tail(account, pr, run, n=LOG_LINES):
+    """Las últimas líneas del log de los pasos caídos de un run, o []."""
+    out = _gh(account, 'run', 'view', str(run), '--repo', pr['slug'], '--log-failed')
+    return clean_log(out)[-n:]
+
+
+def card(account, pr, checks, lines):
+    """La ficha de un PR en rojo: qué falló, el final del log y sus botones."""
+    names = [name for name, _ in checks]
+    run = next((r for _, r in checks if r), None)
+    actions = [{'label': 'Abrir PR', 'url': pr['url'], 'after': 'dismiss'}]
+    if run:
+        # El token se pide al pulsar el botón: nunca queda guardado en la alerta.
+        script = 'GH_TOKEN=$(gh auth token --user "$1") gh run rerun "$2" --failed --repo "$3"'
+        actions.insert(0, {'label': 'Reintentar', 'term': True, 'hold': True, 'after': 'clear',
+                           'cmd': ['bash', '-c', script, 'gh', account, str(run), pr['slug']]})
+    where = names[0] + (f' y {len(names) - 1} más' if len(names) > 1 else '') if names else ''
+    return {'where': where, 'note': _count(len(names), 'check caído', 'checks caídos') if names else '',
+            # Sin log (un check que no es de Actions), los nombres de los demás.
+            'lines': lines or names[1:], 'actions': actions}
+
+
+def _alert(kind, pr, message, tone, **card):
+    """card: la ficha de la alerta (where, note, lines, actions)."""
     return {'event': 'alert', 'session_id': f'gh:{kind}:{pr["url"]}', 'name': pr['repo'],
-            'message': message, 'tone': tone, 'url': pr['url']}
+            'message': message, 'tone': tone, 'url': pr['url'], **card}
 
 
 def _count(n, one, many):
@@ -126,7 +223,8 @@ def summary(snaps):
 
 
 class Watcher:
-    def __init__(self):
+    def __init__(self, failed_checks=failed_checks, log_tail=log_tail):
+        self.failed_checks, self.log_tail = failed_checks, log_tail
         self.before = {}          # cuenta -> foto anterior
 
     def step(self, account, snap):
@@ -146,7 +244,11 @@ class Watcher:
             if now in GREEN:
                 msgs.append(_alert('ci', pr, f'{label}: checks en verde · {pr["title"]}', 'ok'))
             elif now in RED:
-                msgs.append(_alert('ci', pr, f'{label}: checks en rojo · {pr["title"]}', ''))
+                checks = self.failed_checks(account, pr)
+                run = next((r for _, r in checks if r), None)
+                lines = self.log_tail(account, pr, run) if run else []
+                msgs.append(_alert('ci', pr, f'{label}: checks en rojo · {pr["title"]}', '',
+                                   **card(account, pr, checks, lines)))
         for url, pr in snap['reviews'].items():
             if url not in before['reviews']:
                 msgs.append(_alert('review', pr,
