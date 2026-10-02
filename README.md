@@ -192,6 +192,10 @@ diff") o con `@`. Su descripción le dice a la sesión que no los lance por
 iniciativa propia. Los tres devuelven un informe con formato fijo, que siempre
 dice qué no revisaron y qué quedó sin verificar.
 
+Cada uno fija su modelo y su esfuerzo en su encabezado (`model`, `effort`): el
+architect y el reviewer corren con Sonnet y el auditor con Opus, los tres en
+`medium`. Sin esas líneas heredarían los de la sesión que los lanza.
+
 - Las reglas `E`, `C`, `T`, `P` y `UX` son las de `docs/ESTANDARES-CORE.md`.
   Cada agente trae el enunciado, y si el proyecto tiene su propia copia o una
   regla propia, gana la del proyecto.

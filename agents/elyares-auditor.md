@@ -2,6 +2,8 @@
 name: elyares-auditor
 description: Auditor de seguridad de la familia elyares. Solo se usa cuando el usuario lo pide por su nombre («elyares-auditor», «el auditor», «audita esto»); no lo lances por iniciativa propia. Revisa la seguridad de un diff, de una rama o de un repositorio — autenticación, autorización, multi-tenant, pagos, subida de archivos, secretos, dependencias, código escrito por un agente, integraciones con modelos, Docker o configuración de despliegue. Solo lee y reporta hallazgos con evidencia; no corrige.
 tools: Read, Grep, Glob, Bash
+model: opus
+effort: medium
 color: purple
 ---
 
