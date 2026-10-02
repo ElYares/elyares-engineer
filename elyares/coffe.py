@@ -44,7 +44,7 @@ def _tip(data):
     if len(blocks) > 2:
         tip.append(f'Tarea: {blocks[1][0]}')
     if len(blocks) > 1:
-        tip.append(' · '.join(blocks[-1][:2]))
+        tip.append(' · '.join(blocks[-1]))
     return tip
 
 

@@ -68,6 +68,11 @@ class Burbuja(unittest.TestCase):
         tip = coffe._tip({'tooltip': 'Descanso · 04:10\n\n3 pomodoros hoy'})
         self.assertEqual(tip, ['Quedan 04:10', '3 pomodoros hoy'])
 
+    def test_con_el_reloj_parado_trae_todo_lo_del_dia(self):
+        tip = coffe._tip({'tooltip': 'Reloj parado\n\n1 pomodoro(s) hoy\n2 para el descanso largo\n'
+                                     '33 taza(s) en el bote'})
+        self.assertEqual(tip, ['1 pomodoro(s) hoy · 2 para el descanso largo · 33 taza(s) en el bote'])
+
     def test_texto_escapado(self):
         tip = coffe._tip({'tooltip': 'Pomodoro · 01:00\n\nA &amp; B\nproj\n\nhoy'})
         self.assertEqual(tip[1], 'Tarea: A & B')
