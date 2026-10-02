@@ -247,6 +247,9 @@ color. Además:
 
 - **GitHub:** cuántos PRs abiertos tienes y cómo van sus checks, cuántas
   revisiones te piden, qué cuentas respondieron y hace cuánto se consultó.
+  Debajo, cada uno por su nombre (hasta cinco; de los demás dice cuántos): de
+  qué proyecto es y su número, su título, de qué cuenta es y cómo van sus
+  checks, en su color. Primero los tuyos y luego los que te piden revisar.
 - **coffe:** cuánto queda del pomodoro o del descanso, la tarea en curso,
   cómo va el día y cuántos avisos esperan al descanso.
 - **Punto rojo:** por qué (Observe no responde, el reloj de coffe está caído,
