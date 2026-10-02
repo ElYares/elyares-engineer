@@ -320,6 +320,24 @@ class Consulta(IslandCase):
         self.assertEqual(rows[0], ('status', 'Apagada', 'dim'))
         self.assertFalse(any(r[0] in ('chips', 'stats') for r in rows))
 
+    def test_la_de_github_dice_de_que_proyecto_es_cada_pr(self):
+        self.shown, layout = [], self.isl._layout
+        self.isl._layout = lambda cr, text, *a, **kw: self.shown.append(text) or layout(cr, text, *a, **kw)
+        found =[{'where': f'org/proyecto-{i}', 'number': i, 'title': f'Cambio {i}', 'who': 'cuenta',
+                  'note': 'en verde', 'tone': 'ok'} for i in range(1, 8)]
+        self.isl.on_source({'name': 'github', 'ok': True, 'note': '1 cuenta', 'items': found,
+                            'tip': ['7 PRs abiertos: 7 en verde', 'Sin revisiones pendientes']})
+        rows = self.bubble('github')[1]
+        lines = [r[1] for r in rows if r[0] == 'text']
+        at = [r[0] for r in rows].index('items')
+        # Justo debajo de la línea que los cuenta: los primeros, y de los demás cuántos son.
+        self.assertEqual(rows[at - 1][1], '7 PRs abiertos: 7 en verde')
+        self.assertEqual(rows[at], ('items', found[:app.TIP_ITEMS], 2))
+        self.assertIn('Sin revisiones pendientes', lines)
+        for text in ('org/proyecto-1 #1', 'Cambio 1 · cuenta', 'en verde', 'y 2 más'):
+            self.assertIn(text, self.shown)
+        self.assertLessEqual(self.isl.tip_size[1], app.TIP_ROOM - app.TIP_GAP)
+
     def test_la_de_los_atajos_los_lee_de_hyprland(self):
         title, rows = self.bubble(commands.HELP)
         self.assertEqual(title, 'Atajos de elyares-engineer')

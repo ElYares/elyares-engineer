@@ -158,6 +158,15 @@ class Resumen(unittest.TestCase):
         self.assertEqual(lines, ['4 PRs abiertos: 1 en verde, 1 en rojo, 1 corriendo, 1 sin checks',
                                  '1 revisión pendiente', 'Cuentas: a, b · no respondió c'])
 
+    def test_dice_de_que_proyecto_es_cada_uno(self):
+        other = {**pr(5, 'FAILURE'), 'url': 'https://github.com/w/api/pull/5', 'slug': 'w/api'}
+        found = github.items({'a': snap([pr(1, 'SUCCESS'), pr(2)], [pr(9)]),
+                              'b': snap([pr(1, 'SUCCESS'), other]), 'c': None})
+        self.assertEqual([(it['where'], it['number'], it['who'], it['note'], it['tone']) for it in found], [
+            ('o/r', 1, 'a', 'en verde', 'ok'), ('o/r', 2, 'a', 'sin checks', ''),
+            ('w/api', 5, 'b', 'en rojo', 'bad'), ('o/r', 9, 'a', 'te piden revisión', 'info')])
+        self.assertEqual(found[0]['title'], 'cambio 1')
+
     def test_sin_nada(self):
         self.assertEqual(github.summary({'a': snap()}),
                          ['Sin PRs abiertos', 'Sin revisiones pendientes', 'Cuentas: a'])

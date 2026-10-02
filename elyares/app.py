@@ -102,6 +102,11 @@ TIP_ROOM = 440        # el alto que se le reserva en la ventana
 TIP_COL_GAP = 16      # entre un comando y lo que hace
 TIP_HEAD_GAP = 15     # aire sobre el título de un bloque de comandos, con una raya en medio
 TIP_LINES = 3         # líneas propias que puede traer una fuente
+TIP_ITEMS = 5         # cosas que nombra una por una (los PRs de GitHub); de las demás dice cuántas
+TIP_ITEM_DOT = 14     # sitio para el punto de cada una
+TIP_ITEM_GAP = 7      # entre una y otra
+# El color del punto y de la nota de cada una, por su tono.
+TIP_ITEM_ROLES = {'ok': 'pass', 'bad': 'bad', 'run': 'pct2', 'info': 'head'}
 TIP_R = 14            # lo redondo de sus esquinas: un popover de macOS
 TIP_TAIL = 13         # medio ancho de la flecha, donde nace de la burbuja
 TIP_TAIL_GAP = 2      # entre la punta de la flecha y el borde de la isla
@@ -404,8 +409,9 @@ class Island:
         """Una fuente cuenta cómo está. True si cambió lo que se ve en su pastilla.
 
         Además de `ok` y `note` puede traer lo que dirá su burbuja: `tip`
-        (unas líneas con cómo están las cosas) y, si no responde, `why` y
-        `fix`. Con `polled` avisa de que acaba de consultar.
+        (unas líneas con cómo están las cosas), `items` (las cosas que nombra
+        una por una: {where, number, title, who, note, tone}) y, si no
+        responde, `why` y `fix`. Con `polled` avisa de que acaba de consultar.
         """
         name, now = msg.get('name'), time.monotonic()
         if name not in sources.LABELS:
@@ -413,7 +419,9 @@ class Island:
         old = self.sources.get(name) or {}
         ok = msg.get('ok')
         tip = msg.get('tip') if isinstance(msg.get('tip'), list) else []
+        items = msg.get('items') if isinstance(msg.get('items'), list) else []
         self.sources[name] = {
+            'items': [it for it in items if isinstance(it, dict) and isinstance(it.get('where'), str)],
             'ok': ok, 'note': str(msg.get('note') or ''),
             'why': str(msg.get('why') or ''), 'fix': str(msg.get('fix') or ''),
             'tip': [t for t in tip if isinstance(t, str)][:TIP_LINES],
@@ -507,6 +515,7 @@ class Island:
             ('text', texto, color)         una frase; puede traer su marcado
             ('chips', [(texto, papel)])    lo que se sabe de ella, en etiquetas
             ('stats', [(cifra, nombre)])   sus cifras, en fichas
+            ('items', [cosa], cuántas más) lo que nombra una por una (`on_source`)
             ('head', título de un bloque) y ('cmd', comando, qué hace)
 
         Los colores salen de la paleta del tema, cada uno con su papel. Cómo
@@ -551,9 +560,13 @@ class Island:
             if src.get('fix'):
                 rows.append(('text', src['fix'], rgb(self.ink('var'))))
         elif state == 'on':
-            for line in src.get('tip') or []:
+            items = src.get('items') or []
+            for i, line in enumerate(src.get('tip') or []):
                 stats = paint.stats(line)
                 rows.append(('stats', stats) if stats else phrase(line))
+                if i == 0 and items:
+                    # Debajo de la línea que las cuenta, cuáles son.
+                    rows.append(('items', items[:TIP_ITEMS], len(items) - TIP_ITEMS))
             if key == 'coffe' and self.model.focus:
                 held = sum(1 for s in self.model.sessions.values() if s.state in ('waiting', 'alert'))
                 if held:
@@ -1900,6 +1913,8 @@ class Island:
                 blocks.append(self.tip_line(cr, layout, None if markup else row[2]))
             elif row[0] == 'chips':
                 blocks.append(self.tip_chips(cr, row[1], inner))
+            elif row[0] == 'items':
+                blocks.append(self.tip_items(cr, row[1], row[2], inner))
             elif row[0] == 'stats':
                 blocks += [self.tip_stats(cr, row[1][i:i + TIP_STATS_ROW], i, inner)
                            for i in range(0, len(row[1]), TIP_STATS_ROW)]
@@ -1977,6 +1992,45 @@ class Island:
             for dx, dy, chip in placed:
                 chip(x0 + dx, y0 + dy, alpha, glass)
         return wide, y + h, 1, 7, draw
+
+    def tip_items(self, cr, items, more, inner):
+        """Las cosas que una fuente nombra una por una (los PRs de GitHub):
+        arriba, de qué proyecto es y su número, con su punto y su nota (cómo
+        van sus checks) en el color de su tono; debajo, su título y de qué
+        cuenta es. `more` es cuántas no caben: se dice."""
+        soft, dim = rgb(self.ink('text', TIP_SOFT)), rgb(self.ink('dim', TIP_SOFT))
+        rows, y = [], 0
+        for it in items:
+            role = TIP_ITEM_ROLES.get(it.get('tone'), 'dim')
+            color = rgb(self.ink(role))
+            note = self._layout(cr, str(it.get('note') or ''), FONT_PILL)
+            nw, nh = note.get_pixel_size()
+            number = f' #{it["number"]}' if it.get('number') else ''
+            head = self._layout(cr, it['where'] + number, FONT_ROW, inner - TIP_ITEM_DOT - nw - TIP_COL_GAP,
+                                markup=self.tip_markup([(it['where'], 'path'), (number, 'num')]))
+            who = f' · {it["who"]}' if it.get('who') else ''
+            title = str(it.get('title') or '')
+            sub = self._layout(cr, title + who, FONT_TIP, inner - TIP_ITEM_DOT,
+                               markup=self.tip_markup([(title, 'arg'), (who, 'dim')]))
+            hh = max(head.get_pixel_size()[1], nh)
+            rows.append((y, head, note, nw, nh, hh, sub, color))
+            y += hh + sub.get_pixel_size()[1] + TIP_ITEM_GAP
+        tail = (self._layout(cr, f'y {more} más' if more > 1 else 'y 1 más', FONT_TIP)
+                if more > 0 else None)
+        h = y - TIP_ITEM_GAP + (tail.get_pixel_size()[1] + 2 if tail else 0)
+
+        def draw(x, y0, width, alpha, glass):
+            for dy, head, note, nw, nh, hh, sub, color in rows:
+                top = y0 + dy
+                cr.arc(x + 4, top + hh / 2, 3.5, 0, 2 * math.pi)
+                cr.set_source_rgba(*color, alpha)
+                cr.fill()
+                self.tip_text(cr, head, x + TIP_ITEM_DOT, top, None, alpha, glass)
+                self.tip_text(cr, note, x + width - nw, top + (hh - nh) / 2, color, alpha, glass)
+                self.tip_text(cr, sub, x + TIP_ITEM_DOT, top + hh, None, alpha, glass)
+            if tail:
+                self.tip_text(cr, tail, x + TIP_ITEM_DOT, y0 + y - TIP_ITEM_GAP + 2, soft, alpha, glass)
+        return inner, h, 2, 7, draw
 
     def tip_stats(self, cr, stats, first, inner):
         """Una fila de fichas, cada una con su cifra en grande y debajo su

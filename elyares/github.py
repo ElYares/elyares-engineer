@@ -31,6 +31,8 @@ POLL_SECS = 120
 GREEN = ('SUCCESS',)
 RED = ('FAILURE', 'ERROR')
 RUNNING = ('PENDING', 'EXPECTED')
+# Cómo van los checks de un PR, para la burbuja: (estados, tono, lo que dice).
+CHECKS_NOTE = ((GREEN, 'ok', 'en verde'), (RED, 'bad', 'en rojo'), (RUNNING, 'run', 'corriendo'))
 # Con estas conclusiones un check cuenta como caído. Uno cancelado o saltado no.
 FAILED = ('FAILURE', 'ERROR', 'TIMED_OUT', 'STARTUP_FAILURE')
 LOG_LINES = 8             # líneas de log que van en la ficha de un PR en rojo
@@ -194,6 +196,28 @@ def _count(n, one, many):
     return f'{n} {one if n == 1 else many}'
 
 
+def items(snaps):
+    """Los PRs abiertos y las revisiones pedidas, uno por uno, para que la
+    burbuja diga de qué proyecto es cada uno: [{where, number, title, who,
+    note, tone, url}]. Primero los tuyos y luego los que te piden revisar; un
+    PR que ven dos cuentas sale una vez, con la primera."""
+    seen, out = set(), []
+    for kind in ('prs', 'reviews'):
+        for account, snap in snaps.items():
+            for url, pr in (snap or {}).get(kind, {}).items():
+                if url in seen:
+                    continue
+                seen.add(url)
+                if kind == 'reviews':
+                    tone, note = 'info', 'te piden revisión'
+                else:
+                    tone, note = next(((tone, note) for states, tone, note in CHECKS_NOTE
+                                       if pr['checks'] in states), ('', 'sin checks'))
+                out.append({'where': pr['slug'], 'number': pr['number'], 'title': pr['title'],
+                            'who': account, 'note': note, 'tone': tone, 'url': url})
+    return out
+
+
 def summary(snaps):
     """Cómo están las cosas ahora, para la burbuja: [líneas].
 
@@ -287,7 +311,7 @@ def watch(emit, enabled=lambda: True, only=lambda: None):
                 source = {'event': 'source', 'name': 'github', 'ok': good > 0, 'polled': True,
                           'note': _count(good, 'cuenta', 'cuentas')}
                 if good:
-                    source['tip'] = summary(snaps)
+                    source.update(tip=summary(snaps), items=items(snaps))
                 elif snaps:
                     source.update(why='No respondió ninguna cuenta: ' + ', '.join(snaps),
                                   fix='Revisa la red y la sesión con: gh auth status')
