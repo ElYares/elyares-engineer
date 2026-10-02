@@ -42,6 +42,12 @@ la mascota se vuelve ese personaje mientras trabaja (`View.role`).
 
 Una sesión se nombra «agente | proyecto» (`View.agent_name` y `View.title`): el
 agente es `elyares-engineer` salvo mientras trabaja un subagente de la familia.
+
+Para el tablero de la isla, cada sesión dice cómo están sus cuatro
+(`Session.team`): quién trabaja, quién pide permiso y quién está libre, cada
+uno con sus pasos (lo que fue haciendo, con la hora de cada cosa). Mientras la
+sesión espera a un subagente de la familia que lanzó, el engineer está libre;
+lo que hace uno que no es de la familia cuenta como trabajo del engineer.
 """
 
 import os
@@ -66,6 +72,7 @@ CONTEXT_WARN = 90         # % de contexto de una sesión a partir del cual avisa
 LIMIT_WARN = (80, 95)     # % del límite de 5 h en los que avisa
 ASK_TIMEOUT = 600         # timeout del hook PermissionRequest en settings.json
 AGENT_STALE_SECS = 1200   # un subagente tanto rato sin eventos: terminó sin avisar
+STEPS_KEPT = 40           # pasos que se recuerdan de cada uno, para su desglose
 CARD_LINES = 10           # líneas de detalle de una alerta que caben en la isla
 CARD_ACTIONS = 2          # botones propios de una alerta, además de Descartar
 # El botón de una alerta que viene de una terminal o de una sesión: lleva a su pane.
@@ -93,6 +100,11 @@ AGENT_ROLES = {'elyares-architect': 'architect', 'elyares-auditor': 'auditor',
 # Quien trabaja en una sesión mientras no lo haga un subagente de la familia,
 # y su personaje.
 MAIN_AGENT, MAIN_ROLE = 'elyares-engineer', 'engineer'
+# Los cuatro, en el orden de `mascot.ROLES`, y el agente de cada personaje.
+TEAM = (MAIN_ROLE, *AGENT_ROLES.values())
+ROLE_AGENTS = {MAIN_ROLE: MAIN_AGENT, **{role: name for name, role in AGENT_ROLES.items()}}
+# Las herramientas con las que una sesión lanza un subagente.
+DELEGATES = ('Task', 'Agent')
 
 _root_cache = {}
 
@@ -225,6 +237,32 @@ def describe_tool(name, ti, root):
     return name
 
 
+def add_step(steps, text, now):
+    """Apunta un paso: lo que se empieza a hacer y cuándo. El mismo dos veces
+    seguidas (la herramienta y su permiso) es uno solo."""
+    if text and (not steps or steps[-1][0] != text):
+        steps.append((text, now))
+        del steps[:-STEPS_KEPT]
+
+
+@dataclass
+class Member:
+    """Uno de los cuatro de la familia en una sesión, como lo ve el tablero."""
+    role: str
+    name: str
+    state: str = 'idle'       # working | permission | waiting | done | idle
+    steps: list = field(default_factory=list)   # [(texto, cuándo)]; el último es lo de ahora
+    since: float = 0.0        # desde cuándo trabaja
+
+    @property
+    def busy(self):
+        return self.state != 'idle'
+
+    @property
+    def detail(self):
+        return self.steps[-1][0] if self.steps else ''
+
+
 @dataclass
 class Agent:
     """Un subagente que una sesión tiene trabajando."""
@@ -233,6 +271,7 @@ class Agent:
     detail: str = ''          # lo último que hizo
     started: float = 0.0
     updated: float = 0.0
+    steps: list = field(default_factory=list)   # [(texto, cuándo)]
 
     @property
     def role(self):
@@ -275,6 +314,9 @@ class Session:
     used: bool = False
     preview: object = None    # preview.Preview de lo que está editando; no se guarda
     agents: dict = field(default_factory=dict)    # sus subagentes trabajando, por id; no se guardan
+    steps: list = field(default_factory=list)     # [(texto, cuándo)] del turno, sin los de la familia
+    delegating: bool = False  # espera a un subagente que lanzó y no ha vuelto
+    blocked: str = ''         # el subagente que pidió el permiso pendiente; '' es la propia sesión
     changed: float = field(default_factory=time.monotonic)
     updated: float = field(default_factory=time.monotonic)
 
@@ -305,6 +347,37 @@ class Session:
         if self.state == 'alert':
             return ''
         return self.lead.name if self.lead else MAIN_AGENT
+
+    def team(self):
+        """Cómo están los cuatro de la familia en esta sesión, en el orden de `TEAM`."""
+        blocked = self.agents.get(self.blocked) if self.state == 'permission' else None
+        family = [a for a in self.agents.values() if a.kind in AGENT_ROLES]
+        if blocked is not None and blocked not in family:
+            blocked = None                # lo pidió uno que cuenta como el engineer
+        if self.state == 'permission' and blocked is None:
+            state = 'permission'
+        elif self.state in ('working', 'permission'):
+            # Mientras solo espera a los de la familia, el engineer está libre.
+            waits = self.delegating and family and len(family) == len(self.agents)
+            state = 'idle' if waits else 'working'
+        else:
+            state = self.state if self.state in ('done', 'waiting') else 'idle'
+        steps = list(self.steps)
+        if state in ('done', 'waiting') or not (steps or family):
+            # Lo último que se sabe: cómo acabó, o lo que hacía una sesión
+            # recuperada de un reinicio, que vuelve sin sus pasos. Con uno de
+            # la familia trabajando no: lo último de la sesión es de él.
+            add_step(steps, self.detail, self.changed)
+        members = [Member(MAIN_ROLE, MAIN_AGENT, state, steps, self.started)]
+        for role in TEAM[1:]:
+            mine = [a for a in family if a.role == role]
+            if not mine:
+                members.append(Member(role, ROLE_AGENTS[role]))
+                continue
+            a = max(mine, key=lambda a: a.started)
+            members.append(Member(role, a.name, 'permission' if a is blocked else 'working',
+                                  a.steps, a.started))
+        return members
 
     def set(self, state, detail=None, now=None):
         now = now or time.monotonic()
@@ -345,7 +418,7 @@ class Model:
 
     def dump(self):
         """Las sesiones como datos planos, para guardarlas entre reinicios."""
-        return [{'sid': s.sid, 'used': s.used,
+        return [{'sid': s.sid, 'used': s.used, 'delegating': s.delegating,
                  **{k: getattr(s, k) for k in SAVED_TEXT + SAVED_NUM + SAVED_TIMES}}
                 for s in self.sessions.values()]
 
@@ -364,6 +437,9 @@ class Model:
                 setattr(s, k, str(it.get(k) or ''))
             # Lo que guardó una versión anterior no lo dice: se da por usada.
             s.used = bool(it.get('used', True))
+            # Si esperaba a un subagente, lo sigue esperando: él no se guarda,
+            # pero vuelve a salir con lo siguiente que haga.
+            s.delegating = bool(it.get('delegating'))
             if s.state not in PRIORITY:
                 s.state = 'idle'
             if s.state == 'alert' and s.tone == 'run':
@@ -493,24 +569,28 @@ class Model:
             s.ask, s.ask_tool, s.ask_agent = req, msg.get('tool_name', ''), agent
             s.last_tool = describe_tool(s.ask_tool, msg.get('tool_input'), root)
             s.preview = preview.build(s.ask_tool, msg.get('tool_input'))
-            if agent:
-                s.agents[agent].detail = s.last_tool
+            self._step(s, agent, now)
+            s.blocked = agent
             s.set('permission', s.last_tool, now)
         elif ev == 'start':
             s.started = now
             s.last_tool = ''
             s.preview = None
+            s.steps, s.delegating = [('Pensando…', now)], False
             s.set('working', 'Pensando…', now)
         elif ev == 'tool':
             s.last_tool = describe_tool(msg.get('tool_name', ''), msg.get('tool_input'), root)
             # La vista previa dura lo que dura la edición: otra herramienta la quita.
             s.preview = preview.build(msg.get('tool_name', ''), msg.get('tool_input'))
-            if agent:
-                s.agents[agent].detail = s.last_tool
+            self._step(s, agent, now)
+            if not agent:
+                s.delegating = msg.get('tool_name') in DELEGATES
             s.set('working', s.last_tool, now)
         elif ev == 'agent-start':
             s.updated = now
         elif ev in ('tool-done', 'tool-fail'):
+            if not agent and msg.get('tool_name') in DELEGATES:
+                s.delegating = False      # el subagente volvió, o quedó en segundo plano
             # Tras aprobar un permiso no llega otro aviso hasta la siguiente
             # herramienta: esto baja la antena roja en cuanto la herramienta corre.
             if ev == 'tool-done' and s.state == 'permission':
@@ -520,6 +600,8 @@ class Model:
             if isinstance(msg.get('output'), str):
                 self._claude_tests(s, msg, ev == 'tool-fail', now)
         elif ev == 'permission':
+            if s.state != 'permission':
+                s.blocked = agent         # sin el hook `ask` delante: es lo que se sabe
             s.set('permission', s.last_tool or short(msg.get('message')), now)
         elif ev == 'compact':
             s.set('working', 'Compactando el contexto…', now)
@@ -529,11 +611,23 @@ class Model:
             s.set('waiting', 'Esperando tu respuesta', now)
         elif ev == 'stop':
             took = f' en {elapsed(now - s.started)}' if s.started else ''
-            s.preview = None
+            s.preview, s.delegating = None, False
             s.set('done', f'Listo{took}', now)
         elif ev == 'failure':
             reason = msg.get('error_type') or msg.get('reason') or ''
             s.set('waiting', f'Se cayó{": " + reason if reason else ""}', now)
+
+    @staticmethod
+    def _step(s, agent, now):
+        """Apunta lo que se acaba de empezar (`s.last_tool`) a quien lo hace.
+        Lo de un subagente que no es de la familia cuenta también como paso
+        del engineer."""
+        a = s.agents.get(agent)
+        if a is not None:
+            a.detail = s.last_tool
+            add_step(a.steps, s.last_tool, now)
+        if a is None or a.kind not in AGENT_ROLES:
+            add_step(s.steps, s.last_tool, now)
 
     def decide(self, s, allow, now=None):
         """Contesta el permiso pendiente de la sesión desde la isla."""
