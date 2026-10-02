@@ -229,7 +229,20 @@ ahí. La preferencia se guarda en `settings.json` con la clave de la fuente
 
 Con el cursor sobre una pastilla, sin hacer clic, sale debajo de la isla una
 burbuja con lo que se sabe de esa fuente: qué trae, cómo está, cuántas alertas
-suyas hay en la isla y qué hará el clic. Además:
+suyas hay en la isla y qué hará el clic. Es un popover como los de macOS, con
+la flecha hacia la pastilla, sombra y, en modo vidrio, fondo translúcido: sale
+creciendo desde la flecha, se va encogiéndose y de una pastilla a la de al
+lado se desliza. Sus textos van con los colores del tema de omarchy, avivados
+para que no se pierdan sobre el vidrio, y cada cosa en el suyo: lo que hace
+el clic, el título de cada bloque y, de un comando, el programa y lo que hay
+que ponerle (`<tarea>`).
+
+Arriba, junto al título, una etiqueta dice cómo está la fuente, en el color de
+su punto. Debajo, lo que se sabe de ella en etiquetas (`parado`, `sin
+alertas`; las alertas que tenga, en ámbar) y lo que trae ahora: sus cifras en
+fichas, con el número en grande y su nombre debajo (`3 pomodoros hoy`), y lo
+demás en frases con las cifras resaltadas y `en verde` / `en rojo` en su
+color. Además:
 
 - **GitHub:** cuántos PRs abiertos tienes y cómo van sus checks, cuántas
   revisiones te piden, qué cuentas respondieron y hace cuánto se consultó.

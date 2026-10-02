@@ -1,5 +1,6 @@
 """El texto de la isla: resaltado del detalle, vista previa del código y fuentes."""
 
+import colorsys
 import os
 import tempfile
 import unittest
@@ -53,6 +54,40 @@ class Resaltado(unittest.TestCase):
         # Un valor que no es #rrggbb se ignora.
         self.assertEqual(base['str'], themed['str'])
         self.assertEqual((base['pct2'], base['pct3']), (paint.AMBER, paint.RED))
+
+    def test_un_comando_para_consultar(self):
+        self.assertEqual(paint.command('coffe start <tarea> -e [n]'), [
+            ('coffe', 'cmd'), (' ', 'arg'), ('start', 'arg'), (' ', 'arg'), ('<tarea>', 'var'),
+            (' ', 'arg'), ('-e', 'flag'), (' ', 'arg'), ('[n]', 'var')])
+        self.assertEqual(paint.command(''), [])
+
+    def test_cifras_con_su_nombre(self):
+        self.assertEqual(paint.stats('3 pomodoros hoy · 1 h 15 min · Quedan 12:40'),
+                         [('3', 'pomodoros hoy'), ('1 h 15 min', ''), ('12:40', 'quedan')])
+        # Una frase no es una cifra con su nombre, aunque empiece por una.
+        for line in ('Sin PRs abiertos', 'Tarea: Arreglar el flaky',
+                     '3 PRs abiertos: 2 en verde, 1 en rojo', '2 revisiones · Cuentas: a, b'):
+            self.assertIsNone(paint.stats(line), line)
+
+    def test_una_frase_de_datos(self):
+        self.assertEqual(paint.note('3 PRs abiertos: 2 en verde, 1 en rojo'), [
+            ('3', 'num'), (' PRs abiertos: ', 'text'), ('2', 'num'), (' ', 'arg'), ('en verde', 'pass'),
+            (', ', 'arg'), ('1', 'num'), (' ', 'arg'), ('en rojo', 'bad')])
+        self.assertEqual(paint.note('Sin PRs abiertos'), [('Sin PRs abiertos', 'arg')])
+        line = 'Cuentas: a, b · no respondió c'
+        self.assertEqual(''.join(text for text, _ in paint.note(line)), line)
+
+    def test_un_color_apagado_se_aviva_sin_cambiar_de_tono(self):
+        # El gris verdoso de un tema apagado: más claro y más saturado, igual de verde.
+        def hls(color):
+            return colorsys.rgb_to_hls(*(int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)))
+
+        (h0, _, s0), (h1, l1, s1) = hls('#748676'), hls(paint.vivid('#748676', 2.0, .75))
+        self.assertAlmostEqual(h1, h0, delta=.02)
+        self.assertAlmostEqual(s1, 2 * s0, delta=.03)
+        self.assertAlmostEqual(l1, .75, delta=.01)
+        # Uno que ya es claro no se oscurece.
+        self.assertEqual(paint.vivid('#ffffff', 2.0, .75), '#ffffff')
 
     def test_color_del_contexto(self):
         self.assertEqual([paint.context_role(p) for p in (10, 50, 70, 90)],
