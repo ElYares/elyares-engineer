@@ -260,12 +260,12 @@ class Consulta(IslandCase):
             self.isl.model.handle({'event': 'start', 'session_id': sid, 'cwd': '/x/proj', **extra}, now=T)
         self.isl.refresh()
         self.isl.rows = []
-        self.isl.draw_rows(self.cr, 100, 440, app.OPEN_H, 1.0)
+        self.isl.draw_rows(self.cr, 40, app.SIZES['open'][0], app.OPEN_H, 1.0)
         self.assertEqual(len(self.isl.rows), 1)
         self.assertEqual(shown.count(app.BG_TAG), 1 if self.isl.rows[0][0].kind == 'bg' else 0)
         self.isl.view.others = list(self.isl.model.sessions.values())
         shown.clear()
-        self.isl.draw_rows(self.cr, 100, 440, app.OPEN_H, 1.0)
+        self.isl.draw_rows(self.cr, 40, app.SIZES['open'][0], app.OPEN_H, 1.0)
         self.assertEqual(shown.count(app.BG_TAG), 1)
 
     def test_la_ventana_cabe_en_un_monitor_de_1080(self):
@@ -294,11 +294,41 @@ class Consulta(IslandCase):
         layout = self.isl._layout
         self.isl._layout = lambda cr, text, *a, **kw: shown.append(text) or layout(cr, text, *a, **kw)
         self.isl.rows = []
-        self.isl.draw_rows(self.cr, 100, 440, app.OPEN_H, 1.0)
+        self.isl.draw_rows(self.cr, 40, app.SIZES['open'][0], app.OPEN_H, 1.0)
         # La fila de un subagente lleva a su sesión.
         self.assertEqual([s.sid for s, _y, _h in self.isl.rows], [s.sid for s, _a in rows])
-        for name in ('auditor', 'Explore', 'reviewer', 'Arrancando…'):
-            self.assertIn(name, shown)
+        # Cada subagente, con el proyecto de su sesión y no con el de la cabecera.
+        self.assertEqual((best.sid, other.sid), ('a', 'b'))
+        for text in ('elyares-auditor | a', 'Explore | a', 'elyares-engineer | b',
+                     'elyares-reviewer | b', 'Arrancando…'):
+            self.assertIn(text, shown)
+
+    def test_agente_y_proyecto_con_el_agente_en_su_color(self):
+        mascot = app.mascot
+        cases = (('elyares-auditor', 'a & b', mascot.accent('auditor'), mascot.ACCENTS['auditor']),
+                 # El engineer va con el color del tema.
+                 (state.MAIN_AGENT, 'p', mascot.accent(state.MAIN_ROLE), mascot.COLORS['accent']),
+                 # Uno que no es de la familia va sin color propio, y su nombre llega de fuera.
+                 ('a<b', 'p', None, None))
+        for name, project, color, expected in cases:
+            with self.subTest(agent=name):
+                text, markup = self.isl.who(name, project, color)
+                self.assertEqual(text, f'{name} | {project}')
+                # Lo que se pinta es lo mismo que el texto, y el marcado es válido.
+                self.assertEqual(app.Pango.parse_markup(markup, -1, '\0')[2], text)
+                self.assertEqual(f'foreground="{expected}">' in markup.split('|')[0], bool(expected))
+
+    def test_la_cabecera_dice_que_pide_permiso(self):
+        self.isl.model.handle({'event': 'start', 'session_id': 'a', 'cwd': '/x/a'}, now=T)
+        self.isl.refresh()
+        self.assertNotIn('pide permiso', [text for text, _color in self.isl.head_notes()])
+        # Sin el hook `ask` no hay botones: la nota y la antena son lo único que lo dice.
+        self.isl.model.handle({'event': 'permission', 'session_id': 'a', 'cwd': '/x/a'}, now=T)
+        self.isl.refresh()
+        self.assertFalse(self.isl.view.ask)
+        self.assertEqual(self.isl.head_notes()[-1][0], 'pide permiso')
+        self.isl.settings['pinned'] = True
+        self.assertEqual(self.isl.head_notes()[0][0], 'fijada')
 
     def test_un_solo_subagente_ya_abre_la_lista(self):
         self.isl.model.handle({'event': 'start', 'session_id': 'a', 'cwd': '/x/a'}, now=T)
