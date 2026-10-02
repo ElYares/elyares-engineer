@@ -7,8 +7,9 @@ está roto se usan los valores por defecto.
 import json
 import os
 
-DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'devherd': True, 'coffe': True, 'github': True,
-            'terminal': True, 'usage': True, 'github_accounts': []}
+# `pinned_monitor`: el monitor en el que se fijó la isla, para que se quede ahí.
+DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'devherd': True,
+            'coffe': True, 'github': True, 'terminal': True, 'usage': True, 'github_accounts': []}
 
 
 def path():

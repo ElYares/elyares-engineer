@@ -47,7 +47,8 @@ Claude Code ──hook (async)──▶ elyares-hook ──socket──▶ elyar
 - **`elyares/`** es el daemon: una ventana GTK4 con gtk4-layer-shell anclada
   arriba y sin foco de teclado. La región de entrada sigue a la isla, así que
   fuera de ella los clics pasan a las ventanas de abajo.
-- Sigue al monitor enfocado por el socket de eventos de Hyprland, y los ojos
+- Sigue al monitor enfocado por el socket de eventos de Hyprland (fijada se
+  queda en el suyo), y los ojos
   siguen al cursor con `cursorpos` del socket de pedidos (sin lanzar hyprctl).
 
 | Hook de Claude Code | Evento | La mascota |
@@ -568,8 +569,10 @@ tablero, las alertas con su ficha y las fuentes), pero sin tener que dejar el
 cursor ahí: no se cierra sola ni al irse el ratón,
 ni en modo compacto. Arriba a la derecha dice "fijada". Se suelta con el mismo
 atajo, con el clic central o con `elyares-ctl open`, y vuelve a asomarse y
-esconderse como siempre. La preferencia (`pinned` en `settings.json`) se guarda:
-tras reiniciar sigue fijada. Un permiso sigue mostrando sus botones, y
+esconderse como siempre. Fijada tampoco se cambia de monitor: se queda en el
+que estaba al fijarla aunque enfoques otro, y solo se va si lo desconectas.
+Suelta, vuelve al monitor enfocado. La preferencia (`pinned` y `pinned_monitor`
+en `settings.json`) se guarda: tras reiniciar sigue fijada, en su monitor. Un permiso sigue mostrando sus botones, y
 `elyares-ctl hide` la esconde igual.
 
 Para contestar un permiso sin soltar el teclado:

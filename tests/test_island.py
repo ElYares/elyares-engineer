@@ -55,6 +55,12 @@ class IslandCase(unittest.TestCase):
         isl.refresh = lambda: setattr(isl, 'view', isl.model.view(now=T, pin=isl.pin))
         isl.collapse_id = 0
         isl.check_panes = lambda: None
+        isl.monitor = None
+        # Ninguna prueba le pregunta a Hyprland de verdad.
+        for name, value in (('focused_monitor', None), ('monitors', [])):
+            hypr = mock.patch.object(app.hypr, name, lambda value=value: value)
+            hypr.start()
+            self.addCleanup(hypr.stop)
         # Ninguna prueba toca las preferencias de verdad.
         saver = mock.patch.object(app.settings, 'save')
         self.saved = saver.start()
@@ -173,6 +179,57 @@ class Fijada(IslandCase):
         self.isl.toggle_pinned()
         self.assertFalse(self.isl.off)
         self.assertEqual(self.isl.target(), 'open')
+
+    def monitors(self, focused='DP-1', names=('DP-1', 'HDMI-A-1')):
+        """Hyprland con estos monitores y este enfocado; la isla, sin moverse de verdad."""
+        mons = [{'name': n, 'focused': n == focused} for n in names]
+        for name, value in (('monitors', mons), ('focused_monitor', next(m for m in mons if m['focused']))):
+            patcher = mock.patch.object(app.hypr, name, lambda value=value: value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.isl._set_monitor = mock.Mock(return_value=True)
+        self.isl.region, self.isl.update_region = None, lambda: None
+        return mons
+
+    def test_fijada_se_queda_en_su_monitor(self):
+        mons = self.monitors()
+        self.isl.monitor = mons[0]
+        self.isl.toggle_pinned()
+        self.assertEqual(self.isl.settings['pinned_monitor'], 'DP-1')
+        # Se enfoca el otro monitor: la isla no se mueve.
+        self.isl.on_focused_monitor('HDMI-A-1')
+        self.isl._set_monitor.assert_not_called()
+        self.assertEqual(self.isl.monitor['name'], 'DP-1')
+
+    def test_suelta_vuelve_al_monitor_enfocado(self):
+        mons = self.monitors(focused='HDMI-A-1')
+        self.isl.monitor = mons[0]
+        self.isl.toggle_pinned()
+        self.isl.toggle_pinned()
+        self.assertEqual(self.isl.settings['pinned_monitor'], '')
+        self.isl._set_monitor.assert_called_once_with('HDMI-A-1')
+        self.assertEqual(self.isl.monitor['name'], 'HDMI-A-1')
+        # Y sigue al enfocado como siempre.
+        self.isl.on_focused_monitor('DP-1')
+        self.assertEqual(self.isl.monitor['name'], 'DP-1')
+
+    def test_fijada_en_un_monitor_que_se_desconecta_se_va_al_enfocado(self):
+        self.monitors(focused='HDMI-A-1', names=('HDMI-A-1',))
+        self.isl.monitor = {'name': 'DP-1'}
+        self.isl.settings.update(pinned=True, pinned_monitor='DP-1')
+        self.isl.on_focused_monitor('HDMI-A-1')
+        self.assertEqual(self.isl.monitor['name'], 'HDMI-A-1')
+        self.assertEqual(self.isl.settings['pinned_monitor'], 'HDMI-A-1')
+
+    def test_fijada_arranca_en_el_monitor_donde_se_fijo(self):
+        self.monitors(focused='HDMI-A-1')
+        self.isl.settings.update(pinned=True, pinned_monitor='DP-1')
+        self.assertEqual(self.isl.start_monitor()['name'], 'DP-1')
+        # Si ya no está conectado, o no está fijada, arranca en el enfocado.
+        self.isl.settings['pinned_monitor'] = 'DP-9'
+        self.assertEqual(self.isl.start_monitor()['name'], 'HDMI-A-1')
+        self.isl.settings.update(pinned=False, pinned_monitor='DP-1')
+        self.assertEqual(self.isl.start_monitor()['name'], 'HDMI-A-1')
 
     def test_al_irse_el_raton_suelta_la_alerta_elegida_en_la_lista(self):
         self.alert(lines=['uno'])

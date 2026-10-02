@@ -288,7 +288,11 @@ class Island:
                                 'why': sources.MISSING[key], 'fix': sources.MISSING_FIX})
         self.focus_seen = False         # lo último que dijo coffe, aunque esté apagada
         self.pointer = None
-        self.monitor = hypr.focused_monitor()
+        self.monitor = self.start_monitor()
+        if self.settings['pinned'] and self.monitor and not self.settings['pinned_monitor']:
+            # Fijada de antes de que se guardara el monitor: se queda en este.
+            self.settings['pinned_monitor'] = self.monitor['name']
+            settings.save(self.settings)
 
         win = Gtk.ApplicationWindow(application=app)
         LayerShell.init_for_window(win)
@@ -835,14 +839,20 @@ class Island:
         return GLib.SOURCE_REMOVE
 
     def toggle_pinned(self):
-        """Fija la isla abierta, o la suelta para que vuelva a cerrarse sola."""
-        self.settings['pinned'] = not self.settings['pinned']
+        """Fija la isla abierta, o la suelta para que vuelva a cerrarse sola.
+        Fijada se queda además en el monitor donde se fijó; suelta vuelve a
+        seguir al enfocado, que puede ser otro."""
+        pinned = self.settings['pinned'] = not self.settings['pinned']
+        self.settings['pinned_monitor'] = (self.monitor or {}).get('name', '') if pinned else ''
         settings.save(self.settings)
-        if self.settings['pinned']:
+        if pinned:
             self.off = False
             self.expand()
         else:
             self.collapse()
+            focused = hypr.focused_monitor()
+            if focused:
+                self.on_focused_monitor(focused['name'])
 
     def toggle_compact(self):
         self.settings['compact'] = not self.settings['compact']
@@ -1002,11 +1012,28 @@ class Island:
                 return True
         return False
 
+    def start_monitor(self):
+        """El monitor donde arranca la isla: el enfocado o, si quedó fijada,
+        aquel en el que se fijó, mientras siga conectado."""
+        monitors = hypr.monitors()
+        name = self.settings['pinned'] and self.settings['pinned_monitor']
+        return (next((m for m in monitors if name and m.get('name') == name), None)
+                or next((m for m in monitors if m.get('focused')), None))
+
     def on_focused_monitor(self, name):
+        """La isla se va al monitor enfocado. Fijada no se mueve del suyo,
+        salvo que lo desconecten: entonces se va al enfocado y se queda ahí."""
         if self.monitor and self.monitor.get('name') == name:
             return GLib.SOURCE_REMOVE
+        monitors = hypr.monitors()
+        here = (self.monitor or {}).get('name')
+        if self.settings['pinned'] and any(m.get('name') == here for m in monitors):
+            return GLib.SOURCE_REMOVE
         if self._set_monitor(name):
-            self.monitor = next((m for m in hypr.monitors() if m.get('name') == name), None)
+            self.monitor = next((m for m in monitors if m.get('name') == name), None)
+            if self.settings['pinned']:
+                self.settings['pinned_monitor'] = name
+                settings.save(self.settings)
             self.region = None
             self.update_region()
         return GLib.SOURCE_REMOVE
