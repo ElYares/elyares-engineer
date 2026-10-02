@@ -97,6 +97,77 @@ class Sessions(ModelCase):
         self.assertEqual(self.m.view(now=T).mode, 'open')
 
 
+class Subagentes(ModelCase):
+    def agents(self):
+        return {a.aid: a for a in self.m.sessions['a'].agents.values()}
+
+    def test_arranca_trabaja_y_termina(self):
+        self.send('start')
+        self.send('agent-start', agent_id='s1', agent_type='Explore')
+        self.send('tool', agent_id='s1', agent_type='Explore', tool_name='Read',
+                  tool_input={'file_path': '/x/proj/a.py'})
+        a = self.agents()['s1']
+        self.assertEqual((a.name, a.detail, a.started), ('Explore', 'Leyendo a.py', T))
+        # Lo que hace el subagente es lo que dice la cabecera.
+        self.assertEqual(self.m.view(now=T).detail, 'Leyendo a.py')
+        self.send('agent-stop', agent_id='s1', agent_type='Explore')
+        self.assertEqual(self.agents(), {})
+        self.assertEqual(self.m.sessions['a'].state, 'working')
+
+    def test_uno_de_la_familia_le_cambia_la_cara_a_la_mascota(self):
+        self.send('start')
+        self.assertEqual(self.m.view(now=T).role, 'engineer')
+        self.send('agent-start', agent_id='s1', agent_type='elyares-auditor')
+        self.assertEqual(self.m.view(now=T).role, 'auditor')
+        self.assertEqual(self.agents()['s1'].name, 'auditor')
+        self.send('agent-stop', agent_id='s1')
+        self.assertEqual(self.m.view(now=T).role, 'engineer')
+
+    def test_manda_el_de_la_familia_que_arranco_al_ultimo(self):
+        self.send('start')
+        self.send('agent-start', agent_id='s1', agent_type='elyares-architect', now=T)
+        self.send('agent-start', agent_id='s2', agent_type='elyares-reviewer', now=T + 1)
+        # Uno que no es de la familia no le quita la cara al que sí.
+        self.send('agent-start', agent_id='s3', agent_type='Explore', now=T + 2)
+        self.assertEqual(self.m.view(now=T + 2).role, 'reviewer')
+        self.send('agent-stop', agent_id='s2', now=T + 3)
+        self.assertEqual(self.m.view(now=T + 3).role, 'architect')
+
+    def test_sin_haber_visto_su_arranque_tambien_sale(self):
+        self.send('tool', agent_id='s1', agent_type='elyares-reviewer', tool_name='Grep',
+                  tool_input={'pattern': 'TODO'})
+        self.assertEqual(self.agents()['s1'].detail, 'Buscando TODO')
+        self.assertEqual(self.m.view(now=T).role, 'reviewer')
+
+    def test_el_agente_de_la_sesion_no_es_un_subagente(self):
+        # Con `claude --agent` todo trae agent_type, pero solo un subagente trae agent_id.
+        self.send('tool', agent_type='elyares-auditor', tool_name='Bash', tool_input={'command': 'ls'})
+        self.assertEqual(self.agents(), {})
+
+    def test_el_que_se_queda_callado_se_olvida(self):
+        self.send('start')
+        self.send('agent-start', agent_id='s1', agent_type='elyares-auditor')
+        self.m.view(now=T + state.AGENT_STALE_SECS - 1)
+        self.assertIn('s1', self.agents())
+        self.m.view(now=T + state.AGENT_STALE_SECS + 1)
+        self.assertEqual(self.agents(), {})
+
+    def test_su_permiso_se_suelta_si_termina(self):
+        req = FakeReq()
+        self.send('ask', req=req, agent_id='s1', agent_type='elyares-auditor', tool_name='Bash',
+                  tool_input={'command': 'semgrep scan'})
+        self.assertEqual(self.agents()['s1'].detail, 'Ejecutando semgrep scan')
+        self.send('agent-stop', agent_id='s1')
+        self.assertEqual(req.answers, [None])
+
+    def test_no_se_guardan_entre_reinicios(self):
+        self.send('start')
+        self.send('agent-start', agent_id='s1', agent_type='elyares-auditor')
+        other = Model()
+        other.restore(self.m.dump(), now=T)
+        self.assertEqual(other.sessions['a'].agents, {})
+
+
 class SegundoPlano(ModelCase):
     def test_la_de_repuesto_no_sale_hasta_que_se_usa(self):
         # Claude Code tiene lista una sesión que solo pinta su barra de estado.

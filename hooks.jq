@@ -20,6 +20,8 @@ def ask: {hooks: [{type: "command", command: ($hook + " ask"), timeout: 600}]};
   | .hooks.Notification     += [entry("permission"; "permission_prompt"), entry("idle"; "idle_prompt")]
   | .hooks.Stop             += [entry("stop"; null)]
   | .hooks.PreCompact       += [entry("compact"; null)]
+  | .hooks.SubagentStart    += [entry("agent-start"; null)]
+  | .hooks.SubagentStop     += [entry("agent-stop"; null)]
   | .hooks.StopFailure      += [entry("failure"; null)]
   | .hooks.SessionEnd       += [entry("session-end"; null)]
   end

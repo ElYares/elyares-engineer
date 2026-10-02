@@ -47,6 +47,11 @@ como un diff de pocas líneas (`preview.py`). Es solo para mirar.
 Abierta a mano y con varias sesiones, debajo de la más urgente sale una fila
 por cada una de las demás, también las que están en reposo; un clic en la fila
 lleva a su pane de tmux.
+
+Los subagentes de una sesión salen en la lista debajo de ella (los de la
+sesión de la cabecera, al principio), cada uno con su carita, su nombre y lo
+que hace. Mientras trabaja uno de la familia (architect, auditor, reviewer),
+la mascota grande es ese personaje: `mascot.py` los dibuja a los cuatro.
 """
 
 import html
@@ -68,9 +73,9 @@ from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, coffe, commands, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
                preview, settings, sources, store, testrun, theme)
-from .state import Model  # noqa: E402
+from .state import Model, elapsed  # noqa: E402
 
-MAX_ROWS = 4          # filas de la lista: las demás sesiones, sin la principal
+MAX_ROWS = 5          # filas de la lista: las demás sesiones y los subagentes de cada una
 ROW_H, LIST_PAD = 28, 10
 OPEN_H = 88
 DETAIL_LINES = 4      # líneas del detalle cuando se muestra entero
@@ -112,6 +117,8 @@ FONT_ROW = 'Sans Semi-Bold 10'
 FONT_PILL = 'Sans Semi-Bold 8'
 FONT_CODE = 'JetBrainsMono Nerd Font 8'
 ROW_NAME_W = 130     # ancho de la columna del proyecto en la lista
+AGENT_INDENT = 24    # lo que se mete la fila de un subagente bajo la de su sesión
+AGENT_PET = 21       # alto de su carita
 STATE_COLORS = {'permission': 'red', 'alert': 'red', 'waiting': 'yellow', 'done': 'green',
                 'working': 'accent'}
 # El punto de una alerta, según su tono.
@@ -539,6 +546,18 @@ class Island:
         self.refresh()
         return ''
 
+    def listing(self):
+        """Las filas de la lista, como (sesión, subagente o None): los
+        subagentes de la sesión de la cabecera y, debajo, cada una de las
+        demás sesiones con los suyos."""
+        def agents(s):
+            return [(s, a) for a in sorted(s.agents.values(), key=lambda a: a.started)]
+
+        rows = agents(self.view.session) if self.view.session else []
+        for s in self.view.others:
+            rows += [(s, None)] + agents(s)
+        return rows
+
     def expand(self, secs=None):
         """Abre la isla a mano. Con secs se cierra sola si el ratón no está encima."""
         if self.collapse_id:
@@ -606,7 +625,7 @@ class Island:
             return 'ask'
         if self.expanded:
             # Sin ninguna sesión se abre igual: es donde están las fuentes.
-            return 'list' if self.view.others else 'open'
+            return 'list' if self.listing() else 'open'
         # Un permiso se abre solo aunque esté compacta: hay que contestarlo.
         if self.settings['compact'] and self.view.pet != 'permission':
             return 'petit' if mode != 'hidden' or self.hover else 'hidden'
@@ -615,7 +634,7 @@ class Island:
                 mode = 'peek'
             elif mode == 'peek' and self.view.session:
                 mode = 'open'
-            if mode == 'open' and self.view.others:
+            if mode == 'open' and self.listing():
                 mode = 'list'
         return mode
 
@@ -682,7 +701,7 @@ class Island:
         more = self.extra(mode) + prev + card + self.pills_h(mode)
         if mode == 'list':
             w, h = SIZES['open']
-            h += LIST_PAD + ROW_H * min(MAX_ROWS, len(self.view.others))
+            h += LIST_PAD + ROW_H * min(MAX_ROWS, len(self.listing()))
         else:
             w, h = SIZES[mode]
         if prev:
@@ -879,7 +898,8 @@ class Island:
                 cr.save()
             cr.translate(cx, h / 2 + 5 * pet_size)
             cr.scale(PET_SCALE * pet_size, PET_SCALE * pet_size)
-            mascot.draw(cr, state, age, now, tuple(self.look), now < self.blink_until)
+            mascot.draw(cr, state, age, now, tuple(self.look), now < self.blink_until,
+                        role=self.view.role)
             if fading:
                 cr.pop_group_to_source()
                 cr.paint_with_alpha(pet_alpha)
@@ -928,7 +948,7 @@ class Island:
             self.draw_card(cr, x0, w, head, card, clamp((full_h - head) / 20) * text_alpha)
         head += prev + card             # la lista va debajo de la vista previa o de la ficha
         self.rows = []
-        if self.list_layout and self.view.others and mode != 'ask' and full_h > head:
+        if self.list_layout and self.listing() and mode != 'ask' and full_h > head:
             self.draw_rows(cr, x0, w, head, clamp((full_h - head) / 20) * text_alpha)
         self.pills = []
         self.tip = None
@@ -952,22 +972,26 @@ class Island:
         cr.rectangle(left + 4, top - 1, right - left - 8, 1)
         cr.fill()
         px, py = self.pointer or (-1, -1)
-        others = self.view.others
+        rows = self.listing()
         # Si no caben todas, la última fila dice cuántas faltan.
-        shown = others if len(others) <= MAX_ROWS else others[:MAX_ROWS - 1]
-        if len(others) > len(shown):
-            more = self._layout(cr, f'y {len(others) - len(shown)} más', FONT_DETAIL)
+        shown = rows if len(rows) <= MAX_ROWS else rows[:MAX_ROWS - 1]
+        if len(rows) > len(shown):
+            more = self._layout(cr, f'y {len(rows) - len(shown)} más', FONT_DETAIL)
             y = top + 3 + len(shown) * ROW_H
             cr.move_to(left + 28, y + (ROW_H - more.get_pixel_size()[1]) / 2)
             cr.set_source_rgba(*MUTED_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, more)
-        for i, s in enumerate(shown):
+        for i, (s, agent) in enumerate(shown):
             y = top + 3 + i * ROW_H
+            # La fila de un subagente lleva a donde la de su sesión.
             self.rows.append((s, y, ROW_H))
             if left <= px <= right and y <= py < y + ROW_H:
                 mascot.rrect(cr, left, y + 1, right - left, ROW_H - 2, 8)
                 cr.set_source_rgba(1, 1, 1, .07 * alpha)
                 cr.fill()
+            if agent is not None:
+                self.draw_agent(cr, agent, left, right, y, alpha)
+                continue
             cr.new_sub_path()
             color = dot_color(s)
             if color:
@@ -1014,6 +1038,36 @@ class Island:
             # perdía, sobre todo en modo vidrio sobre una ventana clara.
             cr.set_source_rgba(*rgb(self.colors['arg']), alpha)
             self._show(cr, detail, alpha)
+
+    def draw_agent(self, cr, agent, left, right, y, alpha):
+        """La fila de un subagente: su carita, su nombre, lo que hace y cuánto lleva."""
+        cr.push_group()
+        cr.translate(left + AGENT_INDENT + 12, y + ROW_H / 2 + 1)
+        cr.scale(AGENT_PET / 253, AGENT_PET / 253)
+        # Quieta: lo que se mueve es la mascota grande.
+        mascot.draw(cr, 'idle', 0, 0, motion=0, role=agent.role)
+        cr.pop_group_to_source()
+        cr.paint_with_alpha(alpha)
+        nx = left + 28 + AGENT_INDENT
+        name = self._layout(cr, agent.name, FONT_ROW, ROW_NAME_W - AGENT_INDENT)
+        cr.move_to(nx, y + (ROW_H - name.get_pixel_size()[1]) / 2)
+        # Los de la familia, con su color; los demás, como una sesión.
+        family = agent.role != 'engineer'
+        cr.set_source_rgba(*(mascot.rgba(mascot.accent(agent.role), alpha) if family
+                             else (*TITLE_COLOR[:3], alpha)))
+        PangoCairo.show_layout(cr, name)
+        dx, end = left + 28 + ROW_NAME_W + 10, right - 10
+        took = self._layout(cr, elapsed(time.monotonic() - agent.started), FONT_DETAIL)
+        tw, th = took.get_pixel_size()
+        end -= tw
+        cr.move_to(end, y + (ROW_H - th) / 2)
+        cr.set_source_rgba(*MUTED_COLOR[:3], alpha)
+        PangoCairo.show_layout(cr, took)
+        text = agent.detail or 'Arrancando…'
+        detail = self._layout(cr, text, FONT_DETAIL, end - 10 - dx, markup=self.markup(text))
+        cr.move_to(dx, y + (ROW_H - detail.get_pixel_size()[1]) / 2)
+        cr.set_source_rgba(*rgb(self.colors['arg']), alpha)
+        self._show(cr, detail, alpha)
 
     def draw_preview(self, cr, x0, w, top, height, alpha):
         """El fragmento que se está editando, como un diff de pocas líneas."""

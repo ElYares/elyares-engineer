@@ -3,9 +3,14 @@
 
 Uso (desde settings.json):  elyares-hook <evento>   con el payload del hook por stdin
 Eventos: start tool tool-done tool-fail permission idle stop failure session-end
-         ask compact (hook PreCompact), status (barra de estado: uso de contexto
-         y del límite de 5 h), cmd-start (empiezan unas pruebas en la terminal)
-         y cmd-done (un comando largo de la terminal, o unas pruebas, terminó)
+         ask compact (hook PreCompact), agent-start y agent-stop (hooks
+         SubagentStart y SubagentStop: un subagente arranca o termina), status
+         (barra de estado: uso de contexto y del límite de 5 h), cmd-start
+         (empiezan unas pruebas en la terminal) y cmd-done (un comando largo de
+         la terminal, o unas pruebas, terminó)
+
+Lo que pasa dentro de un subagente trae además `agent_id` y `agent_type`: con
+eso la isla sabe cuál de ellos está trabajando.
 
 Cuando Claude corre pruebas con Bash, `tool-done` y `tool-fail` (hooks
 PostToolUse y PostToolUseFailure: unas pruebas en rojo salen con error) llevan
@@ -26,7 +31,7 @@ import sys
 import time
 
 KEEP = ('tool_name', 'tool_input', 'message', 'notification_type', 'reason',
-        'error_type', 'agent_id', 'context_pct', 'limit_pct', 'command', 'exit_code', 'seconds',
+        'error_type', 'agent_id', 'agent_type', 'context_pct', 'limit_pct', 'command', 'exit_code', 'seconds',
         'output', 'at')
 KEEP_INPUT = ('file_path', 'notebook_path', 'command', 'pattern', 'path', 'url',
               'query', 'description', 'subagent_type')
@@ -76,7 +81,7 @@ def trim(ti):
 # Los eventos que lanza el propio proceso de la sesión de Claude. Los demás
 # vienen de la barra de estado o de una terminal: su padre es otra cosa.
 FROM_SESSION = ('start', 'tool', 'tool-done', 'tool-fail', 'permission', 'idle', 'stop',
-                'failure', 'compact', 'ask')
+                'failure', 'compact', 'ask', 'agent-start', 'agent-stop')
 SHELLS = ('sh', 'bash', 'dash', 'zsh', 'fish')
 
 
