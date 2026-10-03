@@ -1963,7 +1963,7 @@ class Flujos(IslandCase):
         self.isl.workflow_launch(self.flow)
         run = self.isl.wf_run
         designer = self.chats['elyares-designer']
-        designer.send.assert_called_once_with('propón')
+        designer.send.assert_called_once_with('propón' + app.workflowview.workflows.RULE)
         self.assertEqual((run.index, self.isl.wf_screen), (0, 'run'))
         self.assertNotIn('', self.chats)                # el engineer aún no sabe nada
         # Lo que llega de otro chat no mueve el workflow.
@@ -2001,6 +2001,16 @@ class Flujos(IslandCase):
         self.done('elyares-designer')
         self.assertEqual(run.index, 1)
 
+    def test_si_el_agente_dice_que_no_salio_el_paso_falla(self):
+        self.isl.workflow_launch(self.flow)
+        run = self.isl.wf_run
+        self.chats['elyares-designer'].reply.return_value = 'No pude.\n\nPASO FALLIDO: develop no está al día.'
+        self.done('elyares-designer')                   # el turno acabó sin error, pero el paso no salió
+        self.assertEqual((run.failed, run.running), (0, False))
+        self.assertNotIn('', self.chats)                # el siguiente no corre
+        self.assertEqual(self.isl.workflow_trouble(0),
+                         'El paso 1 (elyares-designer) no salió: develop no está al día.')
+
     def test_un_agente_ocupado_no_empieza_y_con_seguir_pasa_al_siguiente(self):
         self.chat_for('elyares-designer', '/x/proj').busy = True
         self.isl.workflow_launch(self.flow)
@@ -2012,7 +2022,7 @@ class Flujos(IslandCase):
         self.isl.workflow_launch(self.flow)
         run = self.isl.wf_run
         self.assertEqual((run.failed, run.index), (0, 1))
-        self.chats[''].send.assert_called_once_with('hazlo')
+        self.chats[''].send.assert_called_once_with('hazlo' + app.workflowview.workflows.RULE)
 
     def test_detener_corta_el_turno_y_no_sigue(self):
         self.isl.workflow_launch(self.flow)

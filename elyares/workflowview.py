@@ -158,7 +158,9 @@ class WorkflowView:
         elif event.get('is_error'):
             ok, why = False, f"falló: {str(event.get('result') or event.get('subtype') or 'algo salió mal')[:160]}"
         else:
-            ok, why = True, ''
+            # El turno acabó bien, pero el agente puede decir que su paso no salió.
+            said = workflows.verdict(c.reply())
+            ok, why = not said, f'no salió: {said}' if said else ''
         self.wf_chat = None
         following = run.finish(ok, c.reply(), why)
         if following is None:

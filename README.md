@@ -326,6 +326,12 @@ perder lo que se editaba.
   menos: un paso del engineer puede cambiar código; los de los demás, solo
   lo que deja su candado. Un agente ocupado con otro turno no empieza, y
   cuenta como paso fallido.
+- **Un paso puede decir que no salió.** La isla solo ve que el turno del
+  agente acabó, no si hizo lo que se le pedía. Por eso a cada paso se le
+  añade cómo avisar: si no pudo, o lo que había que comprobar no se cumple,
+  acaba su respuesta con una línea `PASO FALLIDO: <motivo>`, y el paso
+  cuenta como fallido con ese motivo. Así un paso «verifica que develop esté
+  al día» para la cadena cuando no lo está.
 - **Con el panel cerrado**, al acabar (o al pararse en un paso) sale un aviso
   con **Ver workflow**.
 
@@ -472,7 +478,7 @@ e `install.sh` lo copia a `~/.local/bin/elyares-guard`). Tiene cuatro modos:
 | Modo | Dónde corre | Qué hace |
 |---|---|---|
 | `solo-lectura` | el Bash de los agentes (menos el devops), desde su encabezado | frena el comando que escribe: redirecciones fuera de `/tmp`, `rm`, `mv`, `sed -i`, cualquier `git` que no sea de lectura, instaladores (`npm install`, `composer install`, `flutter pub get`…), formateadores que reescriben, `--fix`, migraciones, `sudo`. Y el que sale de la máquina o toca lo desplegado: `ssh` y `scp`, un `make` que no sea de pruebas (sí deja `make -n`), un `gh` que no sea de consulta, y `kubectl`, `terraform`, `supervisorctl`, `crontab` o `certbot` cuando cambian algo. `git clone` solo pasa hacia `/tmp` |
-| `entrega` | el Bash del devops, en vez de `solo-lectura` | lo mismo, y además deja entregar un cambio: `git add` por ruta, `git commit`, `git push`, una rama nueva, `git fetch` y `gh pr create` o `edit`. Sigue frenando `add -A`, `--amend`, `--no-verify`, el push forzado o que borra ramas, `merge`, `rebase`, `reset` y mergear o cerrar un PR |
+| `entrega` | el Bash del devops, en vez de `solo-lectura` | lo mismo, y además deja entregar un cambio: `git add` por ruta, `git commit`, `git push`, una rama nueva, `git fetch`, `gh pr create` o `edit` y `gh auth token`, para usar en un solo comando la cuenta que ve el repositorio (`GH_TOKEN=$(gh auth token --user X) gh …`) sin cambiar la de la máquina. Sigue frenando `add -A`, `--amend`, `--no-verify`, el push forzado o que borra ramas, `merge`, `rebase`, `reset` y mergear o cerrar un PR |
 | `solo-docs` | el `Edit` y el `Write` del architect y del researcher, y el `Write` de los otros cinco | solo deja escribir documentación (`.md`, `.mmd`, `.puml`, `.txt`…) |
 | `config` | el `Edit` y el `Write` de cualquier sesión, desde `settings.json` | pregunta antes de tocar la configuración, ya existente, de lo que revisa el código: ESLint, Prettier, PHPStan y su baseline, Pint, PHPUnit, `analysis_options.yaml`, golangci, ruff, los workflows de GitHub |
 

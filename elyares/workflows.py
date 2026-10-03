@@ -24,6 +24,14 @@ from dataclasses import asdict, dataclass, field
 from . import settings, state
 
 STOP, GO = 'stop', 'go'       # si un paso falla: parar ahí, o seguir con el siguiente
+# Un paso puede acabar su turno sin haber hecho lo que se le pidió («no pude
+# abrir el PR», «develop no está al día»). La isla solo ve que el turno acabó,
+# así que a cada paso se le dice cómo avisar: con esta marca al final.
+FAILED = 'PASO FALLIDO:'
+RULE = ('\n\n---\nEsto es un paso de un workflow, y de lo que contestes depende que corra el siguiente. '
+        'Si no pudiste hacer lo que se pide, o lo que había que comprobar no se cumple, acaba tu respuesta '
+        f'con una línea que empiece por `{FAILED}` y el motivo en una frase. Si salió bien, no la pongas.')
+VERDICT_LINES = 4             # la marca va al final: se busca en las últimas líneas de la respuesta
 # Cómo va un paso de una ejecución.
 WAIT, RUNNING, OK, BAD = 'wait', 'run', 'ok', 'bad'
 
@@ -45,6 +53,16 @@ class Workflow:
 def chat_agent(name):
     """El agente de un paso como lo nombra el chat: '' es el engineer."""
     return '' if name == state.MAIN_AGENT else name
+
+
+def verdict(reply):
+    """Por qué el agente dice que su paso no salió (`PASO FALLIDO: …` al
+    final de su respuesta), o '' si no lo dice."""
+    lines = [line.strip(' *`_>-') for line in (reply or '').splitlines() if line.strip()]
+    for line in reversed(lines[-VERDICT_LINES:]):
+        if line.upper().startswith(FAILED):
+            return line[len(FAILED):].strip(' *`_.') or 'sin motivo'
+    return ''
 
 
 def path():
@@ -180,14 +198,14 @@ class Run:
         return None if self.started[i] is None else self.clock() - self.started[i]
 
     def prompt(self, i):
-        """Lo que se le manda al agente del paso `i`: su instrucción y, si
-        hubo paso anterior con respuesta, lo que dejó."""
+        """Lo que se le manda al agente del paso `i`: su instrucción, lo que
+        dejó el paso anterior (si hubo, con respuesta) y cómo avisar si no sale."""
         text = self.w.steps[i].text
         before = next((j for j in range(i - 1, -1, -1) if self.replies[j]), None)
-        if before is None:
-            return text
-        return (f'{text}\n\n---\nEres el paso {i + 1} de {len(self.w.steps)} del workflow «{self.w.name}». '
-                f'Esto dejó el paso {before + 1} ({self.w.steps[before].agent}):\n\n{self.replies[before]}')
+        if before is not None:
+            text += (f'\n\n---\nEres el paso {i + 1} de {len(self.w.steps)} del workflow «{self.w.name}». '
+                     f'Esto dejó el paso {before + 1} ({self.w.steps[before].agent}):\n\n{self.replies[before]}')
+        return text + RULE
 
     def begin(self, i):
         """Empieza (o reintenta) el paso `i`."""

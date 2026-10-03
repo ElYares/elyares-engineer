@@ -103,7 +103,7 @@ class Marcha(unittest.TestCase):
     def test_cada_paso_recibe_lo_que_dejo_el_anterior(self):
         run = self.run_of()
         self.assertEqual(run.status(), 'Sin empezar.')
-        self.assertEqual(run.prompt(0), 'propón')
+        self.assertEqual(run.prompt(0), 'propón' + workflows.RULE)
         run.begin(0)
         self.assertEqual(run.status(), 'Corriendo el paso 1 de 3…')
         self.now += 12
@@ -135,12 +135,23 @@ class Marcha(unittest.TestCase):
         run = self.run_of(workflows.GO)
         self.assertEqual(run.refuse(0, 'está ocupado con otro turno'), 1)
         self.assertEqual(run.why[0], 'no pudo empezar: está ocupado con otro turno')
-        self.assertEqual(run.prompt(1), 'hazlo')         # sin respuesta anterior, solo lo suyo
+        self.assertEqual(run.prompt(1), 'hazlo' + workflows.RULE)     # sin respuesta anterior, solo lo suyo
         run.begin(1)
         self.assertEqual(run.finish(True, 'hecho'), 2)
         run.begin(2)
         self.assertIsNone(run.finish(True, 'ok'))
         self.assertEqual(run.status(), 'Terminó, con 1 paso fallido.')
+
+    def test_el_agente_avisa_si_su_paso_no_salio(self):
+        self.assertIn('PASO FALLIDO:', workflows.RULE)
+        self.assertEqual(workflows.verdict('Todo en orden.\n\nLa rama está al día.'), '')
+        self.assertEqual(workflows.verdict('No abrí el PR.\n\nPASO FALLIDO: gh usa otra cuenta.'), 'gh usa otra cuenta')
+        self.assertEqual(workflows.verdict('Revisé.\n\n**PASO FALLIDO:** develop va 3 commits atrás\n'),
+                         'develop va 3 commits atrás')
+        self.assertEqual(workflows.verdict('- `paso fallido: sin red`'), 'sin red')
+        # Nombrar la marca a mitad de una respuesta larga no es avisar.
+        self.assertEqual(workflows.verdict('Si fallara pondría PASO FALLIDO: x\n' + 'ok\n' * 6), '')
+        self.assertEqual(workflows.verdict(''), '')
 
     def test_detenido_a_mano_no_sigue(self):
         run = self.run_of(workflows.GO)
