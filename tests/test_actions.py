@@ -65,6 +65,55 @@ class Salto(unittest.TestCase):
             actions.jump(types.SimpleNamespace(url='', pane='%4', tmux='/tmp/sock,1,0'))
         return [c[3:] for c in calls if c[:3] == ('tmux', '-S', '/tmp/sock')]
 
+    def project(self, sessions, clients, cwd='/x/tl'):
+        """Un salto a la sesión de tmux del proyecto de `cwd`, con estas sesiones y clientes."""
+        calls, launched = [], []
+
+        def run(*cmd, timeout=1.0):
+            calls.append(cmd)
+            if 'list-sessions' in cmd:
+                return '\n'.join('\t'.join(s) for s in sessions)
+            if 'list-clients' in cmd:
+                return '\n'.join('\t'.join(c) for c in clients)
+            return ''
+
+        with mock.patch.object(actions, '_run', run), mock.patch.object(actions, 'run', launched.append), \
+                mock.patch.object(actions.state, 'project_root', lambda cwd: cwd), \
+                mock.patch.object(actions.shutil, 'which', lambda name: '/usr/bin/tmux'):
+            actions.jump(types.SimpleNamespace(url='', pane='', tmux='', cwd=cwd))
+        moves = [c[1:] for c in calls if c[0] == 'tmux' and c[1] in ('new-session', 'switch-client')]
+        return moves, launched
+
+    def test_una_sesion_del_chat_va_a_la_sesion_de_tmux_de_su_proyecto(self):
+        sessions = [('aang-server', '/x/aang'), ('tl-mas-server', '/x/tl')]
+        moves, launched = self.project(sessions, [('10', '/dev/pts/1', 'aang-server'), ('30', '/dev/pts/2', 'Work')])
+        # Mueve el cliente que se usó al último, y solo ese.
+        self.assertEqual(moves, [('switch-client', '-c', '/dev/pts/2', '-t', '=tl-mas-server')])
+        self.assertEqual(launched, [])
+        # Si ya hay una terminal en esa sesión, no se mueve nada.
+        self.assertEqual(self.project(sessions, [('10', '/dev/pts/1', 'tl-mas-server')])[0], [])
+
+    def test_si_el_proyecto_no_tiene_sesion_de_tmux_se_la_crea(self):
+        moves, _ = self.project([('aang-server', '/x/aang')], [('10', '/dev/pts/1', 'aang-server')],
+                                cwd='/x/mi.proyecto')
+        self.assertEqual(moves, [('new-session', '-d', '-s', 'mi_proyecto', '-c', '/x/mi.proyecto'),
+                                 ('switch-client', '-c', '/dev/pts/1', '-t', '=mi_proyecto')])
+        # Si otra carpeta ya usa ese nombre, no se confunden.
+        moves, _ = self.project([('tl', '/otra/tl')], [('10', '/dev/pts/1', 'tl')], cwd='/x/tl')
+        self.assertEqual(moves[0], ('new-session', '-d', '-s', 'tl-isla', '-c', '/x/tl'))
+
+    def test_sin_ninguna_terminal_con_tmux_abre_una_en_esa_sesion(self):
+        moves, launched = self.project([('tl-mas-server', '/x/tl')], [])
+        self.assertEqual(moves, [])
+        self.assertEqual(launched, [{'cmd': ['tmux', 'attach', '-t', '=tl-mas-server'], 'term': True,
+                                     'label': 'tl-mas-server'}])
+
+    def test_sin_pane_ni_carpeta_solo_enfoca_la_terminal(self):
+        with mock.patch.object(actions, '_run') as run, \
+                mock.patch.object(actions.shutil, 'which', lambda name: '/usr/bin/tmux'):
+            actions.jump(types.SimpleNamespace(url='', pane='', tmux='', cwd=''))
+        run.assert_called_once_with('hyprctl', 'dispatch', 'focuswindow', f'class:{actions.TERM_CLASS}')
+
     def test_lleva_al_pane(self):
         calls = self.tmux([('10', '/dev/pts/1', 'Work')])
         self.assertEqual(calls[-2:], [('select-window', '-t', '%4'), ('select-pane', '-t', '%4')])
