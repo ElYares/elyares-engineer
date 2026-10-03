@@ -509,6 +509,26 @@ class Tablero(Dibujo):
         self.draw()
         self.assertIn('devops ›', self.shown)
 
+    def test_en_el_desglose_caben_todos_los_demas_y_nada_se_monta(self):
+        self.isl.expanded = True
+        self.send('start')
+        self.send('tool', tool_name='Bash', tool_input={'command': 'make test'})
+        self.isl.chat_sessions.add('a')                 # del chat: tres enlaces a la izquierda
+        self.isl.tab, self.isl.focus = 'a', ('a', 'engineer')
+        positions = {}
+        put = self.isl.put
+        self.isl.put = lambda cr, text, font, x, y, *a, **kw: positions.setdefault(text, y) and 0 or put(
+            cr, text, font, x, y, *a, **kw)
+        self.draw()
+        bottom = app.TABS_H + app.FOCUS_H
+        # Los demás de la familia, en miniatura, dentro del desglose.
+        minis = [(y, h) for kind, key, x, y, w, h in self.isl.hits if kind == 'brief' and x > 500]
+        self.assertEqual(len(minis), len(state.TEAM) - 1)
+        self.assertTrue(all(app.TABS_H <= y and y + h <= bottom for y, h in minis))
+        # A la izquierda, los enlaces no pisan cuántos pasos lleva.
+        steps = next(y for text, y in positions.items() if 'paso' in text)
+        self.assertLess(steps + 16, min(positions[link] for link in ('ir a su tmux ›', 'hablarle ›', '‹ volver')))
+
     def test_con_pocos_libres_la_banca_es_una_lista(self):
         self.isl.expanded = True
         self.work('a', 'elyares-architect', 'elyares-auditor')
