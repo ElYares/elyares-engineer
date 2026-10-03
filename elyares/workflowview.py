@@ -175,7 +175,7 @@ class WorkflowView:
                 c = self.chat_for(workflows.chat_agent(step.agent), run.w.project)
                 if c.busy:
                     why = 'está ocupado con otro turno'
-                elif not c.send(run.prompt(i)):
+                elif not c.send(run.prompt(i), shown=run.shown(i), kind='flow'):
                     why = 'no se pudo hablar con Claude'
             if not why:
                 run.begin(i)

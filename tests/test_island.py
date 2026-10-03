@@ -1963,7 +1963,8 @@ class Flujos(IslandCase):
         self.isl.workflow_launch(self.flow)
         run = self.isl.wf_run
         designer = self.chats['elyares-designer']
-        designer.send.assert_called_once_with('propón' + app.workflowview.workflows.RULE)
+        designer.send.assert_called_once_with('propón' + app.workflowview.workflows.RULE,
+                                              shown='propón\n\n**Paso 1 de 2** · workflow «revisar»', kind='flow')
         self.assertEqual((run.index, self.isl.wf_screen), (0, 'run'))
         self.assertNotIn('', self.chats)                # el engineer aún no sabe nada
         # Lo que llega de otro chat no mueve el workflow.
@@ -1973,8 +1974,12 @@ class Flujos(IslandCase):
             self.done('elyares-designer')
         notice.assert_not_called()                      # un paso intermedio no avisa: sigue el siguiente
         sent = self.chats[''].send.call_args.args[0]
+        shown = self.chats[''].send.call_args.kwargs['shown']
         self.assertTrue(sent.startswith('hazlo'))
         self.assertIn('lo de elyares-designer', sent)
+        # En el chat se ve la instrucción y de qué paso es, no las reglas para el agente.
+        self.assertIn('Recibe lo que dejó el paso 1 (**elyares-designer**)', shown)
+        self.assertNotIn('PASO FALLIDO', shown)
         self.assertEqual(run.index, 1)
         self.done('')
         self.assertTrue(run.done)
@@ -2022,7 +2027,8 @@ class Flujos(IslandCase):
         self.isl.workflow_launch(self.flow)
         run = self.isl.wf_run
         self.assertEqual((run.failed, run.index), (0, 1))
-        self.chats[''].send.assert_called_once_with('hazlo' + app.workflowview.workflows.RULE)
+        self.chats[''].send.assert_called_once_with('hazlo' + app.workflowview.workflows.RULE,
+                                                    shown='hazlo\n\n**Paso 2 de 2** · workflow «revisar»', kind='flow')
 
     def test_detener_corta_el_turno_y_no_sigue(self):
         self.isl.workflow_launch(self.flow)
@@ -2292,6 +2298,28 @@ class FlujosDibujo(IslandCase):
         isl.open_workflows('run')
         self.assertFalse(isl.wf_collapsed)
         self.assertEqual(isl.wf_screen, 'run')
+
+    def test_lo_que_manda_un_workflow_se_ve_en_markdown(self):
+        isl = self.isl
+        c = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock())
+        E = app.chatview.chat.Entry
+        c.entries = [E('flow', 'ejecuta /pr\n\n**Paso 2 de 4** · workflow «close-work»\n\n'
+                               'Recibe lo que dejó el paso 1 (**elyares-devops**):\n\n- un `commit` nuevo'),
+                     E('foot', 'x')]
+        isl.chat, isl.chat_open = c, True
+        isl.chat_cache = {}
+        layout, _, _ = isl.chat_layout(self.cr, 0, c.entries[0], 560)
+        markup = layout.get_attributes()
+        self.assertIsNotNone(markup)                    # tiene negritas y código: no es texto plano
+        self.assertIn('•', layout.get_text())            # la viñeta, no el guion
+        self.assertNotIn('**', layout.get_text())
+        self.assertNotIn('`', layout.get_text())
+        # Lo que escribes tú sigue siendo texto tal cual.
+        plain, _, _ = isl.chat_layout(self.cr, 1, E('you', 'haz **esto**'), 560)
+        self.assertIn('**', plain.get_text())
+        # «copiar» de la respuesta de un agente no se lleva lo que mandó el workflow.
+        c.entries = [E('flow', 'x'), E('claude', 'hecho'), E('foot', 'y')]
+        self.assertEqual(isl.chat_reply_at(2), 'hecho')
 
     def test_la_lista_el_editor_y_sus_menus(self):
         isl = self.isl

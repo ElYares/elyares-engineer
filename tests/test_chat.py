@@ -400,6 +400,33 @@ class Markdown(unittest.TestCase):
         self.assertTrue(lines[3].endswith('>a  b</span>'))   # una sola fila no es cabecera
         self.assertEqual(lines[4], 'fin &amp; listo')
 
+    def test_con_colores_tiene_jerarquia(self):
+        src = ('## Hecho\n\nSe hizo **todo** con *cuidado* y `a_b_c **x**`, ver [el PR](https://x.mx/1).\n\n\n\n'
+               '1. uno\n2) dos\n- punto\n  - hijo\n> una nota\n---\nfin\n')
+        out = paint.markdown(src, code='#111111', head='#222222', bold='#ffffff', dim='#999999', accent='#00ff00')
+        lines = out.split('\n')
+        self.assertTrue(lines[0].startswith('<span foreground="#222222" weight="bold" size="large">Hecho'))
+        self.assertEqual(lines[1], '')                                   # una sola línea en blanco
+        self.assertIn('<span weight="bold" foreground="#ffffff">todo</span>', lines[2])
+        self.assertIn('<i>cuidado</i>', lines[2])
+        self.assertIn('<u>el PR</u>', lines[2])
+        self.assertNotIn('https://x.mx', lines[2])
+        # Lo que va entre acentos graves queda tal cual: ni cursivas ni negritas.
+        self.assertIn('foreground="#111111">a_b_c **x**</span>', lines[2])
+        self.assertEqual(lines[3], '')
+        self.assertEqual(lines[4], '<span foreground="#00ff00" weight="bold">1.</span> uno')
+        self.assertEqual(lines[5], '<span foreground="#00ff00" weight="bold">2.</span> dos')
+        self.assertEqual(lines[6], '<span foreground="#00ff00">•</span> punto')
+        self.assertEqual(lines[7], '  <span foreground="#00ff00">◦</span> hijo')
+        self.assertTrue(lines[8].startswith('<span foreground="#00ff00">▎</span>'))
+        self.assertIn('─' * 10, lines[9])
+        self.assertEqual(lines[10], 'fin')
+        self.assertEqual(len(lines), 11)                                 # sin línea en blanco al final
+        # Un título tras un párrafo lleva su respiro; y un guion_bajo suelto no es cursiva.
+        out = paint.markdown('texto\n## Título\nuna_variable_larga y snake_case', bold='#fff', dim='#999')
+        self.assertEqual(out.split('\n')[1], '')
+        self.assertIn('una_variable_larga y snake_case', out)
+
     def test_una_tabla_va_alineada_por_columnas(self):
         out = paint.markdown('| Rama | Estado |\n|---|:---:|\n| sprint-021026 | al día |\n| main | atrás |')
         rows = [line.split('">', 1)[1].rsplit('</span>', 1)[0] for line in out.split('\n')]

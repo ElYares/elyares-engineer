@@ -804,7 +804,7 @@ class ChatView:
         """La respuesta a la que pertenece el pie que está en `index`, o ''."""
         entries = self.chat.entries if self.chat is not None else []
         for e in reversed(entries[:max(index, 0)]):
-            if e.kind in ('you', 'foot'):
+            if e.kind in ('you', 'flow', 'foot'):
                 break
             if e.kind == 'claude':
                 return e.text
@@ -1197,16 +1197,21 @@ class ChatView:
             return hit
         inner = width - CHAT_INDENT
         if entry.kind == 'claude':
-            markup = paint.markdown(entry.text, self.ink('cmd'), self.ink('head'))
+            markup = self.chat_markdown(entry.text)
             if not Pango.parse_markup(markup, -1, '\0')[0]:
                 markup = html.escape(entry.text, quote=False)     # un markdown que no se pudo leer
             layout = self.chat_wrap(cr, entry.text, FONT_CHAT, inner, markup)
             hit = (layout, layout.get_pixel_size()[1], 'arg')
-        elif entry.kind == 'you':
-            text = entry.text
+        elif entry.kind in ('you', 'flow'):
+            text, markup = entry.text, None
             if entry.images:
                 text += ('\n' if text else '') + ('1 imagen' if entry.images == 1 else f'{entry.images} imágenes')
-            layout = self.chat_wrap(cr, text, FONT_YOU, inner - CHAT_BLOCK_PAD)
+            if entry.kind == 'flow':
+                # Lo que manda un workflow viene en markdown, como lo que contesta Claude.
+                markup = self.chat_markdown(text)
+                if not Pango.parse_markup(markup, -1, '\0')[0]:
+                    markup = None
+            layout = self.chat_wrap(cr, text, FONT_YOU, inner - CHAT_BLOCK_PAD, markup)
             hit = (layout, layout.get_pixel_size()[1] + 2 * CHAT_BLOCK_PAD, 'arg')
         elif entry.kind == 'foot':
             color = mascot.accent(self.chat_role())
@@ -1221,6 +1226,13 @@ class ChatView:
             self.chat_cache.clear()
         self.chat_cache[key] = hit
         return hit
+
+    def chat_markdown(self, text):
+        """Lo que escribe Claude, con la jerarquía de la isla: los títulos en su
+        color, las negritas más claras que el texto, el código en el acento
+        del tema y las viñetas y los números en el color de quien habla."""
+        return paint.markdown(text, self.ink('cmd'), self.ink('head'), bold='#ffffff',
+                              dim=self.colors['text'], accent=mascot.accent(self.chat_role()))
 
     def chat_wrap(self, cr, text, font, width, markup=None):
         """Un texto partido en todas las líneas que haga falta, sin cortarse."""
@@ -1254,7 +1266,7 @@ class ChatView:
             if y + hh < top:
                 break
             x = left + CHAT_INDENT
-            if entry.kind == 'you':
+            if entry.kind in ('you', 'flow'):
                 # Tu bloque: a todo lo ancho, teñido, con la barra del color del agente.
                 cr.rectangle(left, y, width, hh)
                 cr.set_source_rgba(1, 1, 1, .055 * alpha)

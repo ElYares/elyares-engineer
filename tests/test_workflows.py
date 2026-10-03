@@ -142,6 +142,20 @@ class Marcha(unittest.TestCase):
         self.assertIsNone(run.finish(True, 'ok'))
         self.assertEqual(run.status(), 'Terminó, con 1 paso fallido.')
 
+    def test_el_chat_ve_la_instruccion_y_un_trozo_de_lo_anterior(self):
+        run = self.run_of()
+        self.assertEqual(run.shown(0), 'propón\n\n**Paso 1 de 3** · workflow «revisar»')
+        run.begin(0)
+        run.finish(True, '\n'.join(f'línea {n}' for n in range(30)))
+        shown = run.shown(1)
+        self.assertTrue(shown.startswith('hazlo\n\n**Paso 2 de 3**'))
+        self.assertIn('Recibe lo que dejó el paso 1 (**elyares-designer**):', shown)
+        self.assertIn('línea 9', shown)
+        self.assertNotIn('línea 10', shown)              # un trozo, no todo
+        self.assertTrue(shown.endswith('…'))
+        self.assertNotIn(workflows.FAILED, shown)        # las reglas son para el agente
+        self.assertIn(workflows.FAILED, run.prompt(1))
+
     def test_el_agente_avisa_si_su_paso_no_salio(self):
         self.assertIn('PASO FALLIDO:', workflows.RULE)
         self.assertEqual(workflows.verdict('Todo en orden.\n\nLa rama está al día.'), '')

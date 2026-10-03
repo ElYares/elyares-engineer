@@ -222,8 +222,12 @@ respuesta**, que abre el chat para leerla entera.
   que está el cursor, con texto antes o después («sube los cambios con /co»).
   Lo elegido entra en su sitio y lo demás se queda como estaba.
 - **La conversación**, al estilo de OpenCode: lo tuyo en un bloque con una
-  barra del color del agente; lo de Claude con su markdown (negritas,
-  `código`, títulos, bloques de código y tablas alineadas), y al acabar cada
+  barra del color del agente; lo de Claude con su markdown y su jerarquía:
+  títulos en su color, **negritas** más claras que el texto, *cursivas*,
+  enlaces subrayados, `código` en el acento del tema, viñetas y números en el
+  color de quien habla (sangradas por nivel), citas con su barra, la raya
+  `---` como una línea suave, un respiro antes de cada título, y bloques de
+  código y tablas alineadas, y al acabar cada
   turno su pie: `▣ agente · modelo · tiempo`. La rueda del ratón la sube.
   **Solo la respuesta:** lo que hace por el camino (sus herramientas y lo que
   va diciendo antes de seguir) no sale en el chat; para eso está el tablero.

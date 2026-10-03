@@ -142,17 +142,34 @@ def note(text):
 FENCE = re.compile(r'\s*```')
 HEADING = re.compile(r'(#{1,6})\s+(.*)')
 BULLET = re.compile(r'(\s*)[-*]\s+(.*)')
+NUMBERED = re.compile(r'(\s*)(\d+)[.)]\s+(.*)')
+QUOTE = re.compile(r'\s*>\s?(.*)')
+DIVIDER = re.compile(r'\s*([-*_])(\s*\1){2,}\s*')
 BOLD = re.compile(r'\*\*(.+?)\*\*')
+ITALIC = re.compile(r'(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])|(?<![\w])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![\w])')
+LINK = re.compile(r'\[([^\]]+)\]\(([^)\s]+)\)')
 CODE = re.compile(r'`([^`]+)`')
+DIVIDER_WIDTH = 28
 
 
-def markdown(text, code='#c0caf5', head='#ffffff'):
+def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=None):
     """Lo que escribe Claude (markdown) como marcado de Pango, con lo justo
     para leerlo en la isla: negritas, `código` y títulos, viñetas, y los
     bloques de código y las tablas en monoespaciado, para que no se
-    desalineen. `code` y `head` son los colores del código y de los títulos."""
+    desalineen. `code` y `head` son los colores del código y de los títulos.
+
+    Con `bold`, `dim` y `accent` se lee mejor, con jerarquía: las negritas en
+    su color (más claro que el texto), las cursivas y los enlaces, las
+    viñetas y los números en el acento, las listas con su sangría, las citas
+    con su barra, la raya `---` como una línea suave, y un respiro antes de
+    cada título. Sin ellos sale como siempre."""
+    rich = bool(bold or dim or accent)
     mono = f'<span font_family="monospace" foreground="{code}">'
     out, fenced, table = [], False, []
+
+    def inline(line):
+        return _inline(line, mono, bold, rich)
+
     for line in (text or '').split('\n'):
         if line.lstrip().startswith('|') and not fenced:
             table.append(line)
@@ -166,17 +183,41 @@ def markdown(text, code='#c0caf5', head='#ffffff'):
         if fenced:
             out.append(f'{mono}{html.escape(line, quote=False)}</span>')
             continue
+        if rich and not line.strip():
+            if out and out[-1] != '':
+                out.append('')          # una sola línea en blanco, por muchas que haya
+            continue
         m = HEADING.fullmatch(line)
         if m:
             size = ' size="large"' if len(m[1]) <= 2 else ''
-            out.append(f'<span foreground="{head}" weight="bold"{size}>{_inline(m[2], mono)}</span>')
+            if rich and out and out[-1] != '':
+                out.append('')          # un respiro antes de un título
+            out.append(f'<span foreground="{head}" weight="bold"{size}>{inline(m[2])}</span>')
+            continue
+        if rich and DIVIDER.fullmatch(line):
+            out.append(f'<span foreground="{dim or head}">{"─" * DIVIDER_WIDTH}</span>')
             continue
         m = BULLET.fullmatch(line)
         if m:
-            line = f'{m[1]}• {m[2]}'
-        out.append(_inline(line, mono))
+            if rich:
+                mark = '•' if len(m[1]) < 2 else '◦'
+                out.append(f'{m[1]}<span foreground="{accent or head}">{mark}</span> {inline(m[2])}')
+            else:
+                out.append(_inline(f'{m[1]}• {m[2]}', mono))
+            continue
+        m = NUMBERED.fullmatch(line) if rich else None
+        if m:
+            out.append(f'{m[1]}<span foreground="{accent or head}" weight="bold">{m[2]}.</span> {inline(m[3])}')
+            continue
+        m = QUOTE.fullmatch(line) if rich else None
+        if m:
+            out.append(f'<span foreground="{accent or dim}">▎</span> <span foreground="{dim or head}">{inline(m[1])}</span>')
+            continue
+        out.append(inline(line))
     if table:
         out += _table(table, mono)
+    while out and out[-1] == '':
+        out.pop()
     return '\n'.join(out)
 
 
@@ -198,11 +239,22 @@ def _table(lines, mono):
     return out
 
 
-def _inline(line, mono):
-    """Negritas y `código` dentro de una línea, ya escapada."""
-    line = html.escape(line, quote=False)
-    line = CODE.sub(lambda m: f'{mono}{m[1]}</span>', line)
-    return BOLD.sub(r'<b>\1</b>', line)
+def _inline(line, mono, bold=None, rich=False):
+    """Negritas, `código` y, si `rich`, cursivas y enlaces dentro de una línea.
+    Lo que va entre acentos graves se queda como está: ahí un `**` o un `_`
+    son del código."""
+    out = []
+    for part in re.split(r'(`[^`]+`)', line):
+        if len(part) > 2 and part.startswith('`') and part.endswith('`'):
+            out.append(f'{mono}{html.escape(part[1:-1], quote=False)}</span>')
+            continue
+        part = html.escape(part, quote=False)
+        if rich:
+            part = LINK.sub(r'<u>\1</u>', part)
+            part = ITALIC.sub(lambda m: f'<i>{m[1] or m[2]}</i>', part)
+        tag = f'<span weight="bold" foreground="{bold}">\\1</span>' if bold else r'<b>\1</b>'
+        out.append(BOLD.sub(tag, part))
+    return ''.join(out)
 
 
 def context_role(pct):

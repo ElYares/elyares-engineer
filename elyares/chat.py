@@ -182,7 +182,7 @@ def default_effort(model_id, path=None):
 @dataclass
 class Entry:
     """Una cosa de la conversación, como la dibuja la isla."""
-    kind: str                 # you | claude | note | error | foot (el pie de un turno)
+    kind: str                 # you | flow (lo que manda un workflow) | claude | note | error | foot (el pie de un turno)
     text: str
     images: int = 0           # solo en lo tuyo: cuántas imágenes llevaba
 
@@ -308,10 +308,12 @@ class Chat:
         paths = sorted((p for p in self.files if word in p.lower()), key=rank)
         return (found + [(path, '') for path in paths])[:MAX_MENTIONS]
 
-    def send(self, text, images=()):
+    def send(self, text, images=(), shown=None, kind='you'):
         """Le manda a Claude lo que escribiste, con las imágenes pegadas (PNG
         en bytes). Con un turno en curso, Claude lo deja en cola y lo atiende
-        al terminar. False si no había nada."""
+        al terminar. False si no había nada. En la conversación queda `shown`
+        si se da (lo que se ve de un mensaje largo o con instrucciones para
+        Claude) y no `text`; `kind` es 'flow' para lo que manda un workflow."""
         text = text.strip()
         if not text and not images:
             return False
@@ -326,7 +328,7 @@ class Chat:
         if not self._write({'type': 'user', 'message': {'role': 'user', 'content': content}}):
             self._add('error', 'No se pudo hablar con Claude')
             return False
-        self._add('you', text, len(images))
+        self._add(kind, text if shown is None else shown, len(images))
         self.busy, self.cut = True, False
         return True
 

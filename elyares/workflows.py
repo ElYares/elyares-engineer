@@ -30,7 +30,11 @@ STOP, GO = 'stop', 'go'       # si un paso falla: parar ahí, o seguir con el si
 FAILED = 'PASO FALLIDO:'
 RULE = ('\n\n---\nEsto es un paso de un workflow, y de lo que contestes depende que corra el siguiente. '
         'Si no pudiste hacer lo que se pide, o lo que había que comprobar no se cumple, acaba tu respuesta '
-        f'con una línea que empiece por `{FAILED}` y el motivo en una frase. Si salió bien, no la pongas.')
+        f'con una línea que empiece por `{FAILED}` y el motivo en una frase. Si salió bien, no la pongas.'
+        '\n\nEscribe tu respuesta en markdown corto, que se lee en un panel angosto: una línea con lo que hiciste, '
+        'después secciones con títulos en **negritas** y viñetas, `código` para comandos, rutas y hashes, '
+        'y nada de tablas anchas.')
+SHOWN_LINES = 10               # de lo que dejó el paso anterior, lo que se enseña en el chat del siguiente
 VERDICT_LINES = 4             # la marca va al final: se busca en las últimas líneas de la respuesta
 # Cómo va un paso de una ejecución.
 WAIT, RUNNING, OK, BAD = 'wait', 'run', 'ok', 'bad'
@@ -206,6 +210,19 @@ class Run:
             text += (f'\n\n---\nEres el paso {i + 1} de {len(self.w.steps)} del workflow «{self.w.name}». '
                      f'Esto dejó el paso {before + 1} ({self.w.steps[before].agent}):\n\n{self.replies[before]}')
         return text + RULE
+
+    def shown(self, i):
+        """Lo que se ve en el chat de lo que se le manda al paso `i`, en
+        markdown: su instrucción, de qué paso es y, si recibe lo del anterior,
+        un trozo de ello. La regla de cómo avisar si falla no se enseña."""
+        before = next((j for j in range(i - 1, -1, -1) if self.replies[j]), None)
+        text = f'{self.w.steps[i].text}\n\n**Paso {i + 1} de {len(self.w.steps)}** · workflow «{self.w.name}»'
+        if before is None:
+            return text
+        lines = self.replies[before].strip().splitlines()
+        cut = lines[:SHOWN_LINES] + (['…'] if len(lines) > SHOWN_LINES else [])
+        return (f'{text}\n\nRecibe lo que dejó el paso {before + 1} (**{self.w.steps[before].agent}**):\n\n'
+                + '\n'.join(cut))
 
     def begin(self, i):
         """Empieza (o reintenta) el paso `i`."""
