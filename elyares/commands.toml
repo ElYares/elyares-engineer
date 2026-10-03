@@ -36,10 +36,16 @@
 "Clic en uno que trabaja" = "Abre su desglose: sus pasos y lo que tardó cada uno"
 "Clic en una alerta" = "Abre su ficha, o su enlace si no tiene"
 "Clic en una pastilla" = "Prende o apaga esa fuente"
+"Clic en la pastilla Chat" = "Abre el chat con Claude"
+"Clic en el agente, en el chat" = "Elige con quién hablas"
+"Clic en uno de los tres" = "Abre su mini chat, para encargarle algo"
+"hablarle › o ver su chat ›, en un desglose" = "Abre el chat de ese agente"
 "Clic derecho" = "Modo compacto"
 "Clic central" = "Fija la isla abierta, o la suelta"
 
 [engineer]
+"elyares-ctl chat" = "El chat con Claude; otra vez, lo cierra"
+"elyares-ctl chat <agente>" = "El chat de architect, auditor, reviewer o engineer"
 "elyares-ctl tab" = "La pestaña que sigue"
 "elyares-ctl steps" = "El desglose de uno; otra vez, el del que sigue"
 "elyares-ctl status" = "Cómo está cada fuente"

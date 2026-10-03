@@ -89,6 +89,11 @@ de la elegida, **sus cuatro agentes**.
   tardó cada uno (los últimos 8; arriba dice cuántos hubo antes). Los demás
   siguen a la vista en miniatura, y un clic en uno de ellos abre el suyo.
   "‹ volver" regresa al tablero e "ir al pane ›" lleva al pane de tmux.
+- **Encargarle algo a uno de los tres:** un clic en el architect, el auditor
+  o el reviewer, aunque esté libre, abre su desglose con un mini chat al pie.
+  Escribes qué quieres que haga, Enter se lo manda y la isla vuelve al
+  tablero, donde trabaja al lado de los demás: puedes poner a los tres a la
+  vez mientras el engineer sigue con lo suyo. Más abajo, en [El chat](#el-chat).
 - **Las pestañas** van por nombre, para que no cambien de sitio. Su punto es
   del color de quien trabaja ahí, rojo si pide permiso, amarillo si espera,
   verde si terminó y hueco en reposo. Un clic elige la sesión; un clic en la
@@ -139,6 +144,77 @@ pide permiso lo muestra entero siempre, para ver el comando completo antes de
 contestar. En el tablero, lo que no cabe en una tarjeta se lee en su desglose.
 
 Un clic en la mascota la enoja; tres rápidos la marean.
+
+### El chat
+
+A Claude se le piden las cosas desde la isla, sin terminal: tmux se queda
+para el editor, git y los comandos. `elyares-ctl chat` (o la pastilla
+**Chat** del pie) abre el chat, listo para escribir; otra vez lo cierra, y la
+conversación sigue ahí al volver a abrirlo.
+
+**Se pide en el chat y se ve trabajar en el tablero.** Al mandar algo el chat
+se cierra y la isla vuelve al tablero, en la pestaña de la conversación
+(`proyecto · chat`), con el agente al frente y sus pasos. Si Claude pide
+permiso se contesta en su tarjeta del tablero, como el de cualquier sesión.
+Al terminar sale un aviso con el principio de la respuesta y el botón **Ver
+respuesta**, que abre el chat para leerla entera.
+
+- **Dónde trabaja:** en la carpeta del pane de tmux en el que estás al abrirlo
+  (el del cliente de tmux que se usó al último). La cabecera la dice.
+- **La caja:** crece con lo que escribes hasta seis líneas y luego hace
+  scroll. Enter manda; Shift+Enter, otra línea. **Ctrl+V** pega texto y
+  también imágenes: van en etiquetas encima de la caja (`imagen 1 ×`) y salen
+  con el siguiente mensaje.
+- **Comandos:** al escribir `/` salen tus skills y comandos (`/contexto`,
+  `/bitacora`, `/commit`, `/pr`…) con su descripción; se eligen con las
+  flechas y Tab o Enter. Los entiende Claude como en la terminal.
+- **La conversación**, al estilo de OpenCode: lo tuyo en un bloque con una
+  barra del color del agente; lo de Claude con su markdown (negritas,
+  `código`, títulos, bloques de código y tablas alineadas); sus pasos en una
+  línea tenue, y al acabar cada turno su pie: `▣ agente · modelo · tiempo`.
+  La rueda del ratón la sube.
+- **La línea de estado**, debajo de la caja: con quién hablas, el modelo, el
+  esfuerzo y el modo plan, cada uno con su clic. El modelo y el plan cambian
+  al momento; el esfuerzo, desde el siguiente turno (Claude solo lo toma al
+  arrancar, así que la isla retoma la conversación con el nuevo).
+  **Shift+Tab** prende o apaga el plan, como en la terminal. El modelo y el
+  esfuerzo elegidos se guardan (`chat_model`, `chat_effort` en
+  `settings.json`).
+- **Un chat por agente:** un clic en el nombre del agente, en la línea de
+  estado, elige con quién hablas: elyares-engineer o uno de la familia. Cada
+  uno tiene su conversación; la de un agente corre como él (`claude -p
+  --agent elyares-architect`), con su modelo, y en el tablero sale con su
+  cara. También: `elyares-ctl chat architect` (o `auditor`, `reviewer`,
+  `engineer`), **hablarle ›** en el desglose del engineer y **ver su chat ›**
+  en el de cada uno de los tres.
+- **El mini chat, para encargar sin abrir el panel:** en el tablero, un clic
+  en uno de los tres (en su tarjeta, en la banca o en su carita de un
+  desglose) abre su desglose con una caja al pie y el teclado listo. Enter
+  se lo manda a su conversación y la isla vuelve al tablero; Shift+Enter es
+  otra línea y Esc suelta el teclado. Trabaja en la carpeta de esa pestaña,
+  y lo que hace no saca pestaña propia: se ve en su tarjeta de la pestaña
+  desde la que se lo encargaste, al lado de los que ya trabajaban. Si pide
+  permiso se contesta ahí mismo, y al terminar sale el aviso con **Ver
+  respuesta**. La conversación de cada agente es una sola: si sigue ocupado
+  en otro proyecto, su mini chat lo dice y no se le encarga nada hasta que
+  acabe. Si la pestaña desde la que se lo encargaste se cierra, su sesión
+  saca la suya. El engineer no tiene mini chat: a él se le habla en el chat.
+- **Permisos:** el chat corre en bypass (`bypassPermissions`), así que casi
+  nada pregunta. Lo que Claude sigue preguntando aun así (escribir en
+  settings, git o la configuración de herramientas) se contesta en la
+  tarjeta del tablero o, con el chat abierto, en la de encima de la caja.
+- **Detener / Nuevo / Cerrar**, arriba a la derecha: cortar el turno (también
+  Ctrl+C sin nada seleccionado), empezar otra conversación con el mismo
+  agente en la carpeta del pane de ahora, y cerrar el panel.
+- **El teclado:** mientras escribes, el chat lo toma entero. Esc lo suelta sin
+  cerrar el chat y un clic en la caja lo vuelve a tomar; si pasan 90 s sin
+  teclear, lo suelta solo.
+
+Por debajo es `claude -p` con entrada y salida en `stream-json`: un proceso
+por conversación, que la isla mantiene vivo turno tras turno y que le pasa
+los permisos (`--permission-prompt-tool stdio`). Si el proceso se cierra, lo
+siguiente que escribas lo vuelve a abrir con `--resume` (`elyares/chat.py`,
+`elyares/chatview.py`).
 
 ### La familia
 
@@ -541,6 +617,7 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | Orden | Qué hace |
 |---|---|
 | `elyares-ctl open` | abre la isla con lo que hace Claude; se cierra sola a los 6 s o al repetir |
+| `elyares-ctl chat [quién]` | abre el chat con Claude, listo para escribir; otra vez lo cierra. Con `architect`, `auditor`, `reviewer` o `engineer`, el de ese agente |
 | `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
 | `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |
 | `elyares-ctl pin` | fija la isla abierta con todo a la vista; otra vez, la suelta. Como el clic central |

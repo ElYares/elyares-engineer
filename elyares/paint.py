@@ -12,6 +12,7 @@ la paleta es un azul grisáceo y el "verde", un gris.
 """
 
 import colorsys
+import html
 import re
 
 ISLAND = '#050608'
@@ -136,6 +137,72 @@ def note(text):
         if pos < len(chunk):
             out.append((chunk[pos:], base))
     return out
+
+
+FENCE = re.compile(r'\s*```')
+HEADING = re.compile(r'(#{1,6})\s+(.*)')
+BULLET = re.compile(r'(\s*)[-*]\s+(.*)')
+BOLD = re.compile(r'\*\*(.+?)\*\*')
+CODE = re.compile(r'`([^`]+)`')
+
+
+def markdown(text, code='#c0caf5', head='#ffffff'):
+    """Lo que escribe Claude (markdown) como marcado de Pango, con lo justo
+    para leerlo en la isla: negritas, `código` y títulos, viñetas, y los
+    bloques de código y las tablas en monoespaciado, para que no se
+    desalineen. `code` y `head` son los colores del código y de los títulos."""
+    mono = f'<span font_family="monospace" foreground="{code}">'
+    out, fenced, table = [], False, []
+    for line in (text or '').split('\n'):
+        if line.lstrip().startswith('|') and not fenced:
+            table.append(line)
+            continue
+        if table:
+            out += _table(table, mono)
+            table = []
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            out.append(f'{mono}{html.escape(line, quote=False)}</span>')
+            continue
+        m = HEADING.fullmatch(line)
+        if m:
+            size = ' size="large"' if len(m[1]) <= 2 else ''
+            out.append(f'<span foreground="{head}" weight="bold"{size}>{_inline(m[2], mono)}</span>')
+            continue
+        m = BULLET.fullmatch(line)
+        if m:
+            line = f'{m[1]}• {m[2]}'
+        out.append(_inline(line, mono))
+    if table:
+        out += _table(table, mono)
+    return '\n'.join(out)
+
+
+RULE = re.compile(r'[\s|:-]+')
+
+
+def _table(lines, mono):
+    """Una tabla de markdown, con sus columnas alineadas en monoespaciado:
+    sin la fila de guiones y con la cabecera en negrita."""
+    rows = [[cell.strip() for cell in line.strip().strip('|').split('|')]
+            for line in lines if not RULE.fullmatch(line)]
+    cols = max(len(row) for row in rows)
+    rows = [row + [''] * (cols - len(row)) for row in rows]
+    widths = [max(len(row[i]) for row in rows) for i in range(cols)]
+    out = []
+    for n, row in enumerate(rows):
+        text = html.escape('  '.join(cell.ljust(w) for cell, w in zip(row, widths)).rstrip(), quote=False)
+        out.append(f'{mono}<b>{text}</b></span>' if n == 0 and len(rows) > 1 else f'{mono}{text}</span>')
+    return out
+
+
+def _inline(line, mono):
+    """Negritas y `código` dentro de una línea, ya escapada."""
+    line = html.escape(line, quote=False)
+    line = CODE.sub(lambda m: f'{mono}{m[1]}</span>', line)
+    return BOLD.sub(r'<b>\1</b>', line)
 
 
 def context_role(pct):

@@ -50,7 +50,9 @@ es un tablero: una pestaña por sesión y, de la elegida, sus cuatro agentes
 (`state.Session.team`). Los que trabajan van al frente, en grande, con su gesto
 y sus últimos pasos; los libres, en chiquito en la banca. El frente se parte
 según cuántos trabajen, y con los cuatro son cuatro cuadros. Un clic en uno
-abre su desglose: todos sus pasos y lo que tardó cada uno. Un clic en la
+abre su desglose: todos sus pasos y lo que tardó cada uno. El de uno de los
+tres (architect, auditor, reviewer) trae un mini chat para encargarle algo, y
+lo que hace se ve en su tarjeta de esa misma pestaña (`team`, `chatview`). Un clic en la
 pestaña elegida lleva al pane de tmux de esa sesión. La pestaña se va sola a
 la sesión que pide permiso o acaba de terminar y, cuando la elegida se queda
 en reposo, a la que sigue trabajando. Debajo del tablero van las alertas, una
@@ -79,9 +81,9 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import (actions, coffe, commands, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, settings, sources, store, testrun, theme)
-from .state import MAIN_ROLE, Model, elapsed  # noqa: E402
+from . import (actions, chatview, coffe, commands, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
+               preview, settings, sources, state, store, testrun, theme)
+from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
 MAX_ROWS = 5          # filas de la lista de alertas, con la cabecera de siempre
 ROW_H, LIST_PAD = 28, 10
@@ -102,6 +104,9 @@ TIP_ROOM = 440        # el alto que se le reserva en la ventana
 TIP_COL_GAP = 16      # entre un comando y lo que hace
 TIP_HEAD_GAP = 15     # aire sobre el título de un bloque de comandos, con una raya en medio
 TIP_LINES = 3         # líneas propias que puede traer una fuente
+CHAT_PILL = 'chat'    # la pastilla del pie que abre el chat
+# `elyares-ctl chat <quién>`: el chat de ese de la familia.
+AGENT_NAMES = {role: ('' if role == 'engineer' else name) for role, name in state.ROLE_AGENTS.items()}
 TIP_ITEMS = 5         # cosas que nombra una por una (los PRs de GitHub); de las demás dice cuántas
 TIP_ITEM_DOT = 14     # sitio para el punto de cada una
 TIP_ITEM_GAP = 7      # entre una y otra
@@ -155,7 +160,7 @@ MINI, MAX_MINIS = 24, 4             # las caritas de los demás, con la isla aso
 WIN_W = PREVIEW_W + 40
 # Lo más alto que se puede dibujar, con la cabecera de siempre o con el tablero.
 HEAD_MAX = OPEN_H + MAX_EXTRA + PREVIEW_MAX + ASK_TALL + MAX_ROWS * ROW_H + LIST_PAD
-BOARD_MAX = (TABS_H + max(BOARD_H + PREVIEW_MAX, FOCUS_H) + BOARD_PAD
+BOARD_MAX = (TABS_H + max(BOARD_H + PREVIEW_MAX, FOCUS_H + chatview.MINI_H) + BOARD_PAD
              + ALERT_ROWS * ROW_H + LIST_PAD)
 WIN_H = max(HEAD_MAX, BOARD_MAX) + PILLS_H + 8 + TIP_ROOM
 SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
@@ -229,7 +234,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island:
+class Island(chatview.ChatView):
     def __init__(self, app):
         self.model = Model()
         self.model.restore(store.load())
@@ -275,6 +280,7 @@ class Island:
         self.list_layout = False        # la cabecera se queda arriba mientras hay lista
         self.wrap = (None, 0)           # (detalle, alto de más que pide entero)
         self.pills = []                 # (fuente, x, y, ancho, alto), del último dibujo
+        self.chat_init()
         self.tip = None                 # (fuente, centro, opacidad) de la pastilla bajo el cursor
         self.tip_key = None
         self.tip_ref = []               # los comandos de la burbuja que se está viendo
@@ -330,8 +336,12 @@ class Island:
         middle = Gtk.GestureClick(button=Gdk.BUTTON_MIDDLE)
         middle.connect('pressed', self.on_middle_click)
         da.add_controller(middle)
-        win.set_child(da)
+        # La caja de texto del chat va encima del dibujo.
+        overlay = Gtk.Overlay()
+        overlay.set_child(da)
+        win.set_child(overlay)
         self.da = da
+        self.chat_widgets(overlay)
 
         css = Gtk.CssProvider()
         css.load_from_string('window, window.background { background: transparent; }')
@@ -436,6 +446,7 @@ class Island:
 
     def on_second(self):
         self.seconds += 1
+        self.chat_tick(time.monotonic())
         if self.seconds % REAP_SECS == 0:
             # Las sesiones sin pane (las de segundo plano) no tienen otra
             # forma de irse si se cierran sin avisar.
@@ -485,6 +496,7 @@ class Island:
         mascot.set_accent(palette.get('accent'))
         self.colors = paint.colors(palette)
         self.markups = {}
+        self.chat_theme()
 
     def markup(self, detail):
         """El detalle con su resaltado, como marcado de Pango."""
@@ -637,6 +649,12 @@ class Island:
             self.settings['glass'] = not self.settings['glass']
             settings.save(self.settings)
             self.ensure_tick()
+        elif order == 'chat':
+            agent = (msg or {}).get('agent')
+            if agent in AGENT_NAMES:
+                self.open_chat(typing=True, agent=AGENT_NAMES[agent])
+            else:
+                self.toggle_chat()
         elif order in ('tab', 'steps'):
             # Con el teclado: la pestaña que sigue, o el desglose del que sigue.
             self.off = False
@@ -716,8 +734,10 @@ class Island:
         return [s for s in self.everyone() if s.state == 'alert']
 
     def tabs(self):
-        """Las pestañas del tablero: las sesiones, por nombre para que no cambien de sitio."""
-        return sorted(self.claude(), key=lambda s: (s.proj.lower(), s.sid))
+        """Las pestañas del tablero: las sesiones, por nombre para que no
+        cambien de sitio. La de un encargo no tiene la suya: va en la pestaña
+        desde la que se hizo."""
+        return sorted((s for s in self.claude() if self.host(s) is s), key=lambda s: (s.proj.lower(), s.sid))
 
     def tab_session(self):
         """La sesión de la pestaña elegida. Si no hay ninguna elegida, o se
@@ -726,8 +746,36 @@ class Island:
         chosen = next((s for s in sessions if s.sid == self.tab), None)
         if chosen is None and sessions:
             chosen = sessions[0]
+        if chosen is not None:
+            chosen = self.host(chosen)
             self.tab = chosen.sid
         return chosen
+
+    def seat(self, s, role):
+        """La sesión en la que trabaja ese personaje en la pestaña de `s`: la
+        de su encargo, si lo tiene y no anda ya de subagente en la propia."""
+        c = self.crew(s).get(role)
+        other = self.model.sessions.get(c.session) if c is not None else None
+        if other is None or next(m for m in s.team() if m.role == role).busy:
+            return s
+        return other
+
+    def team(self, s):
+        """Los cuatro de la pestaña de `s`: los de su sesión y, en su sitio,
+        los de la familia a los que se les encargó algo desde ella, que
+        trabajan cada uno en su conversación."""
+        team = s.team()
+        for role, c in self.crew(s).items():
+            i = next(i for i, m in enumerate(team) if m.role == role)
+            if team[i].busy:
+                continue
+            other = self.seat(s, role)
+            mine = team[i] if other is s else next(m for m in other.team() if m.role == role)
+            if c.busy and not mine.busy:
+                # Recién encargado: Claude todavía no dice qué hace.
+                mine = Member(role, c.name, 'working', mine.steps, mine.since)
+            team[i] = mine
+        return team
 
     def follow(self, v):
         """La pestaña se va sola a la sesión que pide permiso o acaba de
@@ -738,6 +786,8 @@ class Island:
         se eligió a mano se queda."""
         if v.key == self.view.key:
             return
+        if self.chat_typing and not self.chat_open:
+            return                      # escribiéndole a uno en su desglose: no se mueve
         s = v.session
         if s is None or s.state not in ('permission', 'done'):
             sessions = [o for o in ([s] if s else []) + v.others if o.state != 'alert']
@@ -747,23 +797,33 @@ class Island:
             s = next((o for o in sessions if self.busy(o)), None)
             if s is None:
                 return
+        s = self.host(s)
         if self.tab != s.sid:
             self.focus = None
         self.tab = s.sid
 
-    @staticmethod
-    def busy(s):
+    def busy(self, s):
         """¿Alguno de los cuatro de la sesión hace algo? Es lo que dice su tablero."""
-        return any(m.busy for m in s.team())
+        return any(m.busy for m in self.team(s))
 
     def focused(self):
         """(sesión, miembro) del desglose abierto, o None. Se cierra solo si
-        se cambió de pestaña o ya no quedan pasos que leer."""
+        se cambió de pestaña o ya no quedan pasos que leer; el de uno de los
+        tres no, que tiene su mini chat."""
         s = self.tab_session()
         if not self.focus or s is None or s.sid != self.focus[0]:
             return None
-        member = next((m for m in s.team() if m.role == self.focus[1]), None)
-        return (s, member) if member is not None and member.steps else None
+        member = next((m for m in self.team(s) if m.role == self.focus[1]), None)
+        if member is None or not (member.steps or member.role != MAIN_ROLE):
+            return None
+        return s, member
+
+    def body_h(self):
+        """Alto del tablero bajo las pestañas: el de los cuatro o el de un
+        desglose, que con su mini chat mide un poco más."""
+        if not self.focused():
+            return BOARD_H
+        return FOCUS_H + (chatview.MINI_H if self.briefing() else 0)
 
     def next_tab(self):
         """Pasa a la pestaña que sigue, y de la última a la primera."""
@@ -778,16 +838,21 @@ class Island:
         s = self.tab_session()
         if s is None:
             return
-        roles = [m.role for m in s.team() if m.steps]
+        roles = [m.role for m in self.team(s) if m.steps]
         now = self.focus[1] if self.focused() else None
         after = roles[roles.index(now) + 1:] if now in roles else roles
         self.focus = (s.sid, after[0]) if after else None
 
     def asking(self):
         """La sesión cuyo permiso se puede contestar desde la isla: la de la
-        cabecera o, en el tablero, la de la pestaña elegida."""
+        cabecera o, en el tablero, la de la pestaña elegida o la de uno de
+        sus encargos."""
         s = self.tab_session() if self.target() == 'board' else self.view.session
-        return s if s is not None and s.state == 'permission' and s.ask is not None else None
+        group = [s]
+        if s is not None and self.target() == 'board':
+            group += [self.model.sessions.get(c.session) for c in self.crew(s).values()]
+        return next((o for o in group if o is not None and o.state == 'permission' and o.ask is not None),
+                    None)
 
     def minis(self):
         """Los demás que trabajan, para la isla asomada: (personaje, gesto) de
@@ -831,6 +896,8 @@ class Island:
         return GLib.SOURCE_REMOVE
 
     def collapse(self):
+        if self.chat_typing and not self.off and self.briefing() is not None:
+            return                      # escribiéndole a uno en su desglose: no se cierra debajo de las manos
         if self.collapse_id:
             GLib.source_remove(self.collapse_id)
             self.collapse_id = 0
@@ -875,6 +942,9 @@ class Island:
     def target(self):
         if self.off:
             return 'off'
+        if self.chat_open:
+            # El chat ocupa la isla mientras está abierto, fijada o no.
+            return 'chat'
         mode = self.view.mode
         if self.expanded:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
@@ -961,13 +1031,15 @@ class Island:
         """Tamaño al que va la isla: el del modo, más el detalle entero, las
         filas y las fuentes."""
         mode = self.target()
+        if mode == 'chat':
+            return chatview.CHAT_W, chatview.CHAT_H
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
         rows = len(self.rows_for(mode))
         if mode == 'board':
             # Mide lo mismo trabajen uno, dos o los cuatro: solo crece el desglose.
-            h = TABS_H + (FOCUS_H if self.focused() else BOARD_H) + BOARD_PAD
+            h = TABS_H + self.body_h() + BOARD_PAD
             if rows:
                 h += LIST_PAD + ROW_H * min(ALERT_ROWS, rows)
             return BOARD_W, h + more
@@ -1168,11 +1240,21 @@ class Island:
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         self.buttons, self.rows, self.pills, self.hits = {}, [], [], []
-        self.tip = self.card_span = None
+        self.tip = self.card_span = self.chat_box = None
+        if mode == 'chat':
+            self.draw_chat(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 300) / 200), now)
+            cr.restore()
+            if edge:
+                cr.append_path(edge)
+                cr.set_source_rgba(1, 1, 1, GLASS_EDGE)
+                cr.set_line_width(1)
+                cr.stroke()
+            self.chat_place(h)
+            return
         if mode == 'board':
             full_h = h
             text_alpha = clamp((w - 420) / 120) * clamp((h - 110) / 60)
-            body = FOCUS_H if self.focused() else BOARD_H
+            body = self.body_h()
             if text_alpha > 0:
                 self.draw_board(cr, x0, w, body, text_alpha, now)
             head = TABS_H + body + BOARD_PAD
@@ -1192,6 +1274,7 @@ class Island:
         if pills and full_h > head:
             self.draw_pills(cr, x0, w, full_h, below)
         cr.restore()
+        self.chat_place(h)              # la caja del mini chat, si un desglose dejó su sitio
         if edge:
             # El filo claro es lo que hace que el fondo translúcido se lea como vidrio.
             cr.append_path(edge)
@@ -1335,21 +1418,24 @@ class Island:
             cr.fill_preserve()
         cr.new_path()
 
-    @staticmethod
-    def tab_dot(s):
+    def tab_dot(self, s):
         """El color del punto de una pestaña: rojo si piden permiso, el del
         que trabaja, amarillo si espera, verde si terminó; None en reposo."""
-        states = {m.state for m in s.team()}
+        team = self.team(s)
+        states = {m.state for m in team}
         if 'permission' in states:
             return 'red'
         if 'working' in states:
-            return mascot.accent(s.role)
+            # El de la sesión; si ella descansa, el del encargo que trabaja.
+            working = [m.role for m in team if m.state == 'working']
+            return mascot.accent(s.role if s.role in working else working[0])
         return 'yellow' if 'waiting' in states else 'green' if 'done' in states else None
 
-    @staticmethod
-    def tab_label(s):
+    def tab_label(self, s):
         """El nombre de una sesión en su pestaña: el de su carpeta y, si lo
-        tiene, el que le puso Claude Code."""
+        tiene, el que le puso Claude Code. La del chat de la isla lo dice."""
+        if s.sid in self.chat_sessions:
+            return f'{s.proj} · chat' + (f' {s.owner}' if s.owner != MAIN_ROLE else '')
         return f'{s.proj} · {s.label or BG_TAG}' if s.label or s.kind == 'bg' else s.proj
 
     def tab_labels(self):
@@ -1373,7 +1459,7 @@ class Island:
         if focus:
             self.draw_focus(cr, left, top, width, body, focus[1], s, alpha, now)
             return
-        team = s.team()
+        team = self.team(s)
         front = [m for m in team if m.busy]
         if not front or len(front) == len(team):
             # Todos igual: en fila si están libres, en cuatro cuadros si trabajan.
@@ -1432,12 +1518,16 @@ class Island:
     def draw_member(self, cr, s, member, x, y, cw, ch, alpha, now):
         """Uno de los cuatro en su tarjeta: su cara con el gesto de cómo está,
         su nombre y sus últimos pasos. Si pide permiso, lo que quiere hacer
-        entero y los botones. Libre va apagado."""
+        entero y los botones. Libre va apagado; a uno de los tres, un clic le
+        abre el mini chat para encargarle algo."""
         busy, role = member.busy, member.role
         tint = MEMBER_TINT.get(member.state) or mascot.accent(role)
-        self.panel(cr, x, y, cw, ch, alpha, tint if busy else None, busy and self.over(x, y, cw, ch))
+        over = (busy or role != MAIN_ROLE) and self.over(x, y, cw, ch)
+        self.panel(cr, x, y, cw, ch, alpha, tint if busy else None, over)
         if busy:
             self.hits.append(('member', (s.sid, role), x, y, cw, ch))
+        elif role != MAIN_ROLE:
+            self.hits.append(('brief', (s.sid, role), x, y, cw, ch))
         # Cuatro acomodos según el sitio: en columna (tres al frente, o los
         # cuatro libres), en cuadro (los cuatro trabajando), a medias (dos) y a
         # lo ancho (uno). `sx` y `sw` son dónde van sus pasos.
@@ -1485,13 +1575,14 @@ class Island:
                 if took:
                     self.put(cr, took, FONT_DETAIL, tx + 14, ty + 19, MUTED_COLOR, alpha, tw - 14)
         if not busy:
-            note = ('esperando' if s.delegating else 'en reposo') if role == MAIN_ROLE else 'libre'
+            note = (('esperando' if s.delegating else 'en reposo') if role == MAIN_ROLE
+                    else 'encargar ›' if over else 'libre')
             self.put(cr, note, FONT_DETAIL, x + cw / 2 if column else tx + 14, ty + 20, MUTED_COLOR,
                      alpha * .8, tw, .5 if column else 0)
             return
         if member.state == 'permission':
             # Lo que quiere hacer, entero: hay que leerlo antes de contestar.
-            asks = s.ask is not None
+            asks = self.seat(s, role) is self.asking()
             top = ty + 24 if wide or quad else y + 76 if not column else ty + 22
             room = y + ch - top - (BUTTON_H + 14 if asks else 8)
             self.put(cr, member.detail, FONT_DETAIL, sx, top, rgb(self.colors['arg']), alpha, sw,
@@ -1521,21 +1612,31 @@ class Island:
                 self.put(cr, text, FONT_DETAIL, x + 16, y, MUTED_COLOR, alpha * .8, width - 16)
 
     def draw_bench(self, cr, s, members, x, y, w, h, alpha):
-        """La banca: los que no trabajan, en chiquito."""
+        """La banca: los que no trabajan, en chiquito. Un clic en uno de los
+        tres abre su mini chat para encargarle algo."""
         self.panel(cr, x, y, w, h, alpha)
         step = h / len(members)
         for i, member in enumerate(members):
             cy = y + step * i + step / 2
-            self.face(cr, member.role, 'idle', x + 26, cy + 1, 34, alpha * .4)
-            self.put(cr, member.role, FONT_ROW, x + 48, cy - 15, MUTED_COLOR, alpha, w - 54)
+            over = member.role != MAIN_ROLE and self.over(x, cy - step / 2, w, step)
+            if over:
+                mascot.rrect(cr, x + 4, cy - step / 2 + 3, w - 8, step - 6, 10)
+                cr.set_source_rgba(1, 1, 1, .06 * alpha)
+                cr.fill()
+            if member.role != MAIN_ROLE:
+                self.hits.append(('brief', (s.sid, member.role), x, cy - step / 2, w, step))
+            self.face(cr, member.role, 'idle', x + 26, cy + 1, 34, alpha * (.8 if over else .4))
+            self.put(cr, member.role, FONT_ROW, x + 48, cy - 15, TITLE_COLOR if over else MUTED_COLOR, alpha,
+                     w - 54)
             waits = member.role == MAIN_ROLE and s.delegating
-            self.put(cr, 'esperando' if waits else 'libre', FONT_DETAIL, x + 48, cy + 1, MUTED_COLOR,
-                     alpha * .7, w - 54)
+            self.put(cr, 'esperando' if waits else 'encargar ›' if over else 'libre', FONT_DETAIL,
+                     x + 48, cy + 1, MUTED_COLOR, alpha * .7, w - 54)
 
     def draw_focus(self, cr, x, y, width, h, member, s, alpha, now):
         """El desglose de uno: a la izquierda quién es y cuánto lleva; en
-        medio todos sus pasos y lo que tardó cada uno; a la derecha, los
-        demás en miniatura. Un clic a la izquierda vuelve al tablero."""
+        medio todos sus pasos y lo que tardó cada uno y, si es uno de los
+        tres, el mini chat para encargarle algo; a la derecha, los demás en
+        miniatura. Un clic a la izquierda vuelve al tablero."""
         cw = width - FOCUS_MINIS
         role = member.role
         tint = MEMBER_TINT.get(member.state) or mascot.accent(role)
@@ -1549,25 +1650,39 @@ class Island:
                  FOCUS_SIDE - 12, .5)
         n = len(member.steps)
         took = f' · {elapsed(now - member.since)}' if member.busy and member.since else ''
-        self.put(cr, f'{n} paso{"" if n == 1 else "s"}{took}', FONT_DETAIL, cx, y + 156,
-                 rgb(self.colors['arg']), alpha, FOCUS_SIDE - 12, .5)
+        self.put(cr, f'{n} paso{"" if n == 1 else "s"}{took}' if n or member.busy else 'libre', FONT_DETAIL,
+                 cx, y + 156, rgb(self.colors['arg']), alpha, FOCUS_SIDE - 12, .5)
         # Al pie, dos enlaces: al pane de la sesión y de vuelta al tablero.
-        links = ([('jump', s.sid, 'ir al pane ›')] if s.pane else []) + [('back', None, '‹ volver')]
+        # Y su chat: con el engineer, para hablarle; con uno de los tres, que
+        # ya tiene aquí su mini chat, para leer lo que contestó.
+        agent = '' if role == MAIN_ROLE else state.ROLE_AGENTS[role]
+        talk = 'ver su chat ›' if agent else 'hablarle ›'
+        links = ([('jump', s.sid, 'ir al pane ›')] if s.pane else []) + [('talk', agent, talk),
+                                                                        ('back', None, '‹ volver')]
+        step = 24 if len(links) < 3 else 20
         for i, (kind, key, label) in enumerate(reversed(links)):
-            ly = y + h - 32 - i * 24
+            ly = y + h - 32 - i * step
             over = self.over(x + 8, ly, FOCUS_SIDE - 16, 22)
             self.put(cr, label, FONT_DETAIL, cx, ly + 4, TITLE_COLOR if over else MUTED_COLOR, alpha,
                      FOCUS_SIDE - 16, .5)
             self.hits.append((kind, key, x + 8, ly, FOCUS_SIDE - 16, 22))
         self.hits.append(('back', None, x, y, FOCUS_SIDE, h))
+        left, right = x + FOCUS_SIDE + 8, x + cw - 14
+        ty, floor = y + 14, y + h - 14
+        if agent:
+            floor = self.draw_brief(cr, s, agent, role, left - 4, y + h - 10, right - left + 8, alpha) - 8
+            if not n:
+                self.put(cr, f'{agent} está libre', FONT_ROW, left, ty + 2, MUTED_COLOR, alpha, right - left)
+                self.put(cr, 'Escríbele abajo qué quieres que haga: trabajará en esta carpeta, al lado '
+                         'de los demás.', FONT_DETAIL, left, ty + 24, MUTED_COLOR, alpha * .8, right - left,
+                         lines=3)
         # Los pasos: los últimos que caben, y arriba cuántos hubo antes.
-        shown = member.steps[-FOCUS_STEPS:]
+        fit = max(2, min(FOCUS_STEPS, int((floor - ty) // 26)))
+        shown = member.steps[-fit:]
         hidden = n - len(shown)
         if hidden:
-            shown = member.steps[-(FOCUS_STEPS - 1):]
+            shown = member.steps[-(fit - 1):]
             hidden = n - len(shown)
-        left, right = x + FOCUS_SIDE + 8, x + cw - 14
-        ty = y + 14
         if hidden:
             self.put(cr, f'⋯ {hidden} paso{"" if hidden == 1 else "s"} antes', FONT_DETAIL, left + 20, ty,
                      MUTED_COLOR, alpha * .8)
@@ -1591,7 +1706,7 @@ class Island:
                      right - sw - 12 - (left + 20), markup=self.markup(text))
             ty += 26
         # Los demás siguen a la vista; un clic en uno abre el suyo.
-        others = [m for m in s.team() if m.role != role]
+        others = [m for m in self.team(s) if m.role != role]
         mx = x + cw + FOCUS_MINIS / 2 + 2
         for i, other in enumerate(others):
             my = y + 30 + i * 40
@@ -1599,6 +1714,8 @@ class Island:
                       alpha * (1 if other.busy else .35))
             if other.steps:
                 self.hits.append(('member', (s.sid, other.role), mx - 16, my - 18, 32, 36))
+            elif other.role != MAIN_ROLE:
+                self.hits.append(('brief', (s.sid, other.role), mx - 16, my - 18, 32, 36))
 
     def draw_rows(self, cr, x0, w, top, alpha, rows, limit):
         """Una fila por alerta: su punto, de quién es y qué pasa."""
@@ -1783,11 +1900,25 @@ class Island:
             if over:
                 self.tip = (key, x + pw / 2, alpha)
             x += pw + PILL_GAP
-        # La de los atajos no es una fuente: va sin punto, al otro extremo.
+        # La de los atajos no es una fuente: va sin punto, al otro extremo, y
+        # a su lado la del chat.
         layout = self._layout(cr, '?', FONT_PILL)
         lw, lh = layout.get_pixel_size()
         pw = lw + 16
         x = right - pw
+        chat = self._layout(cr, 'Chat', FONT_PILL)
+        cw, ch = chat.get_pixel_size()
+        cpw = cw + 20
+        cx = x - PILL_GAP - cpw
+        over_chat = cx <= px <= cx + cpw and y <= py <= y + PILL_H
+        mascot.rrect(cr, cx, y, cpw, PILL_H, PILL_H / 2)
+        accent = mascot.rgba(mascot.accent('engineer'))[:3]
+        cr.set_source_rgba(*accent, (.30 if over_chat else .18) * alpha)
+        cr.fill()
+        cr.move_to(cx + (cpw - cw) / 2, y + (PILL_H - ch) / 2)
+        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+        PangoCairo.show_layout(cr, chat)
+        self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
         cr.set_source_rgba(1, 1, 1, (.13 if over else .07) * alpha)
@@ -2170,6 +2301,9 @@ class Island:
         for key, (bx, by, bw, bh) in self.buttons.items():
             if not (bx <= x <= bx + bw and by <= y <= by + bh):
                 continue
+            if key.startswith('chat-'):
+                self.on_chat_button(key)
+                return
             if key in ('allow', 'deny'):
                 asking = self.asking()
                 if asking is None:
@@ -2186,9 +2320,11 @@ class Island:
         for key, bx, by, bw, bh in self.pills:
             if bx <= x <= bx + bw and by <= y <= by + bh:
                 # Claude no se apaga desde aquí: sin sus hooks no hay nada que mostrar.
-                # Y la de los atajos no es una fuente.
+                # Y la de los atajos no es una fuente, ni la del chat.
                 if key in sources.PREFIXES:
                     self.toggle_source(key)
+                elif key == CHAT_PILL:
+                    self.open_chat(typing=True)
                 return
         for s, ry, rh in self.rows:
             if ry <= y < ry + rh:
@@ -2205,7 +2341,7 @@ class Island:
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.target() == 'board' or (self.rows and y > self.rows[0][1]):
+        if self.target() in ('board', 'chat') or (self.rows and y > self.rows[0][1]):
             return
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -2213,8 +2349,11 @@ class Island:
             self.go(self.view.session)
 
     def on_hit(self, kind, key):
-        """Un clic en el tablero: en una pestaña, en uno de los cuatro o en
-        los enlaces de un desglose."""
+        """Un clic en el tablero: en una pestaña, en uno de los cuatro, en los
+        enlaces de un desglose o en su mini chat. O en el chat."""
+        if kind == 'chat':
+            self.on_chat_hit(key)
+            return
         if kind == 'tab':
             if key == self.tab:
                 # La elegida ya se ve: el clic lleva a su pane, como antes el de la cabecera.
@@ -2225,12 +2364,21 @@ class Island:
             self.tab, self.focus = key, None
         elif kind == 'member':
             self.focus = key
+        elif kind == 'brief':
+            # Uno de los tres, libre, o la caja de su desglose: a escribirle.
+            if key is not None:
+                self.focus = key
+            self.brief()
+            return
         elif kind == 'back':
             self.focus = None
         elif kind == 'jump':
             s = self.model.sessions.get(key)
             if s is not None:
                 self.go(s)
+            return
+        elif kind == 'talk':
+            self.open_chat(typing=True, agent=key)
             return
         self.ensure_tick()
 
@@ -2253,6 +2401,9 @@ class Island:
             if action.get('jump'):
                 self.collapse()
                 threading.Thread(target=actions.jump, args=(s,), daemon=True).start()
+            elif action.get('chat'):
+                agent = action['chat']
+                self.open_chat(typing=True, agent=agent if isinstance(agent, str) else '')
             else:
                 threading.Thread(target=actions.run, args=(action,), daemon=True).start()
             if action.get('after'):
