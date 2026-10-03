@@ -4,6 +4,9 @@
 Uso: elyares-ctl <orden>
 
     open      abre la isla con lo que hace la sesión; otra vez, la cierra
+    chat [quién]
+              abre el chat con Claude, listo para escribir; otra vez, lo cierra.
+              Con quién: engineer, architect, auditor o reviewer, el chat de ese agente
     hide      esconde la isla del todo; otra vez, la vuelve a mostrar
     compact   prende o apaga el modo compacto
     pin       fija la isla abierta con todo a la vista; otra vez, la suelta
@@ -22,22 +25,26 @@ import os
 import socket
 import sys
 
-ORDERS = ('open', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'glass', 'allow', 'deny',
+ORDERS = ('open', 'chat', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'glass', 'allow', 'deny',
           'status', 'toggle')
 REPLIES = ('allow', 'deny', 'status')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
+AGENTS = ('engineer', 'architect', 'auditor', 'reviewer')
 STATES = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
 
 
 def main():
     order = sys.argv[1] if len(sys.argv) > 1 else ''
     source = sys.argv[2] if len(sys.argv) > 2 else ''
-    if order not in ORDERS or (order == 'toggle' and source not in SOURCES):
+    if order not in ORDERS or (order == 'toggle' and source not in SOURCES) or (
+            order == 'chat' and source and source not in AGENTS):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     msg = {'control': order}
     if order == 'toggle':
         msg['source'] = source
+    if order == 'chat' and source:
+        msg['agent'] = source
     if order in REPLIES:
         msg['reply'] = True
     path = os.path.join(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'),

@@ -314,6 +314,32 @@ class Equipo(ModelCase):
         self.assertFalse(any(m.busy for m in self.m.sessions['a'].team()))
 
 
+class SesionDeUnAgente(ModelCase):
+    """`claude --agent X`: la sesión entera es de uno de la familia."""
+
+    def test_trabaja_el_y_el_engineer_queda_libre(self):
+        self.send('start', agent_type='elyares-architect')
+        self.send('tool', agent_type='elyares-architect', tool_name='Read',
+                  tool_input={'file_path': '/x/proj/docs/ARQ.md'})
+        s = self.m.sessions['a']
+        self.assertEqual(s.agents, {})
+        self.assertEqual((s.main_agent, s.role, s.agent_name), ('elyares-architect', 'architect', 'elyares-architect'))
+        team = {m.role: m for m in s.team()}
+        self.assertEqual(team['engineer'].state, 'idle')
+        self.assertEqual((team['architect'].state, team['architect'].detail), ('working', 'Leyendo docs/ARQ.md'))
+        self.assertEqual(self.m.view(now=T).role, 'architect')
+
+    def test_se_recuerda_entre_reinicios(self):
+        self.send('start', agent_type='elyares-reviewer')
+        other = Model()
+        other.restore(self.m.dump(), now=T)
+        self.assertEqual(other.sessions['a'].role, 'reviewer')
+
+    def test_uno_que_no_es_de_la_familia_no_cuenta(self):
+        self.send('start', agent_type='Explore')
+        self.assertEqual(self.m.sessions['a'].role, 'engineer')
+
+
 class SegundoPlano(ModelCase):
     def test_la_de_repuesto_no_sale_hasta_que_se_usa(self):
         # Claude Code tiene lista una sesión que solo pinta su barra de estado.
