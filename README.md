@@ -299,7 +299,7 @@ no sirven aquí, porque la isla es una capa y no una ventana.
 
 ### La familia
 
-ElYares no trabaja solo. La sesión es el **engineer**, y hay cinco subagentes de
+ElYares no trabaja solo. La sesión es el **engineer**, y hay siete subagentes de
 Claude Code con su propio personaje: misma cara, mismas gafas y misma antena,
 pero cada uno con su atuendo, lo que trae en las manos al trabajar y su color.
 
@@ -311,15 +311,13 @@ pero cada uno con su atuendo, lo que trae en las manos al trabajar y su color.
 | reviewer | `elyares-reviewer` | visera de editor y lápiz rojo | una lupa sobre el código | rosa |
 | designer | `elyares-designer` | boina ladeada, flequillo teñido de colores, pincel en la oreja y pintura en el cachete | una paleta y el pincel | magenta |
 | mobile | `elyares-mobile` | gorro de lana caído, barba, bigote de manubrio y gafas de pasta | un teléfono y su café | café con leche |
+| devops | `elyares-devops` | capucha negra con `</>`, chamarra negra con sus cordones y código reflejado en las gafas | una terminal negra con el prompt esperando | lima |
+| researcher | `elyares-researcher` | sombrero de explorador con su brújula y pañoleta al cuello | un cuaderno donde apunta lo que encuentra | naranja |
 
 Mientras trabaja un subagente de la familia, la mascota grande es ese
 personaje, con todos sus gestos (la antena sigue en rojo al pedir permiso y en
 verde al terminar); cuando termina, vuelve a ser el engineer. Con varios a la
 vez manda el que arrancó al último.
-
-`elyares-devops` y `elyares-researcher` también son de la familia, pero
-todavía no tienen personaje: mientras trabajan, la isla sigue mostrando al
-engineer, como con cualquier otro subagente.
 
 Una sesión se nombra **agente | proyecto**: `elyares-engineer | tl-mas-server`.
 El engineer está siempre; mientras trabaja un subagente de la familia, la
@@ -329,8 +327,10 @@ permiso" a la derecha.
 
 En el tablero cada uno tiene su tarjeta (ver "El tablero"). Con casi todos
 en la banca las caras se achican, y en una tarjeta estrecha el nombre es el
-del personaje (`designer`) en vez del del agente (`elyares-designer`). Con los
-seis trabajando van en dos filas de tres.
+del personaje (`designer`) en vez del del agente (`elyares-designer`). Con
+todos trabajando van en dos filas de cuatro, y libres también, porque los ocho
+ya no caben en una fila con su nombre. Con más de cinco en la banca, las caras
+van en cuadrícula y el pie dice el nombre del que tiene el cursor encima.
 
 La isla sabe cuál es cuál porque Claude Code manda `agent_id` y `agent_type`
 en cada hook que se dispara dentro de un subagente. Los personajes están en
