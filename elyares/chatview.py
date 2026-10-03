@@ -23,9 +23,13 @@ Con el chat abierto, el permiso sale también en una tarjeta encima de la
 caja.
 
 Hay una conversación por proyecto y agente (`chats`, con la clave de
-`chat_key`). El chat sigue a tmux: al abrirlo, si desde la última vez pasaste
-a otra sesión de tmux, sale la conversación de ese proyecto; si sigues en la
-misma, la que tenías a la vista (`chat_spot`). Con "#" en la caja (o un clic
+`chat_key`). Cada pestaña del tablero es un proyecto y manda sobre su chat:
+con el tablero a la vista, el chat que se abre es el de la pestaña elegida
+(`chat_of`), y los encargos a los tres van a las conversaciones de ese
+proyecto. El proyecto de una pestaña es aquel en el que se empezó su
+conversación (`tab_place`), aunque Claude ande después por otra carpeta. Sin
+tablero, el chat sigue a tmux: sale el del proyecto de la sesión en la que
+estás (`chat_here`). Con "#" en la caja (o un clic
 en la carpeta de la cabecera) se elige otro de entre tus proyectos de
 `~/develop`, abiertos en tmux o no (`chat_projects`, con la lista de
 `projectview`). Las que llevan un
@@ -159,7 +163,6 @@ class ChatView:
         self.chat_menu, self.chat_images = None, []
         self.chat_sessions = set()    # las sesiones (del tablero) que son de un chat
         self.chats = {}               # las conversaciones: (agente, raíz del proyecto) -> Chat
-        self.chat_spot = None         # el proyecto de tu tmux la última vez que se abrió el chat
         self.chat_watch = False       # se acaba de mandar algo: el tablero sigue a su sesión
         self.chat_box = None          # dónde va el texto de la caja, como lo midió el último dibujo
         self.chat_keyed = 0.0         # cuándo se tecleó por última vez en el chat
@@ -284,20 +287,50 @@ class ChatView:
         return c
 
     def open_chat(self, typing=False, agent=None, cwd=None):
-        """Abre el chat. Sin `agent`, con el mismo de la última vez ('' es el
-        engineer). Sin `cwd`, en el proyecto que se tenía a la vista, salvo
-        que desde la última vez hayas pasado a otra sesión de tmux: entonces,
-        en el de esa. Con el panel ya abierto no se mira tmux."""
+        """Abre el chat. Sin `cwd`, con el tablero a la vista, el de la
+        pestaña elegida: su conversación o, si no tiene, la de su proyecto.
+        Sin tablero, en el proyecto de la sesión de tmux en la que estás y,
+        sin tmux, en el que se tenía a la vista. Con el panel ya abierto se
+        sigue en el que está. Sin `agent`, con el mismo de la última vez (''
+        es el engineer)."""
+        s = self.tab_session() if not cwd and not self.chat_open and self.target() == 'board' else None
+        if s is not None:
+            own = s.main_agent if s.owner != state.MAIN_ROLE else ''
+            c = self.chat_of(s, own) if agent is None else None
+            self.show_chat(c or self.chat_for(own if agent is None else agent, self.tab_place(s)), typing)
+            return
         if agent is None:
             agent = self.chat.agent if self.chat is not None else ''
         last = self.chat.cwd if self.chat is not None else ''
         if not cwd:
-            here = '' if self.chat_open else chat.active_cwd('')
-            spot = state.project_root(here) if here else None
-            moved = spot is not None and spot != self.chat_spot
-            self.chat_spot = spot or self.chat_spot
-            cwd = here if here and (moved or not last) else last or os.path.expanduser('~')
+            here = '' if self.chat_open else self.chat_here()
+            cwd = here or last or os.path.expanduser('~')
         self.show_chat(self.chat_for(agent, cwd), typing)
+
+    def chat_here(self):
+        """La carpeta del proyecto de la sesión de tmux en la que estás, mirada
+        ahora mismo; '' si no hay tmux."""
+        self.projects = projects.listing()
+        here = self.project_here()
+        return here.path if here is not None else ''
+
+    def tab_place(self, s):
+        """La carpeta del proyecto de una pestaña: donde se empezó su
+        conversación, si la sesión es de un chat, o la de la sesión. Claude
+        puede acabar trabajando en otra carpeta; la pestaña sigue siendo del
+        proyecto en el que se abrió."""
+        c = next((c for c in self.chats.values() if c.session and c.session == s.sid), None)
+        return c.cwd if c is not None else s.cwd
+
+    def chat_of(self, s, agent=''):
+        """La conversación que hay detrás de una sesión del tablero: la suya,
+        si es de un chat, o la del encargo que se le hizo a ese agente desde
+        su pestaña. None si esa sesión no es de ningún chat."""
+        mine = next((c for c in self.chats.values() if c.session and c.session == s.sid), None)
+        if mine is not None and mine.agent == agent:
+            return mine
+        return next((c for key, c in self.chats.items()
+                     if key[0] == agent and self.chat_hosts.get(key) == s.sid), None)
 
     def show_chat(self, c, typing=False):
         """Abre el panel con esa conversación."""
@@ -400,10 +433,6 @@ class ChatView:
                 self.chat_hosts[key] = item[-1]
         self.chat_open = self.chat is not None and data.get('open') is True
         self.chat_saved = self.chat_dump()
-        if self.chat is not None:
-            # La conversación que se tenía sigue a la vista mientras no cambies de sesión en tmux.
-            here = chat.active_cwd('')
-            self.chat_spot = state.project_root(here) if here else None
 
     def chat_saved_key(self, saved):
         """La clave de una conversación como se guardó: [agente, raíz] o, como
@@ -449,7 +478,7 @@ class ChatView:
         """La conversación a la que va lo que se teclea: la del chat o, en un
         mini chat, la de ese agente (None si aún no tiene)."""
         brief = self.briefing()
-        return self.chats.get(self.chat_key(brief[1], brief[0].cwd)) if brief else self.chat
+        return self.chats.get(self.chat_key(brief[1], self.tab_place(brief[0]))) if brief else self.chat
 
     def brief(self):
         """Toma el teclado para escribirle al del desglose abierto. La isla
@@ -470,10 +499,11 @@ class ChatView:
         """Enter en el mini chat: se le encarga a ese agente, en su
         conversación del proyecto de la pestaña, y la isla vuelve al tablero
         para verlos trabajar a todos."""
-        c = self.chat_for(agent, s.cwd)
+        place = self.tab_place(s)         # el proyecto de la pestaña, no por donde ande su Claude
+        c = self.chat_for(agent, place)
         if not c.send(text, self.chat_images):
             return
-        self.chat_hosts[self.chat_key(agent, s.cwd)] = s.sid
+        self.chat_hosts[self.chat_key(agent, place)] = s.sid
         self.chat_set_text('')
         self.chat_images = []
         self.focus = None
@@ -877,7 +907,9 @@ class ChatView:
         if found:
             self.draw_chat_suggest(cr, left, width, box_y - 6, found, alpha)
         elif self.chat_menu in anchors:
-            self.draw_chat_menu(cr, anchors[self.chat_menu], status_y - 4, alpha)
+            # Encima de la caja, no sobre ella: la caja es un widget de verdad
+            # y se queda con los clics que caen en su sitio.
+            self.draw_chat_menu(cr, anchors[self.chat_menu], box_y - 6, alpha)
 
     def draw_chat_input(self, cr, left, y, width, ih, alpha):
         """La caja: su fondo, su barra del color del agente y, vacía, qué escribir."""
@@ -934,8 +966,8 @@ class ChatView:
 
     def draw_chat_menu(self, cr, x, bottom, alpha):
         """El menú de con quién hablas, de modelos o de esfuerzo, encima de la
-        línea de estado. En el de los agentes va la cara de cada uno, despierta
-        si tiene un turno en curso."""
+        caja. En el de los agentes va la cara de cada uno, despierta si tiene
+        un turno en curso. Sus opciones van por delante de lo que tapan."""
         c = self.chat
         faces = {}
         if self.chat_menu == 'agent':
@@ -975,7 +1007,7 @@ class ChatView:
                 tx += CHAT_PICK_FACE + 10
                 color = mascot.rgba(mascot.accent(role))[:3] if chosen else color
             self.put(cr, ('✓ ' if chosen else '   ') + text, FONT_STEP, tx, ry + 5, color, alpha)
-            self.hits.append(('chat', key, x - 4, ry, width - 8, CHAT_SUGGEST_H))
+            self.hits.insert(0, ('chat', key, x - 4, ry, width - 8, CHAT_SUGGEST_H))
 
     def draw_chat_images(self, cr, left, y, width, alpha):
         """Las imágenes pegadas, en etiquetas con su ×, encima de la caja."""
@@ -1048,7 +1080,7 @@ class ChatView:
             self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, (1, 1, 1), .38 * alpha,
                      width=text_w)
         soft = mascot.rgba(self.ink('text', .66))[:3]
-        c = self.chats.get(self.chat_key(agent, s.cwd))
+        c = self.chats.get(self.chat_key(agent, self.tab_place(s)))
         images = len(self.chat_images) if mine else 0
         if c is not None and c.busy:
             note, tone = 'trabajando · lo que mandes va después', color

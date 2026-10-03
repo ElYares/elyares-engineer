@@ -1533,7 +1533,12 @@ class Island(chatview.ChatView, projectview.ProjectView):
         """El nombre de una sesión en su pestaña: el de su carpeta y, si lo
         tiene, el que le puso Claude Code. La del chat de la isla lo dice."""
         if s.sid in self.chat_sessions:
-            return f'{s.proj} · chat' + (f' {s.owner}' if s.owner != MAIN_ROLE else '')
+            # El proyecto en el que se empezó la conversación, no la carpeta
+            # por la que ande Claude ahora.
+            c = self.chat_of(s, s.main_agent if s.owner != MAIN_ROLE else '')
+            place = self.project_of(c.cwd) if c is not None else None
+            name = place.name if place is not None else c.project if c is not None else s.proj
+            return f'{name} · chat' + (f' {s.owner}' if s.owner != MAIN_ROLE else '')
         return f'{s.proj} · {s.label or BG_TAG}' if s.label or s.kind == 'bg' else s.proj
 
     def tab_labels(self):
@@ -2497,9 +2502,13 @@ class Island(chatview.ChatView, projectview.ProjectView):
             return
         if kind == 'tab':
             if key == self.tab:
-                # La elegida ya se ve: el clic lleva a su pane, como antes el de la cabecera.
+                # La elegida ya se ve: el clic lleva a su pane, como antes el
+                # de la cabecera. La de un chat no tiene pane: abre su conversación.
                 s = self.tab_session()
-                if s is not None:
+                c = self.chat_of(s, s.main_agent if s.owner != MAIN_ROLE else '') if s is not None else None
+                if c is not None:
+                    self.show_chat(c, typing=True)
+                elif s is not None:
                     self.go(s)
                 return
             self.tab, self.focus = key, None
@@ -2519,9 +2528,14 @@ class Island(chatview.ChatView, projectview.ProjectView):
                 self.go(s)
             return
         elif kind == 'talk':
-            # Desde un desglose: su conversación del proyecto de esa pestaña.
+            # Desde un desglose: la conversación de esa sesión (o la del
+            # encargo de ese agente) y, si no tiene, la del proyecto de la pestaña.
             s = self.tab_session()
-            self.open_chat(typing=True, agent=key, cwd=s.cwd if s is not None else None)
+            c = self.chat_of(s, key) if s is not None else None
+            if c is not None:
+                self.show_chat(c, typing=True)
+            else:
+                self.open_chat(typing=True, agent=key, cwd=self.tab_place(s) if s is not None else None)
             return
         self.ensure_tick()
 

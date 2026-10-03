@@ -83,8 +83,9 @@ class ProjectView:
         return max((p for p in self.projects if p.holds(cwd)), key=lambda p: len(p.path), default=None)
 
     def project_sessions(self, p):
-        """Las sesiones de Claude que hay en ese proyecto."""
-        return [s for s in self.claude() if self.project_of(s.cwd) is p]
+        """Las sesiones de Claude de ese proyecto. La de un chat es del
+        proyecto en el que se empezó, ande por donde ande ahora."""
+        return [s for s in self.claude() if self.project_of(self.tab_place(s)) is p]
 
     def project_claude(self, p):
         """Cómo va el Claude de un proyecto, como (texto, papel de su color),
