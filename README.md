@@ -317,6 +317,10 @@ personaje, con todos sus gestos (la antena sigue en rojo al pedir permiso y en
 verde al terminar); cuando termina, vuelve a ser el engineer. Con varios a la
 vez manda el que arrancó al último.
 
+`elyares-devops` y `elyares-researcher` también son de la familia, pero
+todavía no tienen personaje: mientras trabajan, la isla sigue mostrando al
+engineer, como con cualquier otro subagente.
+
 Una sesión se nombra **agente | proyecto**: `elyares-engineer | tl-mas-server`.
 El engineer está siempre; mientras trabaja un subagente de la familia, la
 cabecera pasa a llevar su nombre (`elyares-auditor | tl-mas-server`), en su
@@ -336,7 +340,7 @@ se calla 20 min se da por terminado.
 
 ### Los agentes
 
-Los tres subagentes están en `agents/` y `install.sh` los copia a
+Los siete subagentes están en `agents/` y `install.sh` los copia a
 `~/.claude/agents/`, así que valen en cualquier proyecto. Son copias y no
 enlaces: enlazados cambiarían solos con lo que hubiera en esta carpeta (otra
 rama, un cambio a medias), y son instrucciones para todas las sesiones. Para
@@ -349,28 +353,93 @@ recargan con `/agents`.
 | `elyares-architect` | decidir, revisar o documentar una arquitectura; elige la que se acomoda al proyecto, no la que más se domina | lee, y escribe solo documentación | `E1`–`E7` y `T14` |
 | `elyares-auditor` | seguridad de un diff, de un repo o de la configuración | solo lee | un núcleo de 28 reglas siempre, y los catálogos por demanda |
 | `elyares-reviewer` | código limpio y mantenible: nombres, funciones, tests, textos de interfaz | solo lee | `C1`–`C11`, `T5`–`T13`, `P2`, `P4`, `P7`, `UX1`–`UX6` |
+| `elyares-designer` | la interfaz: proponer una pantalla antes de construirla, revisar una ya hecha o inventariar el sistema de diseño del repo | solo lee | `UI1`–`UI17`, `UX1`–`UX6`, `A1`–`A12` |
+| `elyares-mobile` | Flutter y React Native: revisar un diff, diagnosticar un build, un permiso o una notificación, comprobar que un release está listo | solo lee | `M1`–`M27` |
+| `elyares-devops` | la operación: revisar un diff, un repo entero o un despliegue antes de hacerlo (CI, contenedores, `Makefile` y scripts de despliegue, migraciones, respaldos, colas) | solo lee, y no entra a ningún servidor | `D1`–`D25` |
+| `elyares-researcher` | investigar: una duda básica, un tema complejo, un repositorio ajeno, una comparación o una evaluación contra lo que ya tienes; y, cuando se le pide, documentarlo en la bitácora del proyecto en el vault | lee, busca en la web y escribe solo documentación | `R1`–`R14` |
 
 Se usan solo cuando se piden: por nombre ("usa elyares-auditor sobre este
 diff") o con `@`. Su descripción le dice a la sesión que no los lance por
-iniciativa propia. Los tres devuelven un informe con formato fijo, que siempre
+iniciativa propia. Los siete devuelven un informe con formato fijo, que siempre
 dice qué no revisaron y qué quedó sin verificar.
 
 Cada uno fija su modelo y su esfuerzo en su encabezado (`model`, `effort`): el
-architect y el reviewer corren con Sonnet y el auditor con Opus, los tres en
-`medium`. Sin esas líneas heredarían los de la sesión que los lanza.
+auditor corre con Opus y los otros seis con Sonnet, los siete en `medium`.
+Sin esas líneas heredarían los de la sesión que los lanza.
+
+El researcher es el único que cambia de modelo según el encargo, porque su
+trabajo va de una duda de una línea a una investigación de una tarde. La
+sesión que lo lanza puede pasarle otro modelo, y eso gana sobre su
+encabezado: Haiku para una consulta puntual, Sonnet para lo normal y Opus
+cuando pides investigar a fondo o de la respuesta depende una decisión.
+También puedes decirlo tú: "usa elyares-researcher con opus".
 
 - Las reglas `E`, `C`, `T`, `P` y `UX` son las de `docs/ESTANDARES-CORE.md`.
   Cada agente trae el enunciado, y si el proyecto tiene su propia copia o una
   regla propia, gana la del proyecto.
+- Las reglas `UI`, `A` y `M` no están en el estándar: solo existen en el
+  designer y en el mobile. Cada una sale de algo que ya estaba escrito y sin
+  número (los cuatro estados y los tokens de `07-frontend.md` de los starters,
+  las skills de `ri-chip-delivery`, los `CLAUDE.md` de las apps, decisiones y
+  bitácoras del vault). `A8`–`A12` y `M24`–`M27` son la excepción: vienen de
+  [ECC](https://github.com/affaan-m/ECC) (su lista de WCAG 2.2, su revisor de
+  Flutter y sus reglas de release de Expo), no de un incidente propio. Ninguna
+  se ha corrido todavía contra un repo: la primera pasada dirá cuáles dan ruido.
+- Las reglas `D` tampoco están en el estándar. Salen de incidentes propios:
+  despliegues que quedaron a medias, un respaldo vacío que nadie notó, un
+  worker ajeno reiniciado en un servidor compartido, pruebas en verde que no
+  corrieron, una suite que borró la base de desarrollo. Están en las bitácoras
+  y los runbooks de cada proyecto.
+- Las reglas `R` salen de la Parte B del estándar (`G2`: no inventar;
+  `G23`: no afirmar lo que no se verificó).
+- El researcher documenta en el vault de Obsidian con el procedimiento de
+  `/bitacora`: una entrada `learning` en la bitácora del mes del proyecto y,
+  si la investigación es larga, una nota de referencia en la carpeta del
+  proyecto a la que la entrada enlaza. No reescribe el Estado ni crea
+  decisiones: eso sigue siendo de la sesión principal, que conoce el resto
+  del trabajo. Sin proyecto no escribe: devuelve la investigación y lo dice.
 - Los catálogos del auditor son las 388 reglas de `rules/seguridad/` (su
   índice es `INDEX.md`), copiadas a `~/.claude/elyares/seguridad`. No van en
   `~/.claude/rules`: ahí Claude Code las cargaría enteras en cada sesión. El
   auditor nunca lee un catálogo entero: carga las áreas que toca el cambio.
-- "Solo lee" quiere decir sin `Edit` ni `Write`. Con Bash todavía podrían
-  escribir: lo impide su instrucción, no un candado.
+- "Solo lee" quiere decir sin `Edit` ni `Write`, y con Bash vigilado por un
+  candado (ver abajo).
 - El auditor solo corre escáneres locales (`gitleaks`, `semgrep`,
   `osv-scanner`…) si ya están instalados; no instala nada, y los que mandan
   cargas de ataque (nuclei, ZAP, sqlmap) no los corre nunca.
+
+### El candado
+
+`elyares-guard` es un hook `PreToolUse` (el código está en `elyares/guard.py`,
+e `install.sh` lo copia a `~/.local/bin/elyares-guard`). Tiene tres modos:
+
+| Modo | Dónde corre | Qué hace |
+|---|---|---|
+| `solo-lectura` | el Bash de los siete agentes, desde su encabezado | frena el comando que escribe: redirecciones fuera de `/tmp`, `rm`, `mv`, `sed -i`, cualquier `git` que no sea de lectura, instaladores (`npm install`, `composer install`, `flutter pub get`…), formateadores que reescriben, `--fix`, migraciones, `sudo`. Y el que sale de la máquina o toca lo desplegado: `ssh` y `scp`, un `make` que no sea de pruebas (sí deja `make -n`), un `gh` que no sea de consulta, y `kubectl`, `terraform`, `supervisorctl`, `crontab` o `certbot` cuando cambian algo. `git clone` solo pasa hacia `/tmp` |
+| `solo-docs` | el `Edit` y el `Write` del architect y del researcher | solo deja escribir documentación (`.md`, `.mmd`, `.puml`, `.txt`…) |
+| `config` | el `Edit` y el `Write` de cualquier sesión, desde `settings.json` | pregunta antes de tocar la configuración, ya existente, de lo que revisa el código: ESLint, Prettier, PHPStan y su baseline, Pint, PHPUnit, `analysis_options.yaml`, golangci, ruff, los workflows de GitHub |
+
+Los dos primeros bloquean y le dicen al agente por qué; el tercero no bloquea,
+pregunta: relajar un linter para que algo pase es lo que el estándar prohíbe,
+pero a veces el cambio es intencional y lo decide la persona.
+
+- **Frena lo evidente, no es un sandbox.** Un `python -c`, un script propio o
+  una herramienta que escribe sin decirlo pasan sin que los vea. Sirve contra
+  el descuido (un formateador que reescribe, un `git checkout` de más), no
+  contra un agente empeñado en saltárselo.
+- **Si no está instalado, no frena nada.** Un hook que Claude Code no
+  encuentra no bloquea: la llamada sigue. Por eso se instala como copia y no
+  como enlace a esta carpeta.
+- Escribir en `/tmp` sí se permite: ahí dejan los agentes los informes de sus
+  herramientas. Una ruta que sale de `/tmp` con `..` no cuenta.
+- Dos excepciones, para que el researcher pueda escribir la bitácora:
+  `vaultdocs project <nombre> --write`, que crea el esqueleto del proyecto en
+  el vault sin pisar nada, y el `sed -i` que inserta una entrada bajo el
+  marcador `BITACORA:INSERT` de una bitácora de mes, con las dos rutas
+  literales. Cualquier otro `sed -i` se frena.
+- Las dos ideas vienen de [ECC](https://github.com/affaan-m/ECC) (`gateguard`
+  y `config-protection`); el código es propio. Sus casos están en
+  `tests/test_guard.py`.
 
 ### Fuentes
 
