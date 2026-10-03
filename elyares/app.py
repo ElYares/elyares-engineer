@@ -107,6 +107,11 @@ TIP_COL_GAP = 16      # entre un comando y lo que hace
 TIP_HEAD_GAP = 15     # aire sobre el título de un bloque de comandos, con una raya en medio
 TIP_LINES = 3         # líneas propias que puede traer una fuente
 CHAT_PILL = 'chat'    # la pastilla del pie que abre el chat
+# `elyares-ctl move`: la isla se corre a lo ancho de la pantalla, pegada arriba.
+# Su sitio de siempre es el centro; `left` y `right` la llevan al siguiente de
+# estos sitios, en % del ancho.
+CENTER = 50
+SLOTS = (0, 25, CENTER, 75, 100)
 # `elyares-ctl reload`: la isla se vuelve a arrancar con el código de su carpeta.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAUNCHER = os.path.join(ROOT, 'bin', 'elyares-engineer')
@@ -278,6 +283,7 @@ class Island(chatview.ChatView, projectview.ProjectView):
         self.slow_id = 0
         self.last_frame = None
         self.region = None
+        self.screen_w = 0               # el ancho de la pantalla en la que está
         # 'allow'/'deny' del permiso, o 'dismiss' y el índice de cada botón de
         # la ficha de una alerta -> (x, y, w, h), del último dibujo
         self.buttons = {}
@@ -327,6 +333,11 @@ class Island(chatview.ChatView, projectview.ProjectView):
         self.win = win
         if self.monitor:
             self._set_monitor(self.monitor['name'])
+        if not self.screen_w:
+            # Sin Hyprland que diga cuál es: el ancho de la primera pantalla.
+            first = Gdk.Display.get_default().get_monitors().get_item(0)
+            self.screen_w = first.get_geometry().width if first is not None else 0
+        self.place()
 
         da = Gtk.DrawingArea()
         da.set_content_width(WIN_W)
@@ -668,6 +679,8 @@ class Island(chatview.ChatView, projectview.ProjectView):
                 req.reply(answer)
         elif order == 'projects':
             self.toggle_projects()
+        elif order == 'move':
+            self.move((msg or {}).get('where'))
         elif order == 'chat':
             agent, cwd = (msg or {}).get('agent'), (msg or {}).get('cwd')
             cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else None
@@ -1179,8 +1192,59 @@ class Island(chatview.ChatView, projectview.ProjectView):
             mon = monitors.get_item(i)
             if mon.get_connector() == name:
                 LayerShell.set_monitor(self.win, mon)
+                self.screen_w = mon.get_geometry().width
+                self.place()
                 return True
         return False
+
+    # ── dónde va, a lo ancho de la pantalla ─────────────────────────────────
+
+    def position(self):
+        """Dónde va la isla, de 0 (izquierda) a 100 (derecha); 50 es el centro."""
+        try:
+            return clamp(float(self.settings.get('position', CENTER)), 0, 100)
+        except (TypeError, ValueError):
+            return CENTER
+
+    def offset(self):
+        """Cuánto se corre la ventana desde el borde izquierdo de su pantalla."""
+        return round(max(0, self.screen_w - WIN_W) * self.position() / 100)
+
+    def place(self):
+        """Pone la ventana en su sitio. En el centro va anclada solo arriba,
+        como siempre, y el compositor la centra; en otro sitio, anclada
+        también a la izquierda, con el margen que le toca en esa pantalla."""
+        win = getattr(self, 'win', None)
+        if win is None:
+            return
+        moved = self.moved()
+        LayerShell.set_anchor(win, LayerShell.Edge.LEFT, moved)
+        LayerShell.set_margin(win, LayerShell.Edge.LEFT, self.offset() if moved else 0)
+
+    def moved(self):
+        """¿Está fuera de su sitio de siempre?"""
+        return self.position() != CENTER and self.screen_w > 0
+
+    def move(self, where):
+        """`elyares-ctl move`: `left` y `right` la llevan al siguiente sitio de
+        ese lado, `center` la devuelve al de siempre, y un número del 0 al 100
+        la pone ahí. Se guarda: al volver a arrancar sigue donde la dejaste."""
+        now = self.position()
+        if where == 'left':
+            pos = max((s for s in SLOTS if s < now), default=SLOTS[0])
+        elif where == 'right':
+            pos = min((s for s in SLOTS if s > now), default=SLOTS[-1])
+        elif where == 'center':
+            pos = CENTER
+        else:
+            try:
+                pos = clamp(float(where), 0, 100)
+            except (TypeError, ValueError):
+                return
+        self.settings['position'] = int(pos) if float(pos).is_integer() else pos
+        settings.save(self.settings)
+        self.place()
+        self.ensure_tick()
 
     def start_monitor(self):
         """El monitor donde arranca la isla: el enfocado o, si quedó fijada,
@@ -1269,7 +1333,9 @@ class Island(chatview.ChatView, projectview.ProjectView):
             if pos:
                 m = self.monitor
                 top = m['y'] + (m.get('reserved') or [0, 0])[1]
-                dx = pos[0] - (m['x'] + m['width'] / 2)
+                # Mira desde donde está: corrida, su centro ya no es el de la pantalla.
+                middle = self.offset() + WIN_W / 2 if self.moved() else m['width'] / 2
+                dx = pos[0] - (m['x'] + middle)
                 dy = pos[1] - (top + min(self.h, SIZES['ask'][1]) / 2)
                 d = math.hypot(dx, dy) or 1
                 k = min(1.0, d / 400)

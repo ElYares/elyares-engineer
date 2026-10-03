@@ -11,6 +11,10 @@ Uso: elyares-ctl <orden>
               el chat de ese agente.
               Con --dir: en el proyecto de esa carpeta
     projects  abre el panel de proyectos, para empezar a trabajar en uno; otra vez, lo cierra
+    move <dónde>
+              corre la isla a lo ancho de la pantalla: left y right, al siguiente
+              sitio de ese lado; center, a su sitio de siempre; o un número del
+              0 (izquierda) al 100 (derecha)
     hide      esconde la isla del todo; otra vez, la vuelve a mostrar
     compact   prende o apaga el modo compacto
     pin       fija la isla abierta con todo a la vista; otra vez, la suelta
@@ -31,11 +35,12 @@ import os
 import socket
 import sys
 
-ORDERS = ('open', 'chat', 'projects', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload', 'glass',
-          'allow', 'deny', 'status', 'toggle')
+ORDERS = ('open', 'chat', 'projects', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
+          'glass', 'allow', 'deny', 'status', 'toggle')
 REPLIES = ('allow', 'deny', 'status', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
 AGENTS = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile')
+PLACES = ('left', 'right', 'center')
 STATES = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
 
 
@@ -51,6 +56,9 @@ def main():
     if folder is not None and (order != 'chat' or not os.path.isdir(folder)):
         print(__doc__.strip(), file=sys.stderr)
         return 2
+    if order == 'move' and source not in PLACES and not (source.isdigit() and int(source) <= 100):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
     if order not in ORDERS or (order == 'toggle' and source not in SOURCES) or (
             order == 'chat' and source and source not in AGENTS):
         print(__doc__.strip(), file=sys.stderr)
@@ -60,6 +68,8 @@ def main():
         msg['source'] = source
     if order == 'chat' and source:
         msg['agent'] = source
+    if order == 'move':
+        msg['where'] = source
     if folder:
         msg['cwd'] = folder
     if order in REPLIES:
