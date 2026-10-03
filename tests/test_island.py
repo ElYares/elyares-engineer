@@ -499,26 +499,34 @@ class Tablero(Dibujo):
             self.assertIn(text, self.shown)
         self.assertNotIn('elyares-engineer', self.shown)
 
-    def test_mide_lo_mismo_trabajen_uno_dos_o_los_cuatro(self):
+    def test_mide_lo_mismo_trabajen_uno_dos_o_todos(self):
         self.isl.expanded = True
         sizes, front = set(), []
-        for kinds in ((), ('elyares-reviewer',), ('elyares-architect', 'elyares-auditor', 'elyares-reviewer')):
+        everyone = tuple(state.ROLE_AGENTS[role] for role in state.TEAM[1:])
+        for kinds in ((), ('elyares-reviewer',), everyone[:3], everyone):
             self.isl.model.sessions.clear()
             self.work('a', *kinds)
             sizes.add(self.isl.goal())
             self.draw()
             front.append(len(self.hit('member')))
-        self.assertEqual(front, [1, 2, 4])
+        self.assertEqual(front, [1, 2, 4, 6])
         self.assertEqual(len(sizes), 1)
-        # En reposo, los cuatro en fila y ninguno se abre.
+        # Los seis trabajando caben en dos filas, y cada uno con su nombre.
+        self.assertEqual(len({y for kind, _, _, y, _, _ in self.isl.hits if kind == 'member'}), 2)
+        for role in state.TEAM:
+            self.assertIn(role, self.shown)
+        # En reposo, todos en fila, con el nombre de su personaje, y ninguno se abre.
         self.send('stop', now=T + 1)
         self.isl.refresh = lambda: setattr(self.isl, 'view', self.isl.model.view(
             now=T + 60, pin=self.isl.pin))
-        for kind in ('architect', 'auditor', 'reviewer'):
-            self.send('agent-stop', agent_id=f'a-elyares-{kind}')
+        for agent in everyone:
+            self.send('agent-stop', agent_id=f'a-{agent}')
         self.draw()
         self.assertEqual(self.hit('member'), [])
-        self.assertEqual(self.shown.count('libre'), 3)
+        self.assertEqual(self.shown.count('libre'), 5)
+        for role in state.TEAM:
+            self.assertIn(role, self.shown)
+        self.assertEqual(len({y for kind, _, _, y, _, _ in self.isl.hits if kind == 'brief'}), 1)
 
     def test_un_clic_en_uno_abre_su_desglose(self):
         self.isl.expanded = True
@@ -1102,7 +1110,8 @@ class Chat(Dibujo):
         self.draw()
         self.assertIn('hablarle ›', self.shown)
         self.assertEqual(self.hit('talk'), [''])
-        self.assertEqual(self.hit('brief'), [('a', 'architect'), ('a', 'reviewer')])   # las caritas libres
+        self.assertEqual(self.hit('brief'), [('a', 'architect'), ('a', 'reviewer'), ('a', 'designer'),
+                                             ('a', 'mobile')])                         # las caritas libres
 
     def brief(self, role='auditor', text='audita el diff'):
         """Un clic en uno de los tres, libre, y un encargo en su mini chat."""
@@ -1127,7 +1136,7 @@ class Chat(Dibujo):
         self.work('a')
         board = self.isl.goal()
         self.draw()
-        self.assertEqual(self.hit('brief'), [('a', 'architect'), ('a', 'auditor'), ('a', 'reviewer')])
+        self.assertEqual(self.hit('brief'), [('a', role) for role in state.TEAM[1:]])
         self.isl.on_hit('brief', ('a', 'auditor'))
         # Cambia al desglose de ese, con el teclado listo y sin abrir el panel del chat.
         self.assertEqual(self.isl.focus, ('a', 'auditor'))
@@ -1186,7 +1195,7 @@ class Chat(Dibujo):
         self.brief('reviewer', 'revisa el diff')
         self.draw()
         self.assertEqual(self.hit('member'), [('a', 'engineer'), ('a', 'auditor'), ('a', 'reviewer')])
-        self.assertEqual(self.hit('brief'), [('a', 'architect')])
+        self.assertEqual(self.hit('brief'), [('a', 'architect'), ('a', 'designer'), ('a', 'mobile')])
 
     def test_el_punto_de_la_pestana_es_del_encargo_si_la_sesion_descansa(self):
         self.sending()
@@ -1638,7 +1647,7 @@ class Arranque(unittest.TestCase):
 
 
 class Familia(unittest.TestCase):
-    """Los cuatro personajes de `mascot.py`."""
+    """Los personajes de `mascot.py`."""
 
     STATES = ('idle', 'working', 'permission', 'done', 'confused', 'annoyed', 'dizzy', 'sleep')
 
@@ -1671,6 +1680,10 @@ class Familia(unittest.TestCase):
         # El engineer usa el color del tema; los demás, el suyo.
         self.assertEqual(set(app.mascot.ACCENTS), set(app.mascot.ROLES) - {'engineer'})
         self.assertEqual(set(state.AGENT_ROLES.values()), set(app.mascot.ACCENTS))
+        # Cada uno el suyo, y ninguno el de un aviso: ni rojo, ni verde, ni amarillo.
+        colors = list(app.mascot.ACCENTS.values())
+        self.assertEqual(len(set(colors)), len(colors))
+        self.assertFalse(set(colors) & {app.mascot.COLORS[name] for name in ('red', 'green', 'yellow')})
 
 
 class Ficha(IslandCase):

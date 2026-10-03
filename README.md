@@ -191,7 +191,7 @@ respuesta**, que abre el chat para leerla entera.
   chat`) abre el chat de la pestaña elegida: su conversación o, si la sesión
   es de una terminal, la del chat de ese proyecto. Lo mismo un clic en la
   pestaña ya elegida de una sesión del chat, «hablarle ›» en su desglose y
-  «Ver respuesta» en su aviso. Los encargos a architect, auditor y reviewer
+  «Ver respuesta» en su aviso. Los encargos a los demás de la familia
   desde una pestaña van a las conversaciones de ese proyecto y de ningún otro.
 - **El proyecto de una pestaña** es aquel en el que se empezó su conversación,
   y así se llama, aunque Claude acabe trabajando en otra carpeta.
@@ -287,7 +287,7 @@ siguiente que escribas lo vuelve a abrir con `--resume` (`elyares/chat.py`,
 
 ### La familia
 
-ElYares no trabaja solo. La sesión es el **engineer**, y hay tres subagentes de
+ElYares no trabaja solo. La sesión es el **engineer**, y hay cinco subagentes de
 Claude Code con su propio personaje: misma cara, mismas gafas y misma antena,
 pero cada uno con su atuendo, lo que trae en las manos al trabajar y su color.
 
@@ -297,6 +297,8 @@ pero cada uno con su atuendo, lo que trae en las manos al trabajar y su color.
 | architect | `elyares-architect` | casco de obra y lápiz en la oreja | un plano | cian |
 | auditor | `elyares-auditor` | cachucha negra con `</>`, camisa y gafete | un clipboard con su checklist | morado |
 | reviewer | `elyares-reviewer` | visera de editor y lápiz rojo | una lupa sobre el código | rosa |
+| designer | `elyares-designer` | boina ladeada, flequillo teñido de colores, pincel en la oreja y pintura en el cachete | una paleta y el pincel | magenta |
+| mobile | `elyares-mobile` | gorro de lana caído, barba, bigote de manubrio y gafas de pasta | un teléfono y su café | café con leche |
 
 Mientras trabaja un subagente de la familia, la mascota grande es ese
 personaje, con todos sus gestos (la antena sigue en rojo al pedir permiso y en
@@ -309,7 +311,10 @@ cabecera pasa a llevar su nombre (`elyares-auditor | tl-mas-server`), en su
 color. Que una sesión pide permiso lo dicen la antena roja y la nota "pide
 permiso" a la derecha.
 
-En el tablero cada uno tiene su tarjeta (ver "El tablero").
+En el tablero cada uno tiene su tarjeta (ver "El tablero"). Con casi todos
+en la banca las caras se achican, y en una tarjeta estrecha el nombre es el
+del personaje (`designer`) en vez del del agente (`elyares-designer`). Con los
+seis trabajando van en dos filas de tres.
 
 La isla sabe cuál es cuál porque Claude Code manda `agent_id` y `agent_type`
 en cada hook que se dispara dentro de un subagente. Los personajes están en
