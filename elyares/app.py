@@ -68,6 +68,8 @@ import html
 import math
 import os
 import random
+import subprocess
+import sys
 import threading
 import time
 
@@ -105,6 +107,11 @@ TIP_COL_GAP = 16      # entre un comando y lo que hace
 TIP_HEAD_GAP = 15     # aire sobre el título de un bloque de comandos, con una raya en medio
 TIP_LINES = 3         # líneas propias que puede traer una fuente
 CHAT_PILL = 'chat'    # la pastilla del pie que abre el chat
+# `elyares-ctl reload`: la isla se vuelve a arrancar con el código de su carpeta.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LAUNCHER = os.path.join(ROOT, 'bin', 'elyares-engineer')
+UNIT = 'elyares-engineer.service'
+RELOAD_MS = 1200      # lo que espera tras el último turno: que llegue su aviso y su cuenta de contexto
 # `elyares-ctl chat <quién>`: el chat de ese de la familia.
 AGENT_NAMES = {role: ('' if role == 'engineer' else name) for role, name in state.ROLE_AGENTS.items()}
 TIP_ITEMS = 5         # cosas que nombra una por una (los PRs de GitHub); de las demás dice cuántas
@@ -281,6 +288,8 @@ class Island(chatview.ChatView):
         self.wrap = (None, 0)           # (detalle, alto de más que pide entero)
         self.pills = []                 # (fuente, x, y, ancho, alto), del último dibujo
         self.chat_init()
+        self.chat_restore(store.load_chats())
+        self.reloading = False          # se pidió volver a arrancar: en cuanto no haya turnos en curso
         self.tip = None                 # (fuente, centro, opacidad) de la pastilla bajo el cursor
         self.tip_key = None
         self.tip_ref = []               # los comandos de la burbuja que se está viendo
@@ -649,6 +658,10 @@ class Island(chatview.ChatView):
             self.settings['glass'] = not self.settings['glass']
             settings.save(self.settings)
             self.ensure_tick()
+        elif order == 'reload':
+            answer = self.reload()
+            if req:
+                req.reply(answer)
         elif order == 'chat':
             agent = (msg or {}).get('agent')
             if agent in AGENT_NAMES:
@@ -673,6 +686,66 @@ class Island(chatview.ChatView):
             else:
                 self.off = False
                 self.expand(PREVIEW_OPEN_SECS if self.preview() else KEY_OPEN_SECS)
+
+    # ── volver a arrancar con el código de la carpeta ───────────────────────
+
+    def reload(self):
+        """`elyares-ctl reload`: la isla se vuelve a arrancar para tomar los
+        cambios de su carpeta, sin perder las sesiones ni las conversaciones
+        del chat. Con un turno en curso en algún chat, espera a que acabe:
+        quien lo pide suele ser ese mismo Claude. Si el código no arranca, no
+        lo hace y dice por qué. Devuelve lo que se le contesta a elyares-ctl."""
+        why = self.reload_check()
+        if why:
+            return {'ok': False, 'why': f'no se recarga, el código no arranca: {why}'}
+        self.reloading = True
+        if self.chat_busy():
+            return {'ok': True, 'note': 'la isla se recarga al acabar el turno en curso'}
+        self.reload_soon()
+        return {'ok': True, 'note': 'la isla se recarga ya'}
+
+    @staticmethod
+    def reload_check():
+        """¿Arranca el código que hay en la carpeta? '' si sí; si no, la
+        última línea del error. Una isla rota no se levanta sola."""
+        try:
+            run = subprocess.run([sys.executable, '-c', 'import elyares.app'], cwd=ROOT,
+                                 capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError) as e:
+            return str(e)
+        lines = run.stderr.strip().splitlines()
+        return '' if run.returncode == 0 else (lines[-1] if lines else f'código {run.returncode}')
+
+    def reload_soon(self):
+        if self.reloading and not self.chat_busy():
+            GLib.timeout_add(RELOAD_MS, self.reload_now)
+
+    def reload_now(self):
+        if not self.reloading or self.chat_busy():
+            return GLib.SOURCE_REMOVE   # empezó otro turno: al acabar ese
+        self.reloading = False
+        store.save(self.model.dump())
+        self.chat_shutdown()
+        try:
+            if self.is_service():
+                # systemd la vuelve a arrancar limpia, sin hijos sueltos.
+                subprocess.Popen(['systemctl', '--user', '--no-block', 'restart', UNIT])
+            else:
+                # A mano: el mismo proceso, desde su lanzador (que precarga layer-shell).
+                os.execv(LAUNCHER, [LAUNCHER])
+        except OSError:
+            pass
+        return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def is_service():
+        """¿Es esta la isla que lleva systemd?"""
+        try:
+            pid = subprocess.run(['systemctl', '--user', 'show', '-p', 'MainPID', '--value', UNIT],
+                                 capture_output=True, text=True, timeout=3).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return pid == str(os.getpid())
 
     def answer(self, allow, peer=None, now=None):
         """Contesta con el teclado el permiso que está a la vista. Devuelve por
@@ -1482,7 +1555,7 @@ class Island(chatview.ChatView):
         right = x0 + w - 18
         notes = [('fijada', rgb('accent'))] if self.settings['pinned'] else []
         if current.context >= CONTEXT_SHOW:
-            notes.append((f'{current.context:.0f}%',
+            notes.append((f'contexto {current.context:.0f}%',
                           rgb(self.colors[paint.context_role(current.context)])))
         for text, color in notes:
             right -= self.put(cr, text, FONT_DETAIL, right, 10, color, alpha, align=1) + 12

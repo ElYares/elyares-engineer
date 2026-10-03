@@ -168,11 +168,22 @@ respuesta**, que abre el chat para leerla entera.
 - **Comandos:** al escribir `/` salen tus skills y comandos (`/contexto`,
   `/bitacora`, `/commit`, `/pr`…) con su descripción; se eligen con las
   flechas y Tab o Enter. Los entiende Claude como en la terminal.
+- **Agentes y archivos:** al escribir `@` salen los agentes
+  (`@elyares-reviewer`) y los archivos del proyecto, los que ve git
+  (`@elyares/chat.py`).
+- **En cualquier parte del texto:** las dos listas salen para la palabra en la
+  que está el cursor, con texto antes o después («sube los cambios con /co»).
+  Lo elegido entra en su sitio y lo demás se queda como estaba.
 - **La conversación**, al estilo de OpenCode: lo tuyo en un bloque con una
   barra del color del agente; lo de Claude con su markdown (negritas,
-  `código`, títulos, bloques de código y tablas alineadas); sus pasos en una
-  línea tenue, y al acabar cada turno su pie: `▣ agente · modelo · tiempo`.
-  La rueda del ratón la sube.
+  `código`, títulos, bloques de código y tablas alineadas), y al acabar cada
+  turno su pie: `▣ agente · modelo · tiempo`. La rueda del ratón la sube.
+  **Solo la respuesta:** lo que hace por el camino (sus herramientas y lo que
+  va diciendo antes de seguir) no sale en el chat; para eso está el tablero.
+- **El contexto:** al final de la línea de estado dice cuánto lleva lleno el
+  de la conversación (`contexto 12% · 118k`), con el color que le toca según
+  se llena. El mismo % sale en el tablero, a la derecha de las pestañas, y en
+  la cabecera de la isla. Lo cuenta el propio Claude al acabar cada turno.
 - **La línea de estado**, debajo de la caja: con quién hablas, el modelo, el
   esfuerzo y el modo plan, cada uno con su clic. El modelo y el plan cambian
   al momento; el esfuerzo, desde el siguiente turno (Claude solo lo toma al
@@ -209,6 +220,16 @@ respuesta**, que abre el chat para leerla entera.
 - **El teclado:** mientras escribes, el chat lo toma entero. Esc lo suelta sin
   cerrar el chat y un clic en la caja lo vuelve a tomar; si pasan 90 s sin
   teclear, lo suelta solo.
+
+**Ver un cambio sin reinstalar.** Las conversaciones se guardan (junto a las
+sesiones, en `$XDG_RUNTIME_DIR/elyares-chats.json`) y vuelven al arrancar la
+isla, con el panel abierto si lo estaba; lo siguiente que escribas las retoma.
+Por eso `elyares-ctl reload` basta para ver un cambio del código: la isla se
+vuelve a arrancar y el chat sigue donde iba. Si quien lo pide es el propio
+Claude del chat, espera a que acabe su turno, para no cortarlo. Antes
+comprueba que el código arranca: con un error, la isla que corre se queda.
+`./install.sh` solo hace falta para lo que se copia fuera de la carpeta: los
+agentes, los catálogos, los hooks nuevos y el servicio.
 
 Por debajo es `claude -p` con entrada y salida en `stream-json`: un proceso
 por conversación, que la isla mantiene vivo turno tras turno y que le pasa
@@ -624,6 +645,7 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | `elyares-ctl tab` | pasa a la pestaña (la sesión) que sigue en el tablero |
 | `elyares-ctl steps` | abre el desglose de uno de los cuatro; otra vez, el del que sigue, y al final vuelve al tablero |
 | `elyares-ctl theme` | vuelve a leer el color de acento del tema (lo llama el hook de omarchy) |
+| `elyares-ctl reload` | vuelve a arrancar la isla con el código de su carpeta, sin perder las sesiones ni los chats; con un turno en curso en algún chat, al acabar. Si el código no arranca, no lo hace y dice por qué |
 | `elyares-ctl glass` | prende o apaga el modo vidrio |
 | `elyares-ctl allow` | permite lo que pide el permiso que la isla tiene a la vista |
 | `elyares-ctl deny` | lo deniega y corta el turno, como el botón Denegar |

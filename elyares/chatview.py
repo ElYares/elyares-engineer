@@ -3,11 +3,14 @@
 Se abre con `elyares-ctl chat` (o la pastilla «Chat» del pie) y ocupa la
 isla. Arriba, la mascota con «agente | proyecto» y cómo va el turno; en
 medio, la conversación al estilo de OpenCode: lo tuyo en un bloque con una
-barra del color del agente, lo de Claude con su markdown, sus pasos en una
-línea tenue y, al acabar cada turno, su pie (`▣ agente · modelo · tiempo`).
+barra del color del agente, lo de Claude con su markdown y, al acabar cada
+turno, su pie (`▣ agente · modelo · tiempo`). Solo la respuesta: lo que hace
+por el camino no sale aquí, se ve en el tablero.
 Abajo, la caja de texto, que crece con lo que escribes hasta CHAT_INPUT_LINES
 líneas y luego hace scroll; debajo de ella, la línea de estado: con quién
-hablas, el modelo, el esfuerzo y el modo plan, cada uno con su clic.
+hablas, el modelo, el esfuerzo y el modo plan, cada uno con su clic, y cuánto
+lleva lleno el contexto. Ese % va también a la sesión del tablero, que lo
+muestra junto a sus pestañas (`chat_context`).
 
 El chat es para pedir; a Claude se le ve trabajar en el tablero. Al mandar
 algo el panel se cierra y la isla vuelve al tablero, con la pestaña de la
@@ -22,9 +25,11 @@ caja.
 Cada uno de la familia tiene su conversación (`chats`): en la línea de
 estado, un clic en el nombre del agente elige con quién hablas, y en el tablero el desglose de cada uno tiene
 «hablarle ›». La de un agente corre como él (`claude -p --agent X`), con su
-modelo; en el tablero sale con su cara. Al escribir "/" sale la lista de comandos para elegir con las flechas y
-Tab. Ctrl+V pega texto y también imágenes: van en etiquetas encima de la caja
-y salen con el siguiente mensaje.
+modelo; en el tablero sale con su cara. Al escribir "/" sale la lista de
+comandos, y con "@" la de agentes y archivos del proyecto, para elegir con las
+flechas y Tab; vale en cualquier parte del texto, no solo al principio
+(`chat_token`). Ctrl+V pega texto y también imágenes: van en etiquetas encima
+de la caja y salen con el siguiente mensaje.
 
 El mini chat: para encargarle algo a uno de los tres sin abrir el panel. Un
 clic en él, en el tablero, abre su desglose con una caja al pie (`draw_brief`);
@@ -40,6 +45,10 @@ teclear lo suelta solo: un descuido no deja la máquina sin teclado. Enter
 manda y Shift+Enter cambia de línea; Shift+Tab prende o apaga el modo plan;
 Ctrl+C sin nada seleccionado corta el turno.
 
+Las conversaciones se guardan (`chat_save`, en `store`) y se recuperan al
+arrancar (`chat_restore`), con el panel abierto si lo estaba: la isla se puede
+volver a arrancar sin perderlas.
+
 La conversación la lleva `chat.Chat`; aquí solo se dibuja y se escucha.
 `ChatView` es parte de la isla (`app.Island` la hereda): usa sus ayudantes
 de dibujo (`_layout`, `tip_text`, `draw_button`, `face`, `ink`, `who`).
@@ -51,7 +60,7 @@ import time
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
-from . import chat, mascot, paint, settings, state
+from . import chat, mascot, paint, settings, state, store
 
 CHAT_W, CHAT_H = 600, 620     # el panel: ancho de la isla con vista previa, y alto
 CHAT_PAD = 16                 # margen por dentro
@@ -67,7 +76,7 @@ CHAT_GAP = 10                 # entre una cosa de la conversación y la siguient
 CHAT_INDENT = 12              # lo de Claude, un poco adentro: alineado con el texto de tus bloques
 CHAT_BLOCK_PAD = 9            # relleno de tus bloques
 CHAT_SCROLL = 48              # lo que baja o sube la conversación con cada paso de la rueda
-CHAT_SUGGEST = 6              # comandos que se ven a la vez en la lista de "/"
+CHAT_SUGGEST = 6              # lo que se ve a la vez en la lista de "/" o de "@"
 CHAT_SUGGEST_H = 24           # alto de cada uno, y de cada opción de un menú
 CHAT_ASK_H = 74               # la tarjeta del permiso
 CHAT_CHIP_H = 22              # las etiquetas de las imágenes pegadas
@@ -87,7 +96,8 @@ FONT_STEP = 'JetBrainsMono Nerd Font 9'          # sus pasos y la línea de esta
 FONT_LINK = 'Sans Semi-Bold 9'
 FONT_HINT = 'Sans 10'
 TITLE = (.95, .96, 1)
-PLACEHOLDER = 'Pídele algo a {agent} · / para los comandos · Shift+Enter, otra línea'
+PLACEHOLDER = 'Pídele algo a {agent} · / comandos · @ agentes y archivos · Shift+Enter, otra línea'
+SIGILS = '/@'                 # lo que abre una lista para completar: comandos, y agentes y archivos
 CSS = '''
 textview.elyares-chat, textview.elyares-chat text, scrolledwindow.elyares-chat {
   background: transparent; border: none; box-shadow: none; outline: none;
@@ -143,6 +153,7 @@ class ChatView:
         self.chat_keyed = 0.0         # cuándo se tecleó por última vez en el chat
         self.chat_hosts = {}          # los encargos del tablero: agente -> la sesión de la pestaña desde la que se hizo
         self.chat_whom = None         # para quién es lo escrito en la caja: 'chat' o el agente de un mini chat
+        self.chat_saved = None        # lo último que se guardó de las conversaciones
         self.entry = self.entry_box = None
 
     def chat_widgets(self, overlay):
@@ -153,6 +164,8 @@ class ChatView:
         view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         view.set_accepts_tab(False)
         view.get_buffer().connect('changed', self.on_chat_changed)
+        # La lista de "/" y "@" depende de la palabra en la que está el cursor.
+        view.get_buffer().connect('notify::cursor-position', lambda *_: self.ensure_tick())
         keys = Gtk.EventControllerKey()
         keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         keys.connect('key-pressed', self.on_chat_key)
@@ -188,12 +201,37 @@ class ChatView:
         buf = self.entry.get_buffer()
         return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
 
-    def chat_set_text(self, text):
+    def chat_cursor(self):
+        """Dónde está el cursor en lo escrito, en caracteres."""
+        if self.entry is None:
+            return None
+        buf = self.entry.get_buffer()
+        return buf.get_iter_at_mark(buf.get_insert()).get_offset()
+
+    def chat_set_text(self, text, cursor=None):
+        """Cambia lo escrito y deja el cursor en `cursor`, o al final."""
         if self.entry is None:
             return
         buf = self.entry.get_buffer()
         buf.set_text(text)
-        buf.place_cursor(buf.get_end_iter())
+        buf.place_cursor(buf.get_end_iter() if cursor is None else buf.get_iter_at_offset(cursor))
+
+    def chat_token(self):
+        """La palabra en la que está el cursor, si empieza por "/" o "@":
+        (signo, lo escrito tras él hasta el cursor, dónde empieza, dónde
+        acaba). None si no se está escribiendo un comando ni nombrando algo."""
+        text, cursor = self.chat_text(), self.chat_cursor()
+        if cursor is None or not 0 <= cursor <= len(text):
+            cursor = len(text)
+        start = cursor
+        while start and not text[start - 1].isspace():
+            start -= 1
+        if text[start:start + 1] not in tuple(SIGILS) or start == cursor:
+            return None
+        end = cursor
+        while end < len(text) and not text[end].isspace():
+            end += 1
+        return text[start], text[start + 1:cursor], start, end
 
     def chat_claim(self, whom):
         """La caja es una sola: lo que quedó escrito para otro (en el chat o
@@ -279,12 +317,63 @@ class ChatView:
         self.ensure_tick()
 
     def chat_tick(self, now):
-        """Cada segundo: suelta el teclado si hace rato que no se teclea."""
+        """Cada segundo: suelta el teclado si hace rato que no se teclea, y
+        guarda las conversaciones si cambiaron."""
         if self.chat_typing and now - self.chat_keyed > CHAT_IDLE_SECS:
             if self.chat_open:
                 self.chat_type(False)
             else:
                 self.brief_drop()
+        self.chat_save()
+
+    # ── entre reinicios de la isla ──────────────────────────────────────────
+
+    def chat_dump(self):
+        """Las conversaciones, para guardarlas: las que ya tienen algo, cuál
+        se tenía a la vista, si el panel estaba abierto y los encargos."""
+        chats = [c.dump() for c in self.chats.values() if c.session or c.entries]
+        return {'chats': chats, 'current': self.chat.agent if self.chat is not None else None,
+                'open': self.chat_open, 'hosts': dict(self.chat_hosts)}
+
+    def chat_save(self):
+        data = self.chat_dump()
+        if data != self.chat_saved:
+            self.chat_saved = data
+            store.save_chats(data)
+
+    def chat_restore(self, data):
+        """Al arrancar: las conversaciones que se guardaron, como estaban."""
+        for saved in data.get('chats') if isinstance(data.get('chats'), list) else []:
+            c = chat.Chat.restore(saved, None) if isinstance(saved, dict) else None
+            if c is None:
+                continue
+            c.emit = lambda ev, c=c: GLib.idle_add(self.on_chat, ev, c)
+            self.chats[c.agent] = c
+            if c.session:
+                self.chat_sessions.add(c.session)
+        self.chat = self.chats.get(data.get('current'))
+        hosts = data.get('hosts') if isinstance(data.get('hosts'), dict) else {}
+        self.chat_hosts = {agent: sid for agent, sid in hosts.items()
+                           if agent in self.chats and sid in self.model.sessions}
+        self.chat_open = self.chat is not None and data.get('open') is True
+        self.chat_saved = self.chat_dump()
+
+    def chat_busy(self):
+        """¿Hay algún turno en curso, en el chat que sea?"""
+        return any(c.busy for c in self.chats.values())
+
+    def chat_shutdown(self):
+        """Cierra los procesos de Claude de todos los chats, y espera a que
+        acaben: las conversaciones quedan guardadas."""
+        self.chat_save()
+        procs = [c.proc for c in self.chats.values() if c.proc is not None]
+        for c in self.chats.values():
+            c.close()
+        for proc in procs:
+            try:
+                proc.wait(timeout=2)
+            except Exception:           # no acabó a tiempo: se va con la isla
+                pass
 
     # ── el mini chat: encargarle algo a uno desde el tablero ────────────────
 
@@ -371,15 +460,39 @@ class ChatView:
             self.chat_sessions.add(c.session)
             if self.chat_watch:
                 self.tab = c.session
+        self.chat_context(c)
         if c.asking and not asked:
             self.chat_ask(c)
         if event.get('type') == 'result' and not cut:
             self.chat_watch = False
             if not (self.chat_open and c is self.chat) and c.reply():
                 self.chat_notice(c)
+        if event.get('type') != 'stream_event':
+            self.chat_save()
         self.refresh()
         self.ensure_tick()
+        if event.get('type') in ('result', 'exit'):
+            self.reload_soon()          # si se pidió volver a arrancar la isla, ya puede
         return GLib.SOURCE_REMOVE
+
+    def chat_context(self, c):
+        """Lo lleno que va el contexto de un chat, a su sesión del tablero:
+        en `claude -p` no hay barra de estado que lo mande."""
+        s = self.model.sessions.get(c.session) if c.session else None
+        if s is None or not c.context or not self.settings.get('usage', True):
+            return
+        if round(s.context, 1) != round(c.context, 1):
+            self.model.handle({'event': 'status', 'session_id': c.session, 'context_pct': c.context})
+
+    def chat_context_text(self):
+        """El contexto de la conversación para la línea de estado, como
+        (texto, papel de su color); ('', None) si aún no se sabe."""
+        c = self.chat
+        if c is None or not c.tokens:
+            return '', None
+        if not c.window:
+            return f'contexto {chat.tokens_text(c.tokens)}', 'pct0'
+        return f'contexto {c.context:.0f}% · {chat.tokens_text(c.tokens)}', paint.context_role(c.context)
 
     def chat_ask(self, c):
         """Un chat pide permiso: va a la tarjeta del tablero, como el de
@@ -446,27 +559,39 @@ class ChatView:
     # ── la caja de texto ────────────────────────────────────────────────────
 
     def suggestions(self):
-        """Los comandos que empiezan por lo que llevas escrito tras "/":
-        [(nombre, descripción)]. [] si no estás escribiendo un comando."""
+        """Lo que casa con la palabra en la que está el cursor: tras "/", los
+        comandos que empiezan así; tras "@", los agentes y los archivos del
+        proyecto. [(nombre, descripción)]; [] si no se está en una de esas."""
         if self.chat is None or self.chat_quiet or not self.chat_open:
             return []
-        text = self.chat_text()
-        if not text.startswith('/') or ' ' in text or '\n' in text:
+        token = self.chat_token()
+        if token is None:
             return []
-        word = text[1:].lower()
+        sigil, word = token[0], token[1].lower()
+        if sigil == '@':
+            return self.chat.mentions(word)
         return sorted(((name, desc) for name, desc in self.chat.commands.items()
                        if name.lower().startswith(word)), key=lambda it: (len(it[0]), it[0]))
 
     def complete(self, name):
-        self.chat_set_text(f'/{name} ')
+        """Pone el elegido de la lista en el sitio de la palabra a medias, con
+        lo de antes y lo de después tal cual, y el cursor justo detrás."""
+        token = self.chat_token()
+        if token is None:
+            return
+        sigil, _, start, end = token
+        text = self.chat_text()
+        head = f'{text[:start]}{sigil}{name} '
+        self.chat_set_text(head + text[end:].lstrip(' '), len(head))
 
     def on_chat_enter(self):
         found = self.suggestions()
         text = self.chat_text()
         if found:
             name = found[min(self.chat_pick, len(found) - 1)][0]
-            if text.strip() != f'/{name}':
-                # Enter sobre la lista elige el comando; otro Enter lo manda.
+            sigil, _, start, end = self.chat_token()
+            if text[start:end] != f'{sigil}{name}':
+                # Enter sobre la lista elige de ella; otro Enter lo manda.
                 self.complete(name)
                 return
         brief = self.briefing()
@@ -575,7 +700,7 @@ class ChatView:
             index = int(key[4:])
             if index < len(self.chat_images):
                 del self.chat_images[index]
-        elif key.startswith('/'):
+        elif key.startswith(tuple(SIGILS)):
             self.complete(key[1:])
             self.chat_type(True)
         elif key == 'type':
@@ -682,13 +807,17 @@ class ChatView:
 
     def draw_chat_status(self, cr, left, y, width, alpha):
         """La línea de debajo de la caja: con quién hablas, el modelo, el
-        esfuerzo y el modo plan. Devuelve dónde quedó cada uno, para su menú."""
+        esfuerzo, el modo plan y lo lleno que va el contexto. Devuelve dónde
+        quedó cada uno de los que tienen menú."""
         name = self.chat.name if self.chat is not None else state.MAIN_AGENT
         plan = self.chat is not None and self.chat.plan
         soft = mascot.rgba(self.ink('text', .66))[:3]
         parts = [('agent', name, self.chat_color()), ('model', self.chat_model_text(), mascot.rgba(self.ink('arg'))[:3]),
                  ('effort', self.chat_effort_text(), soft),
                  ('plan', 'plan' if plan else 'sin plan', mascot.rgba(self.ink('flag'))[:3] if plan else soft)]
+        context, role = self.chat_context_text()
+        if context:
+            parts.append((None, context, mascot.rgba(self.colors[role])[:3]))
         anchors, x = {}, left + 2
         for i, (key, text, color) in enumerate(parts):
             if i:
@@ -912,11 +1041,8 @@ class ChatView:
             layout = self._layout(cr, '▣  ' + entry.text, FONT_STEP, inner, 1, markup=markup)
             hit = (layout, layout.get_pixel_size()[1] + 4, None)
         else:
-            text = {'tool': f'· {entry.text}'}.get(entry.kind, entry.text)
-            font = FONT_STEP if entry.kind == 'tool' else FONT_LINK
-            layout = self._layout(cr, text, font, inner, 2)
-            role = {'tool': 'text', 'note': 'text', 'error': 'bad'}[entry.kind]
-            hit = (layout, layout.get_pixel_size()[1], role)
+            layout = self._layout(cr, entry.text, FONT_LINK, inner, 2)
+            hit = (layout, layout.get_pixel_size()[1], 'bad' if entry.kind == 'error' else 'text')
         if len(self.chat_cache) > 600:
             self.chat_cache.clear()
         self.chat_cache[key] = hit
@@ -965,7 +1091,7 @@ class ChatView:
             elif role is None:
                 self.tip_text(cr, layout, x, y + 2, None, alpha, False)
             else:
-                light = .62 if entry.kind in ('tool', 'note') else None
+                light = .62 if entry.kind == 'note' else None
                 tone = mascot.rgba(self.ink(role, light) if light else self.ink(role))[:3]
                 if entry.kind == 'note':
                     x = left + (width - layout.get_pixel_size()[0]) / 2
@@ -1008,7 +1134,10 @@ class ChatView:
         self.draw_button(cr, 'chat-deny', 'Denegar', right - 2 * 84 - 8, by, False, alpha)
 
     def draw_chat_suggest(self, cr, left, width, bottom, found, alpha):
-        """La lista de comandos al escribir "/", justo encima de la caja."""
+        """La lista de comandos al escribir "/", o la de agentes y archivos
+        con "@", justo encima de la caja."""
+        token = self.chat_token()
+        sigil = token[0] if token else '/'
         pick = min(self.chat_pick, len(found) - 1)
         first = max(0, min(pick - CHAT_SUGGEST + 1, len(found) - CHAT_SUGGEST))
         shown = found[first:first + CHAT_SUGGEST]
@@ -1027,10 +1156,10 @@ class ChatView:
                 mascot.rrect(cr, left + 4, ry, width - 8, CHAT_SUGGEST_H, 8)
                 cr.set_source_rgba(1, 1, 1, .09 * alpha)
                 cr.fill()
-            layout = self._layout(cr, f'/{name}', FONT_YOU)
+            layout = self._layout(cr, f'{sigil}{name}', FONT_YOU, width - 24)
             nw, nh = layout.get_pixel_size()
             self.tip_text(cr, layout, left + 12, ry + (CHAT_SUGGEST_H - nh) / 2, cmd, alpha, False)
-            if desc:
+            if desc and width - 44 - max(nw, 110) > 40:
                 self.put(cr, desc, FONT_STEP, left + 24 + max(nw, 110), ry + (CHAT_SUGGEST_H - nh) / 2 + 1,
                          soft, alpha, width=width - 44 - max(nw, 110))
-            self.hits.append(('chat', f'/{name}', left, ry, width, CHAT_SUGGEST_H))
+            self.hits.append(('chat', f'{sigil}{name}', left, ry, width, CHAT_SUGGEST_H))

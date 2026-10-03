@@ -13,6 +13,8 @@ Uso: elyares-ctl <orden>
     tab       pasa a la pestaña (la sesión) que sigue en el tablero
     steps     abre el desglose de uno de los cuatro; otra vez, el del que sigue
     theme     vuelve a leer el color de acento del tema de omarchy
+    reload    vuelve a arrancar la isla con el código de su carpeta, sin perder
+              las sesiones ni los chats; con un turno en curso, al acabar
     glass     prende o apaga el modo vidrio
     allow     permite lo que pide el permiso que la isla tiene a la vista
     deny      lo deniega, y corta el turno como el No de la terminal
@@ -25,9 +27,9 @@ import os
 import socket
 import sys
 
-ORDERS = ('open', 'chat', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'glass', 'allow', 'deny',
-          'status', 'toggle')
-REPLIES = ('allow', 'deny', 'status')    # las que esperan a que elyares-engineer conteste
+ORDERS = ('open', 'chat', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload', 'glass', 'allow',
+          'deny', 'status', 'toggle')
+REPLIES = ('allow', 'deny', 'status', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
 AGENTS = ('engineer', 'architect', 'auditor', 'reviewer')
 STATES = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
@@ -56,7 +58,7 @@ def main():
             s.sendall((json.dumps(msg) + '\n').encode())
             if order not in REPLIES:
                 return 0
-            s.settimeout(2)
+            s.settimeout(25 if order == 'reload' else 2)    # antes de recargar comprueba que el código arranca
             data = b''
             while not data.endswith(b'\n'):
                 b = s.recv(4096)
@@ -70,6 +72,8 @@ def main():
     if order != 'status':
         if not answer.get('ok'):
             print(f"elyares-ctl: {answer.get('why') or 'elyares-engineer no contestó'}", file=sys.stderr)
+        elif answer.get('note'):
+            print(answer['note'])
         return 0 if answer.get('ok') else 1
     for src in answer.get('sources', []):
         print(f"{src['label']:<10}{STATES.get(src['state'], src['state']):<15}{src['note']}".rstrip())

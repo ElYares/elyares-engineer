@@ -77,11 +77,33 @@ class Conversacion(ChatCase):
         self.c.feed({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Hola, Yared.'})
         self.assertFalse(self.c.busy)
 
-    def test_una_herramienta_es_un_paso(self):
+    def test_solo_queda_la_respuesta_no_lo_que_hace_por_el_camino(self):
         self.c.send('lee')
-        self.c.feed({'type': 'assistant', 'message': {'content': [
-            {'type': 'tool_use', 'name': 'Read', 'input': {'file_path': '/x/proj/docs/INDEX.md'}}]}})
-        self.assertEqual((self.c.entries[-1].kind, self.c.entries[-1].text), ('tool', 'Leyendo docs/INDEX.md'))
+        text = lambda t: {'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': t}]}}
+        tool = {'type': 'assistant', 'message': {'content': [
+            {'type': 'tool_use', 'name': 'Read', 'input': {'file_path': '/x/proj/docs/INDEX.md'}}]}}
+        self.c.feed(text('Voy a leer el índice.'))
+        self.assertEqual(self.c.entries[-1].text, 'Voy a leer el índice.')
+        # Sigue trabajando: eso no era la respuesta, y la herramienta no se apunta.
+        self.c.feed(tool)
+        self.assertEqual([(e.kind, e.text) for e in self.c.entries], [('you', 'lee')])
+        self.c.feed(text('El índice tiene tres documentos.'))
+        self.c.feed({'type': 'result', 'subtype': 'success', 'duration_ms': 1200})
+        self.assertEqual([e.kind for e in self.c.entries], ['you', 'claude', 'foot'])
+        self.assertEqual(self.c.reply(), 'El índice tiene tres documentos.')
+        # La respuesta de un turno ya acabado no se toca en el siguiente.
+        self.c.send('y ahora el README')
+        self.c.feed(tool)
+        self.assertEqual([e.kind for e in self.c.entries], ['you', 'claude', 'foot', 'you'])
+
+    def test_lo_que_dice_un_subagente_no_es_la_respuesta(self):
+        self.c.send('audita')
+        self.c.feed({'type': 'assistant', 'parent_tool_use_id': 'toolu_1', 'message': {
+            'usage': {'input_tokens': 900}, 'content': [{'type': 'text', 'text': 'Reviso el diff.'}]}})
+        self.c.feed({'type': 'stream_event', 'parent_tool_use_id': 'toolu_1', 'event': {
+            'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': 'Reviso'}}})
+        self.assertEqual([e.kind for e in self.c.entries], ['you'])
+        self.assertEqual(self.c.tokens, 0)
 
     def test_el_init_da_la_sesion_y_los_comandos(self):
         self.c.commands = {'commit': 'Convierte el working tree…'}
@@ -143,6 +165,105 @@ class Conversacion(ChatCase):
         self.c.send('hola')
         self.c.feed({'type': 'result', 'subtype': 'error_max_turns', 'is_error': True, 'result': ''})
         self.assertEqual((self.c.entries[-1].kind, self.c.entries[-1].text), ('error', 'error_max_turns'))
+
+
+class EntreReinicios(ChatCase):
+    """La conversación se guarda y vuelve cuando la isla se arranca de nuevo."""
+
+    def test_vuelve_como_estaba_y_lo_siguiente_la_retoma(self):
+        c = chat.Chat('/x/proj', None, agent='elyares-auditor', model='opus', effort='high')
+        c.session, c.model_id, c.plan, c.tokens, c.window = 's-1', 'claude-opus-5-5', True, 88000, 1000000
+        c.entries = [chat.Entry('you', 'audita', 1), chat.Entry('claude', 'Sin hallazgos.'),
+                     chat.Entry('foot', 'elyares-auditor · Opus 5.5 · 4.0 s')]
+        saved = json.loads(json.dumps(c.dump()))
+        back = chat.Chat.restore(saved, self.events.append, spawn=lambda *a, **kw: FakeProc(*a, **kw))
+        self.assertEqual(back.dump(), saved)
+        self.assertFalse(back.alive or back.busy)
+        self.assertEqual(back.commands, chat.local_commands('/x/proj'))
+        back.spawn = mock.Mock(side_effect=lambda *a, **kw: FakeProc(*a, **kw))
+        back.send('y el README')
+        cmd = back.spawn.call_args[0][0]
+        self.assertEqual(cmd[cmd.index('--resume') + 1], 's-1')
+        self.assertEqual(cmd[cmd.index('--permission-mode') + 1], 'plan')
+
+    def test_un_turno_cortado_por_el_reinicio_lo_dice(self):
+        self.c.send('hola')
+        back = chat.Chat.restore(self.c.dump(), None)
+        self.assertFalse(back.busy)
+        self.assertEqual((back.entries[-1].kind, back.entries[-1].text), ('note', chat.CUT_NOTE))
+
+    def test_solo_se_guarda_lo_ultimo(self):
+        self.c.entries = [chat.Entry('you', str(i)) for i in range(chat.SAVED_ENTRIES + 20)]
+        self.assertEqual(len(self.c.dump()['entries']), chat.SAVED_ENTRIES)
+        self.assertEqual(self.c.dump()['entries'][-1], ['you', str(chat.SAVED_ENTRIES + 19), 0])
+
+    def test_lo_guardado_que_no_sirve_no_vuelve(self):
+        self.assertIsNone(chat.Chat.restore({}, None))
+        back = chat.Chat.restore({'cwd': '/x', 'entries': [['you'], 'x', ['you', 3, 0], ['you', 'vale', 0]],
+                                  'tokens': 'muchos', 'plan': 'sí'}, None)
+        self.assertEqual([(e.kind, e.text) for e in back.entries], [('you', 'vale')])
+        self.assertEqual((back.tokens, back.plan, back.session), (0, False, ''))
+
+
+class Contexto(ChatCase):
+    """Cuánto lleva lleno el contexto de la conversación."""
+
+    def asked(self):
+        return [m['request']['subtype'] for m in self.procs[0].sent() if m.get('type') == 'control_request']
+
+    def test_claude_lo_cuenta_al_arrancar_y_al_acabar_cada_turno(self):
+        self.c.send('hola')
+        self.c.feed({'type': 'system', 'subtype': 'init', 'session_id': 's-1'})
+        self.assertEqual(self.asked(), ['get_context_usage'])
+        self.assertEqual((self.c.tokens, self.c.context), (0, 0.0))
+        self.assertTrue(self.c.feed({'type': 'control_response', 'response': {
+            'subtype': 'success', 'request_id': 'isla-1',
+            'response': {'totalTokens': 14000, 'maxTokens': 1000000, 'percentage': 1}}}))
+        self.assertEqual((self.c.tokens, self.c.window), (14000, 1000000))
+        self.assertAlmostEqual(self.c.context, 1.4)
+        self.c.feed({'type': 'result', 'subtype': 'success'})
+        self.assertEqual(self.asked(), ['get_context_usage'] * 2)
+
+    def test_entre_medias_sale_de_lo_que_gasta_cada_respuesta(self):
+        self.c.send('hola')
+        self.c.window = 200000
+        self.assertTrue(self.c.feed({'type': 'assistant', 'message': {'content': [], 'usage': {
+            'input_tokens': 4, 'cache_read_input_tokens': 86000, 'cache_creation_input_tokens': 1996,
+            'output_tokens': 1291}}}))
+        self.assertEqual(self.c.tokens, 88000)
+        self.assertAlmostEqual(self.c.context, 44.0)
+
+    def test_otra_respuesta_de_control_no_es_la_cuenta(self):
+        self.assertFalse(self.c.feed({'type': 'control_response', 'response': {
+            'subtype': 'success', 'request_id': 'isla-2', 'response': {'mode': 'plan'}}}))
+        self.assertFalse(self.c.feed({'type': 'control_response', 'response': {'subtype': 'error'}}))
+        self.assertEqual(self.c.context, 0.0)
+
+    def test_los_tokens_se_leen_de_un_vistazo(self):
+        self.assertEqual([chat.tokens_text(n) for n in (812, 87767, 1250000)], ['812', '88k', '1.2M'])
+
+
+class Menciones(ChatCase):
+    """Lo que se nombra con "@": los agentes y los archivos del proyecto."""
+
+    FILES = ['README.md', 'elyares/chat.py', 'elyares/chatview.py', 'tests/test_chat.py']
+
+    def test_primero_los_agentes_y_luego_los_archivos_que_empiezan_asi(self):
+        files = mock.Mock(return_value=self.FILES)
+        self.assertEqual(self.c.mentions('chat', files, now=0),
+                         [('elyares/chat.py', ''), ('elyares/chatview.py', ''), ('tests/test_chat.py', '')])
+        self.assertEqual(self.c.mentions('aud', files, now=1), [('elyares-auditor', 'agente')])
+        self.assertEqual(self.c.mentions('', files, now=2)[:3], [(a, 'agente') for a in state.AGENT_ROLES][:3])
+        # Los archivos no se listan a cada tecla.
+        files.assert_called_once_with('/x/proj')
+        self.c.mentions('x', files, now=chat.FILES_SECS + 1)
+        self.assertEqual(files.call_count, 2)
+
+    def test_los_agentes_son_los_que_dice_claude(self):
+        self.c.feed({'type': 'system', 'subtype': 'init', 'session_id': 's-1',
+                     'agents': ['Explore', 'elyares-reviewer']})
+        self.assertEqual(self.c.mentions('e', lambda cwd: [], now=0),
+                         [('Explore', 'agente'), ('elyares-reviewer', 'agente')])
 
 
 class ModeloEsfuerzoPlan(ChatCase):

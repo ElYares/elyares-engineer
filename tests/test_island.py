@@ -6,6 +6,8 @@ con otro python estas pruebas se saltan. No abre ninguna ventana: la isla se
 arma con `Island.__new__` y solo lo que cada prueba usa.
 """
 
+import json
+import os
 import threading
 import time
 import unittest
@@ -57,11 +59,16 @@ class IslandCase(unittest.TestCase):
         isl.check_panes = lambda: None
         isl.monitor = None
         isl.chat_init()
+        isl.reloading = False
         # Ninguna prueba le pregunta a Hyprland de verdad.
         for name, value in (('focused_monitor', None), ('monitors', [])):
             hypr = mock.patch.object(app.hypr, name, lambda value=value: value)
             hypr.start()
             self.addCleanup(hypr.stop)
+        # Ninguna prueba toca las conversaciones guardadas de verdad.
+        chats = mock.patch.object(app.store, 'save_chats')
+        self.save_chats = chats.start()
+        self.addCleanup(chats.stop)
         # Ninguna prueba toca las preferencias de verdad.
         saver = mock.patch.object(app.settings, 'save')
         self.saved = saver.start()
@@ -740,7 +747,7 @@ class Chat(Dibujo):
         c = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock())
         c.commands = {'contexto': 'Carga el contexto', 'commit': 'Hace los commits', 'compact': ''}
         E = app.chatview.chat.Entry
-        c.entries = [E('you', 'haz /contexto'), E('tool', 'Leyendo docs/INDEX.md'),
+        c.entries = [E('you', 'haz /contexto'),
                      E('claude', '## Listo\n- **tl-mas-server** en `sprint-021026`')]
         self.isl.chat, self.isl.chat_open = c, True
         return c
@@ -777,7 +784,7 @@ class Chat(Dibujo):
     def test_se_dibuja_la_conversacion(self):
         self.conversation()
         self.draw()
-        for text in ('haz /contexto', '· Leyendo docs/INDEX.md', 'Listo', 'Cerrar', 'Nuevo'):
+        for text in ('haz /contexto', 'Listo', 'Cerrar', 'Nuevo'):
             self.assertIn(text, self.shown)
         self.assertEqual({k for _, k, *_ in self.isl.hits} >= {'close', 'new', 'type'}, True)
         self.assertIsNotNone(self.isl.chat_box)
@@ -1100,6 +1107,168 @@ class Chat(Dibujo):
         # Con espacio ya no es un comando a medias.
         self.isl.chat_text = lambda: '/commit ahora'
         self.assertEqual(self.isl.suggestions(), [])
+
+    def write(self, text, cursor=None):
+        """Lo escrito en la caja, con el cursor en `cursor` (o al final)."""
+        self.isl.chat_text = lambda: text
+        self.isl.chat_cursor = lambda: len(text) if cursor is None else cursor
+        self.isl.chat_set_text = mock.Mock()
+
+    def test_la_barra_vale_con_texto_antes_y_despues(self):
+        self.conversation()
+        self.write('sube los cambios con /co')
+        self.assertEqual([n for n, _ in self.isl.suggestions()], ['commit', 'compact', 'contexto'])
+        # Enter elige de la lista, y lo de antes se queda como estaba.
+        self.isl.on_chat_enter()
+        self.isl.chat_set_text.assert_called_once_with('sube los cambios con /commit ', 29)
+        # Con el cursor en medio del texto, lo de después tampoco se toca.
+        self.write('primero /con y luego el PR', cursor=12)
+        self.assertEqual([n for n, _ in self.isl.suggestions()], ['contexto'])
+        self.isl.complete('contexto')
+        self.isl.chat_set_text.assert_called_once_with('primero /contexto y luego el PR', 18)
+        # Una ruta o una fracción no son un comando.
+        for text in ('abre /home/yared/notas', 'y/o', 'el 10/02'):
+            self.write(text)
+            self.assertEqual(self.isl.suggestions(), [], text)
+
+    def test_el_comando_ya_escrito_se_manda_con_enter(self):
+        c = self.conversation()
+        c.send = mock.Mock(return_value=True)
+        self.write('luego corre /commit')
+        self.isl.on_chat_enter()
+        c.send.assert_called_once_with('luego corre /commit', [])
+
+    def test_la_arroba_nombra_agentes_y_archivos(self):
+        c = self.conversation()
+        c.files, c.files_at = ['elyares/chat.py', 'README.md'], float('inf')
+        self.write('que lo revise @rev')
+        self.assertEqual(self.isl.suggestions(), [('elyares-reviewer', 'agente')])
+        self.draw()
+        self.assertIn('@elyares-reviewer', self.shown)
+        self.isl.on_chat_hit('@elyares-reviewer')
+        self.isl.chat_set_text.assert_called_once_with('que lo revise @elyares-reviewer ', 32)
+        self.write('mira @chat y dime')
+        self.isl.chat_cursor = lambda: 10
+        self.assertEqual(self.isl.suggestions(), [('elyares/chat.py', '')])
+        # Un correo no nombra a nadie.
+        self.write('escríbele a yared@ejemplo.mx')
+        self.assertEqual(self.isl.suggestions(), [])
+
+    def test_las_conversaciones_vuelven_al_arrancar_la_isla(self):
+        c = self.isl.chats[''] = self.conversation()
+        c.session, c.tokens, c.window = 's-chat', 88000, 1000000
+        self.send('start', 's-chat', cwd='/x/proj')
+        aud = self.isl.chat_for('elyares-auditor', '/x/proj')
+        aud.session = 's-aud'
+        self.isl.chat_hosts = {'elyares-auditor': 's-chat', 'elyares-reviewer': 's-ido'}
+        self.isl.chat_save()
+        saved = self.save_chats.call_args[0][0]
+        self.isl.chat_save()
+        self.save_chats.assert_called_once()        # sin cambios no se vuelve a escribir
+        # Otra isla, recién arrancada, con las mismas sesiones.
+        other = app.Island.__new__(app.Island)
+        other.model, other.settings = self.isl.model, self.isl.settings
+        other.chat_init()
+        other.chat_restore(json.loads(json.dumps(saved)))
+        self.assertEqual(sorted(other.chats), ['', 'elyares-auditor'])
+        back = other.chat
+        self.assertEqual((back.agent, back.cwd, back.session, back.context), ('', '/x/proj', 's-chat', 8.8))
+        self.assertEqual([(e.kind, e.text) for e in back.entries], [(e.kind, e.text) for e in c.entries])
+        self.assertIsNone(back.proc)
+        self.assertTrue(other.chat_open)                        # estaba abierto: sigue abierto
+        self.assertFalse(other.chat_typing)                     # pero sin tomar el teclado
+        self.assertEqual(other.chat_sessions, {'s-chat', 's-aud'})
+        self.assertEqual(other.chat_hosts, {'elyares-auditor': 's-chat'})   # el otro encargo ya no tiene a quién
+        # Lo guardado a medias o roto no tumba el arranque.
+        for bad in ({}, {'chats': 'x', 'hosts': []}, {'chats': [{}, 3, {'cwd': 7}], 'current': 9}):
+            other.chat_init()
+            other.chat_restore(bad)
+            self.assertEqual((other.chats, other.chat, other.chat_open), ({}, None, False))
+
+    def test_el_contexto_sale_en_la_linea_de_estado_y_en_el_tablero(self):
+        c = self.conversation()
+        self.draw()
+        self.assertFalse([t for t in self.shown if t.startswith('contexto')])
+        c.session = 's-chat'
+        self.send('start', 's-chat', cwd='/x/proj')
+        self.isl.on_chat({'type': 'control_response', 'response': {
+            'subtype': 'success', 'response': {'totalTokens': 88000, 'maxTokens': 1000000}}})
+        self.draw()
+        self.assertIn('contexto 9% · 88k', self.shown)
+        # A la sesión del tablero, que lo muestra junto a sus pestañas.
+        self.assertAlmostEqual(self.isl.model.sessions['s-chat'].context, 8.8)
+        self.isl.close_chat()
+        self.isl.expanded, self.isl.tab = True, 's-chat'
+        self.draw()
+        self.assertIn('contexto 9%', self.shown)
+
+
+@unittest.skipIf(app is None, 'sin gi: usa /usr/bin/python3')
+class Recarga(IslandCase):
+    """`elyares-ctl reload`: la isla se vuelve a arrancar con el código de su carpeta."""
+
+    def setUp(self):
+        super().setUp()
+        self.isl.reload_check = lambda: ''
+        self.isl.is_service = lambda: True
+        self.isl.ensure_tick = lambda: None
+        timer = mock.patch.object(app.GLib, 'timeout_add', side_effect=lambda ms, fn: fn())
+        self.timer = timer.start()
+        self.addCleanup(timer.stop)
+        popen = mock.patch.object(app.subprocess, 'Popen')
+        self.popen = popen.start()
+        self.addCleanup(popen.stop)
+        save = mock.patch.object(app.store, 'save')
+        self.save = save.start()
+        self.addCleanup(save.stop)
+        self.c = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock())
+        self.c.session = 's-chat'
+        self.isl.chats[''] = self.isl.chat = self.c
+
+    def reply(self):
+        req = mock.Mock()
+        self.isl.on_control('reload', {}, req)
+        return req.reply.call_args[0][0]
+
+    def test_sin_turnos_en_curso_se_recarga_ya(self):
+        self.assertEqual(self.reply(), {'ok': True, 'note': 'la isla se recarga ya'})
+        self.popen.assert_called_once_with(['systemctl', '--user', '--no-block', 'restart', app.UNIT])
+        self.save.assert_called_once()
+        self.save_chats.assert_called_once()        # las conversaciones quedan guardadas antes
+
+    def test_con_un_turno_en_curso_espera_a_que_acabe(self):
+        self.c.busy = True
+        self.assertEqual(self.reply()['note'], 'la isla se recarga al acabar el turno en curso')
+        self.popen.assert_not_called()
+        self.isl.on_chat({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Listo.'}]}})
+        self.popen.assert_not_called()
+        self.isl.on_chat({'type': 'result', 'subtype': 'success'})
+        self.popen.assert_called_once()
+        self.assertEqual(self.save_chats.call_args[0][0]['chats'][0]['entries'][-1][:2], ['claude', 'Listo.'])
+
+    def test_con_el_codigo_roto_la_isla_se_queda(self):
+        self.isl.reload_check = lambda: "SyntaxError: '(' was never closed"
+        answer = self.reply()
+        self.assertFalse(answer['ok'])
+        self.assertIn('SyntaxError', answer['why'])
+        self.assertFalse(self.isl.reloading)
+        self.popen.assert_not_called()
+
+    def test_a_mano_se_vuelve_a_lanzar_el_mismo_proceso(self):
+        self.isl.is_service = lambda: False
+        with mock.patch.object(app.os, 'execv') as execv:
+            self.reply()
+        execv.assert_called_once_with(app.LAUNCHER, [app.LAUNCHER])
+        self.popen.assert_not_called()
+
+
+
+@unittest.skipIf(app is None, 'sin gi: usa /usr/bin/python3')
+class Arranque(unittest.TestCase):
+    def test_el_codigo_de_la_carpeta_arranca(self):
+        # Lo que comprueba `reload` antes de volver a arrancar la isla.
+        self.assertEqual(app.Island.reload_check(), '')
+        self.assertTrue(os.access(app.LAUNCHER, os.X_OK))
 
 
 class Familia(unittest.TestCase):
