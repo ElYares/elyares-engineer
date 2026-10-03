@@ -101,11 +101,12 @@ SAVED_TIMES = ('started', 'changed', 'updated')
 # cada uno. Cualquier otro (Explore, general-purpose…) trabaja con la cara del
 # engineer.
 AGENT_ROLES = {'elyares-architect': 'architect', 'elyares-auditor': 'auditor',
-               'elyares-reviewer': 'reviewer'}
+               'elyares-reviewer': 'reviewer', 'elyares-designer': 'designer',
+               'elyares-mobile': 'mobile'}
 # Quien trabaja en una sesión mientras no lo haga un subagente de la familia,
 # y su personaje.
 MAIN_AGENT, MAIN_ROLE = 'elyares-engineer', 'engineer'
-# Los cuatro, en el orden de `mascot.ROLES`, y el agente de cada personaje.
+# La familia entera, en el orden de `mascot.ROLES`, y el agente de cada personaje.
 TEAM = (MAIN_ROLE, *AGENT_ROLES.values())
 ROLE_AGENTS = {MAIN_ROLE: MAIN_AGENT, **{role: name for name, role in AGENT_ROLES.items()}}
 # Las herramientas con las que una sesión lanza un subagente.

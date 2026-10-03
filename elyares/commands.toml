@@ -48,7 +48,7 @@
 
 [engineer]
 "elyares-ctl chat" = "El chat con Claude; otra vez, lo cierra"
-"elyares-ctl chat <agente>" = "El chat de architect, auditor, reviewer o engineer"
+"elyares-ctl chat <agente>" = "El chat de ese agente (architect, designer…)"
 "elyares-ctl chat --dir <carpeta>" = "El chat, en ese proyecto"
 "elyares-ctl projects" = "El panel de proyectos; otra vez, lo cierra"
 "elyares-ctl reload" = "Recarga la isla con los cambios; los chats siguen"
