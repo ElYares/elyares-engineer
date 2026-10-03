@@ -56,6 +56,7 @@ class IslandCase(unittest.TestCase):
         isl.collapse_id = 0
         isl.check_panes = lambda: None
         isl.monitor = None
+        isl.chat_init()
         # Ninguna prueba le pregunta a Hyprland de verdad.
         for name, value in (('focused_monitor', None), ('monitors', [])):
             hypr = mock.patch.object(app.hypr, name, lambda value=value: value)
@@ -279,7 +280,7 @@ class Consulta(IslandCase):
         width = app.SIZES['open'][0]
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
         keys = [key for key, *_ in self.isl.pills]
-        self.assertEqual(keys, [key for key, _ in sources.SOURCES] + [commands.HELP])
+        self.assertEqual(keys, [key for key, _ in sources.SOURCES] + [app.CHAT_PILL, commands.HELP])
         for (_, x, _, w, _), (_, nx, *_) in zip(self.isl.pills, self.isl.pills[1:]):
             self.assertLessEqual(x + w, nx)
         self.assertLessEqual(self.isl.pills[-1][1] + self.isl.pills[-1][3], 100 + width - 18)
@@ -415,8 +416,8 @@ class Consulta(IslandCase):
         self.isl.settings['pinned'] = True
         self.assertEqual(self.isl.head_notes()[0][0], 'fijada')
 
-class Tablero(IslandCase):
-    """Abierta a mano: una pestaña por sesión y, dentro, sus cuatro."""
+class Dibujo(IslandCase):
+    """La isla dibujada fuera de pantalla, con eventos simulados."""
 
     def setUp(self):
         super().setUp()
@@ -458,6 +459,10 @@ class Tablero(IslandCase):
 
     def hit(self, kind):
         return [key for k, key, *_ in self.isl.hits if k == kind]
+
+
+class Tablero(Dibujo):
+    """Abierta a mano: una pestaña por sesión y, dentro, sus cuatro."""
 
     def test_abierta_a_mano_con_una_sesion_es_el_tablero(self):
         self.isl.expanded = True
@@ -720,6 +725,383 @@ class Tablero(IslandCase):
 
 
 @unittest.skipIf(app is None, 'sin gi: usa /usr/bin/python3')
+class Chat(Dibujo):
+    """El chat dentro de la isla."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(app.chatview.chat, 'active_cwd', lambda: '/x/proj')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.isl.ensure_tick = lambda: None
+        self.isl.expand = mock.Mock()
+
+    def conversation(self):
+        c = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock())
+        c.commands = {'contexto': 'Carga el contexto', 'commit': 'Hace los commits', 'compact': ''}
+        E = app.chatview.chat.Entry
+        c.entries = [E('you', 'haz /contexto'), E('tool', 'Leyendo docs/INDEX.md'),
+                     E('claude', '## Listo\n- **tl-mas-server** en `sprint-021026`')]
+        self.isl.chat, self.isl.chat_open = c, True
+        return c
+
+    def test_con_la_orden_se_abre_y_se_cierra(self):
+        self.isl.on_control('chat')
+        self.assertTrue(self.isl.chat_open and self.isl.chat_typing)
+        self.assertEqual(self.isl.target(), 'chat')
+        self.assertEqual(self.isl.goal(), (app.chatview.CHAT_W, app.chatview.CHAT_H))
+        self.assertEqual(self.isl.chat.cwd, '/x/proj')
+        chat = self.isl.chat
+        self.isl.on_control('chat')
+        self.assertFalse(self.isl.chat_open or self.isl.chat_typing)
+        self.assertNotEqual(self.isl.target(), 'chat')
+        # Cerrar no termina la conversación: al abrirlo, ahí sigue.
+        self.isl.on_control('chat')
+        self.assertIs(self.isl.chat, chat)
+
+    def test_sin_teclear_suelta_el_teclado_solo(self):
+        self.isl.on_control('chat')
+        self.isl.chat_tick(self.isl.chat_keyed + app.chatview.CHAT_IDLE_SECS - 1)
+        self.assertTrue(self.isl.chat_typing)
+        self.isl.chat_tick(self.isl.chat_keyed + app.chatview.CHAT_IDLE_SECS + 1)
+        self.assertFalse(self.isl.chat_typing)
+        self.assertTrue(self.isl.chat_open)          # el chat sigue a la vista
+
+    def test_la_pastilla_del_chat_lo_abre(self):
+        self.isl.expanded = True
+        self.draw()
+        key, x, y, w, h = next(p for p in self.isl.pills if p[0] == app.CHAT_PILL)
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.assertTrue(self.isl.chat_open)
+
+    def test_se_dibuja_la_conversacion(self):
+        self.conversation()
+        self.draw()
+        for text in ('haz /contexto', '· Leyendo docs/INDEX.md', 'Listo', 'Cerrar', 'Nuevo'):
+            self.assertIn(text, self.shown)
+        self.assertEqual({k for _, k, *_ in self.isl.hits} >= {'close', 'new', 'type'}, True)
+        self.assertIsNotNone(self.isl.chat_box)
+
+    def test_el_permiso_se_contesta_en_su_tarjeta(self):
+        c = self.conversation()
+        c.busy = True
+        c.asking = {'id': 'r-1', 'tool': 'Bash', 'input': {'command': 'make test'}, 'text': 'Ejecutando make test'}
+        c.answer = mock.Mock()
+        self.draw()
+        self.assertIn('Pide permiso', self.shown)
+        self.assertIn('Detener', self.shown)
+        x, y, w, h = self.isl.buttons['chat-allow']
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        c.answer.assert_called_once_with(True)
+
+    def test_al_mandar_se_cierra_y_se_ve_trabajar_en_el_tablero(self):
+        c = self.conversation()
+        c.send = mock.Mock(return_value=True)
+        self.isl.chat_text = lambda: 'corre las pruebas'
+        self.isl.chat_set_text = mock.Mock()
+        self.isl.on_chat_enter()
+        c.send.assert_called_once_with('corre las pruebas', [])
+        self.assertFalse(self.isl.chat_open)
+        self.assertTrue(self.isl.chat_watch)
+        self.isl.expand.assert_called_once()
+        # En cuanto Claude dice qué sesión es, la pestaña la sigue.
+        self.isl.on_chat({'type': 'system', 'subtype': 'init', 'session_id': 's-chat'})
+        self.assertEqual(self.isl.tab, 's-chat')
+        self.send('start', 's-chat', cwd='/x/proj')
+        self.assertEqual(self.isl.tab_label(self.isl.model.sessions['s-chat']), 'proj · chat')
+
+    def test_el_permiso_del_chat_se_contesta_en_el_tablero(self):
+        c = self.conversation()
+        self.isl.chat_open = False
+        c.session = 's-chat'
+        c.answer = mock.Mock()
+        self.isl.on_chat({'type': 'control_request', 'request_id': 'r', 'request': {
+            'subtype': 'can_use_tool', 'tool_name': 'Bash', 'input': {'command': 'make test'}}})
+        self.assertFalse(self.isl.chat_open)        # el chat no se abre: se ve en el tablero
+        s = self.isl.model.sessions['s-chat']
+        self.assertEqual(s.state, 'permission')
+        self.assertEqual(self.isl.tab, 's-chat')
+        self.isl.expanded = True
+        self.draw()
+        x, y, w, h = self.isl.buttons['allow']
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        c.answer.assert_called_once_with(True)
+
+    def test_al_terminar_avisa_con_el_principio_de_la_respuesta(self):
+        c = self.conversation()
+        self.isl.chat_open = False
+        c.session, c.busy = 's-chat', True
+        c.entries.append(app.chatview.chat.Entry('claude', '## Hecho\nLas **22** pruebas pasan.'))
+        self.isl.on_chat({'type': 'result', 'subtype': 'success', 'duration_ms': 1000})
+        alert = self.isl.model.sessions['chat:s-chat']
+        self.assertIn('ver respuesta', alert.detail)
+        self.assertEqual(alert.lines, ['Hecho', 'Las 22 pruebas pasan.'])
+        # Su botón abre el chat, y el aviso se va.
+        self.isl.act(alert, 0)
+        self.assertTrue(self.isl.chat_open)
+        self.assertNotIn('chat:s-chat', self.isl.model.sessions)
+
+    def test_cada_agente_tiene_su_conversacion(self):
+        self.isl.settings['chat_model'] = 'haiku'
+        self.isl.open_chat()
+        engineer = self.isl.chat
+        self.assertEqual((engineer.agent, engineer.model), ('', 'haiku'))
+        self.isl.on_chat_hit('agent:elyares-architect')
+        architect = self.isl.chat
+        # La del agente corre como él, con su modelo, no con el elegido para el engineer.
+        self.assertEqual((architect.agent, architect.model, architect.cwd), ('elyares-architect', '', '/x/proj'))
+        self.draw()
+        self.assertIn('Pídele algo a elyares-architect', self.shown)
+        self.isl.on_chat_hit('agent:')
+        self.assertIs(self.isl.chat, engineer)       # la del engineer sigue ahí
+        # «Nuevo» empieza otra solo con el que tienes a la vista.
+        self.isl.on_chat_hit('agent:elyares-architect')
+        self.isl.on_chat_hit('new')
+        self.assertIsNot(self.isl.chat, architect)
+        self.assertIs(self.isl.chats[''], engineer)
+
+    def test_con_la_orden_y_desde_el_tablero_se_le_habla_a_uno(self):
+        self.isl.on_control('chat', {'control': 'chat', 'agent': 'reviewer'})
+        self.assertEqual(self.isl.chat.agent, 'elyares-reviewer')
+        self.isl.close_chat()
+        self.isl.on_hit('talk', 'elyares-auditor')
+        self.assertTrue(self.isl.chat_open)
+        self.assertEqual(self.isl.chat.agent, 'elyares-auditor')
+
+    def test_el_desglose_lleva_a_su_chat(self):
+        self.isl.expanded = True
+        self.work('a', 'elyares-auditor')
+        self.isl.tab, self.isl.focus = 'a', ('a', 'auditor')
+        self.draw()
+        # Uno de los tres ya tiene ahí su mini chat: el enlace es para leerlo.
+        self.assertIn('ver su chat ›', self.shown)
+        self.assertEqual(self.hit('talk'), ['elyares-auditor'])
+        self.isl.focus = ('a', 'engineer')
+        self.draw()
+        self.assertIn('hablarle ›', self.shown)
+        self.assertEqual(self.hit('talk'), [''])
+        self.assertEqual(self.hit('brief'), [('a', 'architect'), ('a', 'reviewer')])   # las caritas libres
+
+    def brief(self, role='auditor', text='audita el diff'):
+        """Un clic en uno de los tres, libre, y un encargo en su mini chat."""
+        self.isl.expanded = True
+        self.draw()
+        self.isl.on_hit('brief', ('a', role))
+        self.isl.chat_text = lambda: text
+        self.isl.on_chat_enter()
+        return self.isl.chats.get(f'elyares-{role}')
+
+    def sending(self):
+        """Mandar sin abrir ningún Claude: el turno queda en curso."""
+        def send(c, text, images=()):
+            c.busy = bool(text.strip())
+            return c.busy
+        patcher = mock.patch.object(app.chatview.chat.Chat, 'send', autospec=True, side_effect=send)
+        self.addCleanup(patcher.stop)
+        return patcher.start()
+
+    def test_un_clic_en_uno_libre_abre_su_mini_chat(self):
+        self.isl.expanded = True
+        self.work('a')
+        board = self.isl.goal()
+        self.draw()
+        self.assertEqual(self.hit('brief'), [('a', 'architect'), ('a', 'auditor'), ('a', 'reviewer')])
+        self.isl.on_hit('brief', ('a', 'auditor'))
+        # Cambia al desglose de ese, con el teclado listo y sin abrir el panel del chat.
+        self.assertEqual(self.isl.focus, ('a', 'auditor'))
+        self.assertTrue(self.isl.chat_typing)
+        self.assertFalse(self.isl.chat_open)
+        self.assertEqual(self.isl.target(), 'board')
+        self.assertEqual(self.isl.goal()[1] - board[1], app.FOCUS_H + app.chatview.MINI_H - app.BOARD_H)
+        self.draw()
+        for text in ('elyares-auditor está libre', 'Dile a elyares-auditor qué hacer', 'Enter manda · Esc suelta'):
+            self.assertIn(text, self.shown)
+        self.assertIsNotNone(self.isl.chat_box)
+        self.assertEqual(self.isl.chats, {})         # hasta que se le manda algo no hay conversación
+        # Esc suelta el teclado; el desglose sigue ahí, con su caja.
+        self.isl.on_chat_key(None, app.Gdk.KEY_Escape, 0, 0)
+        self.assertFalse(self.isl.chat_typing)
+        self.draw()
+        self.assertIn('Clic aquí para encargarle algo a elyares-auditor', self.shown)
+        self.isl.on_hit('brief', None)               # un clic en la caja lo vuelve a tomar
+        self.assertTrue(self.isl.chat_typing)
+
+    def test_el_engineer_no_tiene_mini_chat(self):
+        self.isl.expanded = True
+        self.work('a')
+        self.isl.focus = ('a', 'engineer')
+        self.assertIsNone(self.isl.briefing())
+        self.assertEqual(self.isl.goal()[1], app.TABS_H + app.FOCUS_H + app.BOARD_PAD + app.PILLS_H)
+        self.isl.chat_type(True)
+        self.assertFalse(self.isl.chat_typing)
+
+    def test_al_encargarle_trabaja_al_lado_de_los_demas(self):
+        send = self.sending()
+        self.work('a')
+        c = self.brief()
+        send.assert_called_once_with(c, 'audita el diff', [])
+        # En la carpeta de la pestaña, y de vuelta al tablero, sin el teclado.
+        self.assertEqual((c.agent, c.cwd), ('elyares-auditor', '/x/a'))
+        self.assertEqual(self.isl.chat_hosts, {'elyares-auditor': 'a'})
+        self.assertEqual((self.isl.focus, self.isl.chat_typing, self.isl.chat_open), (None, False, False))
+        # Aún sin noticias de Claude ya sale trabajando, al lado del engineer.
+        self.draw()
+        self.assertEqual(self.hit('member'), [('a', 'engineer'), ('a', 'auditor')])
+        self.assertIn('Arrancando…', self.shown)
+        # Su sesión no saca pestaña: sus pasos van en su tarjeta de esta.
+        self.isl.on_chat({'type': 'system', 'subtype': 'init', 'session_id': 's-aud'}, c)
+        self.send('start', 's-aud', cwd='/x/a', agent_type='elyares-auditor')
+        self.send('tool', 's-aud', cwd='/x/a', agent_type='elyares-auditor', tool_name='Bash',
+                  tool_input={'command': 'semgrep scan'})
+        self.assertEqual([s.sid for s in self.isl.tabs()], ['a'])
+        self.isl.tab = 's-aud'
+        self.assertEqual(self.isl.tab_session().sid, 'a')
+        self.draw()
+        self.assertEqual(self.hit('tab'), ['a'])
+        self.assertEqual(self.hit('member'), [('a', 'engineer'), ('a', 'auditor')])
+        self.assertIn('Ejecutando semgrep scan', self.shown)
+        # Y otro más: los tres a la vez.
+        self.brief('reviewer', 'revisa el diff')
+        self.draw()
+        self.assertEqual(self.hit('member'), [('a', 'engineer'), ('a', 'auditor'), ('a', 'reviewer')])
+        self.assertEqual(self.hit('brief'), [('a', 'architect')])
+
+    def test_el_punto_de_la_pestana_es_del_encargo_si_la_sesion_descansa(self):
+        self.sending()
+        self.work('a')
+        self.send('stop', now=T + 1)
+        self.isl.refresh = lambda: setattr(self.isl, 'view', self.isl.model.view(now=T + 60, pin=self.isl.pin))
+        self.isl.refresh()
+        self.brief()
+        a = self.isl.model.sessions['a']
+        self.assertEqual(self.isl.tab_dot(a), app.mascot.accent('auditor'))
+        self.assertTrue(self.isl.busy(a))
+
+    def test_el_permiso_de_un_encargo_se_contesta_en_su_tarjeta(self):
+        self.sending()
+        self.work('a')
+        c = self.brief()
+        c.answer = mock.Mock()
+        self.isl.on_chat({'type': 'system', 'subtype': 'init', 'session_id': 's-aud'}, c)
+        self.send('start', 's-aud', cwd='/x/a', agent_type='elyares-auditor')
+        self.isl.on_chat({'type': 'control_request', 'request_id': 'r', 'request': {
+            'subtype': 'can_use_tool', 'tool_name': 'Bash', 'input': {'command': 'git push'}}}, c)
+        self.assertEqual(self.isl.tab_session().sid, 'a')
+        self.draw()
+        self.assertIn('Ejecutando git push', self.shown)
+        x, y, w, h = self.isl.buttons['allow']
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        c.answer.assert_called_once_with(True)
+
+    def test_sin_su_pestana_el_encargo_saca_la_suya(self):
+        self.sending()
+        self.work('a')
+        c = self.brief()
+        self.isl.on_chat({'type': 'system', 'subtype': 'init', 'session_id': 's-aud'}, c)
+        self.send('start', 's-aud', cwd='/x/a', agent_type='elyares-auditor')
+        self.send('session-end', 'a')
+        self.assertEqual([s.sid for s in self.isl.tabs()], ['s-aud'])
+        self.assertEqual(self.isl.tab_session().sid, 's-aud')
+
+    def test_ocupado_en_otro_proyecto_no_se_le_encarga_aqui(self):
+        send = self.sending()
+        self.work('a')
+        self.work('b')
+        self.isl.tab = 'a'
+        c = self.brief()
+        # Desde la pestaña de otro proyecto, mientras sigue con lo de este.
+        self.isl.tab = 'b'
+        self.draw()
+        self.isl.on_hit('brief', ('b', 'auditor'))
+        self.isl.on_chat_enter()
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(self.isl.chat_hosts, {'elyares-auditor': 'a'})
+        self.draw()
+        self.assertIn('ocupado en a: aquí, cuando acabe', self.shown)
+        # Cuando acaba, sí: con una conversación nueva en la carpeta de aquí.
+        c.busy, c.close = False, mock.Mock()
+        self.isl.on_chat_enter()
+        other = self.isl.chats['elyares-auditor']
+        self.assertIsNot(other, c)
+        c.close.assert_called_once_with()
+        self.assertEqual((other.cwd, self.isl.chat_hosts), ('/x/b', {'elyares-auditor': 'b'}))
+
+    def test_lo_escrito_para_uno_no_se_le_manda_a_otro(self):
+        self.work('a')
+        self.isl.expanded = True
+        self.isl.chat_images = [b'png']
+        self.isl.on_hit('brief', ('a', 'auditor'))
+        self.assertEqual((self.isl.chat_whom, self.isl.chat_images), ('elyares-auditor', []))
+        self.isl.chat_images = [b'png']
+        self.isl.on_hit('brief', None)               # el mismo: lo pegado sigue
+        self.assertEqual(self.isl.chat_images, [b'png'])
+        self.isl.open_chat()
+        self.assertEqual((self.isl.chat_whom, self.isl.chat_images), ('chat', []))
+
+    def test_escribiendo_en_el_mini_chat_la_isla_no_se_mueve(self):
+        self.work('a')
+        self.work('b')
+        self.isl.expanded = True
+        self.isl.tab = 'a'
+        self.isl.on_hit('brief', ('a', 'auditor'))
+        self.isl.model.handle({'event': 'stop', 'session_id': 'b', 'cwd': '/x/b'}, now=T + 3)
+        self.isl.follow(self.isl.model.view(now=T + 3))
+        self.assertEqual((self.isl.tab, self.isl.focus), ('a', ('a', 'auditor')))
+        # Ni se cierra con el ratón fuera.
+        del self.isl.collapse
+        self.isl.collapse()
+        self.assertEqual(self.isl.focus, ('a', 'auditor'))
+        # Si el desglose se va, el teclado no se queda tomado.
+        self.isl.on_hit('back', None)
+        self.isl.chat_place(300)
+        self.assertFalse(self.isl.chat_typing)
+
+    def test_la_pestana_del_chat_de_un_agente_lo_dice(self):
+        self.isl.chat_sessions.add('s-arq')
+        self.send('start', 's-arq', agent_type='elyares-architect')
+        self.assertEqual(self.isl.tab_label(self.isl.model.sessions['s-arq']), 's-arq · chat architect')
+
+    def test_la_linea_de_estado_cambia_modelo_esfuerzo_y_plan(self):
+        c = self.conversation()
+        c.model_id = 'claude-opus-5-5'
+        c.set_model, c.set_effort, c.toggle_plan = mock.Mock(), mock.Mock(), mock.Mock()
+        self.draw()
+        self.assertIn('Opus 5.5', self.shown)
+        self.assertIn('sin plan', self.shown)
+        self.isl.on_chat_hit('model')
+        self.assertEqual(self.isl.chat_menu, 'model')
+        self.draw()
+        self.assertIn('   Sonnet 5.5', self.shown)
+        self.isl.on_chat_hit('model:sonnet')
+        c.set_model.assert_called_once_with('sonnet')
+        self.assertEqual(self.isl.settings['chat_model'], 'sonnet')
+        self.assertIsNone(self.isl.chat_menu)
+        self.isl.on_chat_hit('effort:max')
+        c.set_effort.assert_called_once_with('max')
+        # Shift+Tab, como en la terminal.
+        self.isl.on_chat_key(None, app.Gdk.KEY_ISO_Left_Tab, 0, app.Gdk.ModifierType.SHIFT_MASK)
+        c.toggle_plan.assert_called_once_with()
+
+    def test_las_imagenes_pegadas_van_en_etiquetas(self):
+        self.conversation()
+        self.isl.chat_images = [b'uno', b'dos']
+        self.draw()
+        self.assertIn('imagen 2  ×', self.shown)
+        self.isl.on_chat_hit('img:0')
+        self.assertEqual(self.isl.chat_images, [b'dos'])
+
+    def test_al_escribir_una_barra_salen_los_comandos(self):
+        self.conversation()
+        self.isl.chat_text = lambda: '/co'
+        self.assertEqual([n for n, _ in self.isl.suggestions()], ['commit', 'compact', 'contexto'])
+        self.draw()
+        self.assertIn('/commit', self.shown)
+        self.assertIn('Hace los commits', self.shown)
+        # Con espacio ya no es un comando a medias.
+        self.isl.chat_text = lambda: '/commit ahora'
+        self.assertEqual(self.isl.suggestions(), [])
+
+
 class Familia(unittest.TestCase):
     """Los cuatro personajes de `mascot.py`."""
 

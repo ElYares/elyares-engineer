@@ -8,7 +8,9 @@ import json
 import os
 
 # `pinned_monitor`: el monitor en el que se fijó la isla, para que se quede ahí.
-DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'devherd': True,
+# `chat_model` y `chat_effort`: lo último elegido en el chat ('' deja lo de Claude).
+DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'chat_model': '',
+            'chat_effort': '', 'devherd': True,
             'coffe': True, 'github': True, 'terminal': True, 'usage': True, 'github_accounts': []}
 
 
