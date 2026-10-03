@@ -4,15 +4,20 @@
 Uso: elyares-ctl <orden>
 
     open      abre la isla con lo que hace la sesión; otra vez, la cierra
-    chat [quién]
-              abre el chat con Claude, listo para escribir; otra vez, lo cierra.
-              Con quién: engineer, architect, auditor o reviewer, el chat de ese agente
+    chat [quién] [--dir carpeta]
+              abre el chat con Claude, listo para escribir, en el proyecto de la
+              sesión de tmux en la que estás; otra vez, lo cierra.
+              Con quién: engineer, architect, auditor o reviewer, el chat de ese agente.
+              Con --dir: en el proyecto de esa carpeta
+    projects  abre el panel de proyectos, para empezar a trabajar en uno; otra vez, lo cierra
     hide      esconde la isla del todo; otra vez, la vuelve a mostrar
     compact   prende o apaga el modo compacto
     pin       fija la isla abierta con todo a la vista; otra vez, la suelta
     tab       pasa a la pestaña (la sesión) que sigue en el tablero
     steps     abre el desglose de uno de los cuatro; otra vez, el del que sigue
     theme     vuelve a leer el color de acento del tema de omarchy
+    reload    vuelve a arrancar la isla con el código de su carpeta, sin perder
+              las sesiones ni los chats; con un turno en curso, al acabar
     glass     prende o apaga el modo vidrio
     allow     permite lo que pide el permiso que la isla tiene a la vista
     deny      lo deniega, y corta el turno como el No de la terminal
@@ -25,17 +30,26 @@ import os
 import socket
 import sys
 
-ORDERS = ('open', 'chat', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'glass', 'allow', 'deny',
-          'status', 'toggle')
-REPLIES = ('allow', 'deny', 'status')    # las que esperan a que elyares-engineer conteste
+ORDERS = ('open', 'chat', 'projects', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload', 'glass',
+          'allow', 'deny', 'status', 'toggle')
+REPLIES = ('allow', 'deny', 'status', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
 AGENTS = ('engineer', 'architect', 'auditor', 'reviewer')
 STATES = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
 
 
 def main():
-    order = sys.argv[1] if len(sys.argv) > 1 else ''
-    source = sys.argv[2] if len(sys.argv) > 2 else ''
+    args = sys.argv[1:]
+    folder = None
+    if '--dir' in args:
+        at = args.index('--dir')
+        folder = os.path.abspath(args[at + 1]) if at + 1 < len(args) else ''
+        del args[at:at + 2]
+    order = args[0] if args else ''
+    source = args[1] if len(args) > 1 else ''
+    if folder is not None and (order != 'chat' or not os.path.isdir(folder)):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
     if order not in ORDERS or (order == 'toggle' and source not in SOURCES) or (
             order == 'chat' and source and source not in AGENTS):
         print(__doc__.strip(), file=sys.stderr)
@@ -45,6 +59,8 @@ def main():
         msg['source'] = source
     if order == 'chat' and source:
         msg['agent'] = source
+    if folder:
+        msg['cwd'] = folder
     if order in REPLIES:
         msg['reply'] = True
     path = os.path.join(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'),
@@ -56,7 +72,7 @@ def main():
             s.sendall((json.dumps(msg) + '\n').encode())
             if order not in REPLIES:
                 return 0
-            s.settimeout(2)
+            s.settimeout(25 if order == 'reload' else 2)    # antes de recargar comprueba que el código arranca
             data = b''
             while not data.endswith(b'\n'):
                 b = s.recv(4096)
@@ -70,6 +86,8 @@ def main():
     if order != 'status':
         if not answer.get('ok'):
             print(f"elyares-ctl: {answer.get('why') or 'elyares-engineer no contestó'}", file=sys.stderr)
+        elif answer.get('note'):
+            print(answer['note'])
         return 0 if answer.get('ok') else 1
     for src in answer.get('sources', []):
         print(f"{src['label']:<10}{STATES.get(src['state'], src['state']):<15}{src['note']}".rstrip())

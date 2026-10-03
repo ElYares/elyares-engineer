@@ -68,6 +68,8 @@ import html
 import math
 import os
 import random
+import subprocess
+import sys
 import threading
 import time
 
@@ -82,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, chatview, coffe, commands, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, settings, sources, state, store, testrun, theme)
+               preview, projectview, settings, sources, state, store, testrun, theme)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
 MAX_ROWS = 5          # filas de la lista de alertas, con la cabecera de siempre
@@ -105,6 +107,11 @@ TIP_COL_GAP = 16      # entre un comando y lo que hace
 TIP_HEAD_GAP = 15     # aire sobre el título de un bloque de comandos, con una raya en medio
 TIP_LINES = 3         # líneas propias que puede traer una fuente
 CHAT_PILL = 'chat'    # la pastilla del pie que abre el chat
+# `elyares-ctl reload`: la isla se vuelve a arrancar con el código de su carpeta.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LAUNCHER = os.path.join(ROOT, 'bin', 'elyares-engineer')
+UNIT = 'elyares-engineer.service'
+RELOAD_MS = 1200      # lo que espera tras el último turno: que llegue su aviso y su cuenta de contexto
 # `elyares-ctl chat <quién>`: el chat de ese de la familia.
 AGENT_NAMES = {role: ('' if role == 'engineer' else name) for role, name in state.ROLE_AGENTS.items()}
 TIP_ITEMS = 5         # cosas que nombra una por una (los PRs de GitHub); de las demás dice cuántas
@@ -234,7 +241,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView):
+class Island(chatview.ChatView, projectview.ProjectView):
     def __init__(self, app):
         self.model = Model()
         self.model.restore(store.load())
@@ -280,7 +287,10 @@ class Island(chatview.ChatView):
         self.list_layout = False        # la cabecera se queda arriba mientras hay lista
         self.wrap = (None, 0)           # (detalle, alto de más que pide entero)
         self.pills = []                 # (fuente, x, y, ancho, alto), del último dibujo
+        self.projects_init()
         self.chat_init()
+        self.chat_restore(store.load_chats())
+        self.reloading = False          # se pidió volver a arrancar: en cuanto no haya turnos en curso
         self.tip = None                 # (fuente, centro, opacidad) de la pastilla bajo el cursor
         self.tip_key = None
         self.tip_ref = []               # los comandos de la burbuja que se está viendo
@@ -447,6 +457,7 @@ class Island(chatview.ChatView):
     def on_second(self):
         self.seconds += 1
         self.chat_tick(time.monotonic())
+        self.projects_tick(self.seconds)
         if self.seconds % REAP_SECS == 0:
             # Las sesiones sin pane (las de segundo plano) no tienen otra
             # forma de irse si se cierran sin avisar.
@@ -477,7 +488,9 @@ class Island(chatview.ChatView):
             self.title, self.detail = 'Sin sesiones activas', f'{len(v.others)} en reposo'
             self.agent_name = ''
         elif self.expanded:
-            self.title, self.detail, self.agent_name = 'Sin sesiones', 'Nada corriendo ahora', ''
+            # Sin nada: si estás en un proyecto en tmux, se ofrece empezar ahí.
+            self.title, self.agent_name = 'Sin sesiones', ''
+            self.detail = self.start_text() or 'Nada corriendo ahora'
         self.follow(v)
         changed = v.mode != self.view.mode or v.key != self.view.key
         if v.key != self.view.key:
@@ -649,10 +662,18 @@ class Island(chatview.ChatView):
             self.settings['glass'] = not self.settings['glass']
             settings.save(self.settings)
             self.ensure_tick()
+        elif order == 'reload':
+            answer = self.reload()
+            if req:
+                req.reply(answer)
+        elif order == 'projects':
+            self.toggle_projects()
         elif order == 'chat':
-            agent = (msg or {}).get('agent')
-            if agent in AGENT_NAMES:
-                self.open_chat(typing=True, agent=AGENT_NAMES[agent])
+            agent, cwd = (msg or {}).get('agent'), (msg or {}).get('cwd')
+            cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else None
+            if agent in AGENT_NAMES or cwd:
+                # Con quién o dónde: se abre ahí, no se alterna.
+                self.open_chat(typing=True, agent=AGENT_NAMES.get(agent), cwd=cwd)
             else:
                 self.toggle_chat()
         elif order in ('tab', 'steps'):
@@ -673,6 +694,66 @@ class Island(chatview.ChatView):
             else:
                 self.off = False
                 self.expand(PREVIEW_OPEN_SECS if self.preview() else KEY_OPEN_SECS)
+
+    # ── volver a arrancar con el código de la carpeta ───────────────────────
+
+    def reload(self):
+        """`elyares-ctl reload`: la isla se vuelve a arrancar para tomar los
+        cambios de su carpeta, sin perder las sesiones ni las conversaciones
+        del chat. Con un turno en curso en algún chat, espera a que acabe:
+        quien lo pide suele ser ese mismo Claude. Si el código no arranca, no
+        lo hace y dice por qué. Devuelve lo que se le contesta a elyares-ctl."""
+        why = self.reload_check()
+        if why:
+            return {'ok': False, 'why': f'no se recarga, el código no arranca: {why}'}
+        self.reloading = True
+        if self.chat_busy():
+            return {'ok': True, 'note': 'la isla se recarga al acabar el turno en curso'}
+        self.reload_soon()
+        return {'ok': True, 'note': 'la isla se recarga ya'}
+
+    @staticmethod
+    def reload_check():
+        """¿Arranca el código que hay en la carpeta? '' si sí; si no, la
+        última línea del error. Una isla rota no se levanta sola."""
+        try:
+            run = subprocess.run([sys.executable, '-c', 'import elyares.app'], cwd=ROOT,
+                                 capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError) as e:
+            return str(e)
+        lines = run.stderr.strip().splitlines()
+        return '' if run.returncode == 0 else (lines[-1] if lines else f'código {run.returncode}')
+
+    def reload_soon(self):
+        if self.reloading and not self.chat_busy():
+            GLib.timeout_add(RELOAD_MS, self.reload_now)
+
+    def reload_now(self):
+        if not self.reloading or self.chat_busy():
+            return GLib.SOURCE_REMOVE   # empezó otro turno: al acabar ese
+        self.reloading = False
+        store.save(self.model.dump())
+        self.chat_shutdown()
+        try:
+            if self.is_service():
+                # systemd la vuelve a arrancar limpia, sin hijos sueltos.
+                subprocess.Popen(['systemctl', '--user', '--no-block', 'restart', UNIT])
+            else:
+                # A mano: el mismo proceso, desde su lanzador (que precarga layer-shell).
+                os.execv(LAUNCHER, [LAUNCHER])
+        except OSError:
+            pass
+        return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def is_service():
+        """¿Es esta la isla que lleva systemd?"""
+        try:
+            pid = subprocess.run(['systemctl', '--user', 'show', '-p', 'MainPID', '--value', UNIT],
+                                 capture_output=True, text=True, timeout=3).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return pid == str(os.getpid())
 
     def answer(self, allow, peer=None, now=None):
         """Contesta con el teclado el permiso que está a la vista. Devuelve por
@@ -945,6 +1026,8 @@ class Island(chatview.ChatView):
         if self.chat_open:
             # El chat ocupa la isla mientras está abierto, fijada o no.
             return 'chat'
+        if self.projects_open:
+            return 'projects'
         mode = self.view.mode
         if self.expanded:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
@@ -1033,6 +1116,8 @@ class Island(chatview.ChatView):
         mode = self.target()
         if mode == 'chat':
             return chatview.CHAT_W, chatview.CHAT_H
+        if mode == 'projects':
+            return self.projects_goal()
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
@@ -1251,6 +1336,16 @@ class Island(chatview.ChatView):
                 cr.stroke()
             self.chat_place(h)
             return
+        if mode == 'projects':
+            self.draw_projects(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 90) / 60))
+            cr.restore()
+            if edge:
+                cr.append_path(edge)
+                cr.set_source_rgba(1, 1, 1, GLASS_EDGE)
+                cr.set_line_width(1)
+                cr.stroke()
+            self.chat_place(h)
+            return
         if mode == 'board':
             full_h = h
             text_alpha = clamp((w - 420) / 120) * clamp((h - 110) / 60)
@@ -1352,6 +1447,9 @@ class Island(chatview.ChatView):
                                   DETAIL_LINES if extra else 1, self.markup(self.detail))
             cr.move_to(tx, mid + 3)
             self._show(cr, detail, text_alpha)
+            start = self.project_start() if self.detail == self.start_text() else None
+            if start is not None:
+                self.hits.append(('start', start.path, tx, mid - 21, right - tx, 44))
         if ask_alpha > 0 and text_alpha > 0:
             self.draw_buttons(cr, x0 + w - 18, full_h - 14, ask_alpha * text_alpha)
         return full_h, head, text_alpha
@@ -1482,14 +1580,17 @@ class Island(chatview.ChatView):
         right = x0 + w - 18
         notes = [('fijada', rgb('accent'))] if self.settings['pinned'] else []
         if current.context >= CONTEXT_SHOW:
-            notes.append((f'{current.context:.0f}%',
+            notes.append((f'contexto {current.context:.0f}%',
                           rgb(self.colors[paint.context_role(current.context)])))
         for text, color in notes:
             right -= self.put(cr, text, FONT_DETAIL, right, 10, color, alpha, align=1) + 12
         tabs, labels = self.tabs(), self.tab_labels()
         x, y, th = x0 + 12, 6, 24
+        # Si estás en tmux en un proyecto sin ningún Claude, al final va su
+        # pestaña fantasma: un clic empieza ahí.
+        start = self.project_start()
         # Si no caben, se reparten el sitio y el nombre se corta.
-        room = max(40, (right - x) / len(tabs) - 4)
+        room = max(40, (right - x) / (len(tabs) + (start is not None)) - 4)
         for s in tabs:
             label = self._layout(cr, labels[s.sid], FONT_ROW, room - 28)
             lw, lh = label.get_pixel_size()
@@ -1514,6 +1615,23 @@ class Island(chatview.ChatView):
             PangoCairo.show_layout(cr, label)
             self.hits.append(('tab', s.sid, x, y, tw, th))
             x += tw + 4
+        if start is not None:
+            label = self._layout(cr, f'+ {start.name}', FONT_ROW, room - 20)
+            lw, lh = label.get_pixel_size()
+            tw = lw + 20
+            over = self.over(x, y, tw, th)
+            mascot.rrect(cr, x + .5, y + .5, tw - 1, th - 1, th / 2)
+            cr.set_source_rgba(1, 1, 1, (.10 if over else 0) * alpha)
+            cr.fill_preserve()
+            cr.set_dash([3, 3])
+            cr.set_line_width(1)
+            cr.set_source_rgba(1, 1, 1, (.45 if over else .22) * alpha)
+            cr.stroke()
+            cr.set_dash([])
+            cr.move_to(x + 10, y + (th - lh) / 2)
+            cr.set_source_rgba(*(TITLE_COLOR if over else MUTED_COLOR)[:3], alpha)
+            PangoCairo.show_layout(cr, label)
+            self.hits.append(('start', start.path, x, y, tw, th))
 
     def draw_member(self, cr, s, member, x, y, cw, ch, alpha, now):
         """Uno de los cuatro en su tarjeta: su cara con el gesto de cómo está,
@@ -1657,8 +1775,9 @@ class Island(chatview.ChatView):
         # ya tiene aquí su mini chat, para leer lo que contestó.
         agent = '' if role == MAIN_ROLE else state.ROLE_AGENTS[role]
         talk = 'ver su chat ›' if agent else 'hablarle ›'
-        links = ([('jump', s.sid, 'ir al pane ›')] if s.pane else []) + [('talk', agent, talk),
-                                                                        ('back', None, '‹ volver')]
+        # Una sesión del chat no tiene pane: va a la sesión de tmux de su proyecto.
+        jump = 'ir al pane ›' if s.pane else 'ir a su tmux ›' if s.sid in self.chat_sessions else ''
+        links = ([('jump', s.sid, jump)] if jump else []) + [('talk', agent, talk), ('back', None, '‹ volver')]
         step = 24 if len(links) < 3 else 20
         for i, (kind, key, label) in enumerate(reversed(links)):
             ly = y + h - 32 - i * step
@@ -1918,6 +2037,19 @@ class Island(chatview.ChatView):
         cr.move_to(cx + (cpw - cw) / 2, y + (PILL_H - ch) / 2)
         cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
         PangoCairo.show_layout(cr, chat)
+        # Y, antes, la de los proyectos, para empezar en cualquiera.
+        plus = self._layout(cr, '+', FONT_PILL)
+        qw, qh = plus.get_pixel_size()
+        qpw = qw + 16
+        qx = cx - PILL_GAP - qpw
+        over_plus = qx <= px <= qx + qpw and y <= py <= y + PILL_H
+        mascot.rrect(cr, qx, y, qpw, PILL_H, PILL_H / 2)
+        cr.set_source_rgba(1, 1, 1, (.13 if over_plus else .07) * alpha)
+        cr.fill()
+        cr.move_to(qx + (qpw - qw) / 2, y + (PILL_H - qh) / 2)
+        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+        PangoCairo.show_layout(cr, plus)
+        self.pills.append((projectview.PROJECTS_PILL, qx, y, qpw, PILL_H))
         self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
@@ -2325,6 +2457,8 @@ class Island(chatview.ChatView):
                     self.toggle_source(key)
                 elif key == CHAT_PILL:
                     self.open_chat(typing=True)
+                elif key == projectview.PROJECTS_PILL:
+                    self.toggle_projects()
                 return
         for s, ry, rh in self.rows:
             if ry <= y < ry + rh:
@@ -2341,7 +2475,7 @@ class Island(chatview.ChatView):
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.target() in ('board', 'chat') or (self.rows and y > self.rows[0][1]):
+        if self.target() in ('board', 'chat', 'projects') or (self.rows and y > self.rows[0][1]):
             return
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -2350,7 +2484,11 @@ class Island(chatview.ChatView):
 
     def on_hit(self, kind, key):
         """Un clic en el tablero: en una pestaña, en uno de los cuatro, en los
-        enlaces de un desglose o en su mini chat. O en el chat."""
+        enlaces de un desglose o en su mini chat. O en el chat, o en el panel
+        de proyectos y sus atajos para empezar en uno."""
+        if kind in ('project', 'projects', 'start'):
+            self.on_project_hit(kind, key)
+            return
         if kind == 'chat':
             self.on_chat_hit(key)
             return
@@ -2378,7 +2516,9 @@ class Island(chatview.ChatView):
                 self.go(s)
             return
         elif kind == 'talk':
-            self.open_chat(typing=True, agent=key)
+            # Desde un desglose: su conversación del proyecto de esa pestaña.
+            s = self.tab_session()
+            self.open_chat(typing=True, agent=key, cwd=s.cwd if s is not None else None)
             return
         self.ensure_tick()
 
@@ -2402,8 +2542,7 @@ class Island(chatview.ChatView):
                 self.collapse()
                 threading.Thread(target=actions.jump, args=(s,), daemon=True).start()
             elif action.get('chat'):
-                agent = action['chat']
-                self.open_chat(typing=True, agent=agent if isinstance(agent, str) else '')
+                self.chat_show(action['chat'])
             else:
                 threading.Thread(target=actions.run, args=(action,), daemon=True).start()
             if action.get('after'):

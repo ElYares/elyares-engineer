@@ -6,6 +6,8 @@ con otro python estas pruebas se saltan. No abre ninguna ventana: la isla se
 arma con `Island.__new__` y solo lo que cada prueba usa.
 """
 
+import json
+import os
 import threading
 import time
 import unittest
@@ -56,12 +58,18 @@ class IslandCase(unittest.TestCase):
         isl.collapse_id = 0
         isl.check_panes = lambda: None
         isl.monitor = None
+        isl.projects_init()
         isl.chat_init()
+        isl.reloading = False
         # Ninguna prueba le pregunta a Hyprland de verdad.
         for name, value in (('focused_monitor', None), ('monitors', [])):
             hypr = mock.patch.object(app.hypr, name, lambda value=value: value)
             hypr.start()
             self.addCleanup(hypr.stop)
+        # Ninguna prueba toca las conversaciones guardadas de verdad.
+        chats = mock.patch.object(app.store, 'save_chats')
+        self.save_chats = chats.start()
+        self.addCleanup(chats.stop)
         # Ninguna prueba toca las preferencias de verdad.
         saver = mock.patch.object(app.settings, 'save')
         self.saved = saver.start()
@@ -280,7 +288,8 @@ class Consulta(IslandCase):
         width = app.SIZES['open'][0]
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
         keys = [key for key, *_ in self.isl.pills]
-        self.assertEqual(keys, [key for key, _ in sources.SOURCES] + [app.CHAT_PILL, commands.HELP])
+        self.assertEqual(keys, [key for key, _ in sources.SOURCES]
+                         + [app.projectview.PROJECTS_PILL, app.CHAT_PILL, commands.HELP])
         for (_, x, _, w, _), (_, nx, *_) in zip(self.isl.pills, self.isl.pills[1:]):
             self.assertLessEqual(x + w, nx)
         self.assertLessEqual(self.isl.pills[-1][1] + self.isl.pills[-1][3], 100 + width - 18)
@@ -730,9 +739,14 @@ class Chat(Dibujo):
 
     def setUp(self):
         super().setUp()
-        patcher = mock.patch.object(app.chatview.chat, 'active_cwd', lambda: '/x/proj')
+        self.tmux_cwd = '/x/proj'           # la carpeta de la sesión de tmux en la que se está
+        patcher = mock.patch.object(app.chatview.chat, 'active_cwd', lambda default=None: self.tmux_cwd)
         patcher.start()
         self.addCleanup(patcher.stop)
+        P = app.projectview.projects.Project
+        self.isl.projects = [P('proj', '/x/proj', 'personal', 'proj', 50, key='proj'),
+                             P('aang-server', '/x/aang', 'work', key='aang-server'),
+                             P('tl-mas-server', '/x/tl', 'work', 'tl-mas-server', 90, True, key='tl-mas-server')]
         self.isl.ensure_tick = lambda: None
         self.isl.expand = mock.Mock()
 
@@ -740,7 +754,7 @@ class Chat(Dibujo):
         c = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock())
         c.commands = {'contexto': 'Carga el contexto', 'commit': 'Hace los commits', 'compact': ''}
         E = app.chatview.chat.Entry
-        c.entries = [E('you', 'haz /contexto'), E('tool', 'Leyendo docs/INDEX.md'),
+        c.entries = [E('you', 'haz /contexto'),
                      E('claude', '## Listo\n- **tl-mas-server** en `sprint-021026`')]
         self.isl.chat, self.isl.chat_open = c, True
         return c
@@ -777,7 +791,7 @@ class Chat(Dibujo):
     def test_se_dibuja_la_conversacion(self):
         self.conversation()
         self.draw()
-        for text in ('haz /contexto', '· Leyendo docs/INDEX.md', 'Listo', 'Cerrar', 'Nuevo'):
+        for text in ('haz /contexto', 'Listo', 'Cerrar', 'Nuevo'):
             self.assertIn(text, self.shown)
         self.assertEqual({k for _, k, *_ in self.isl.hits} >= {'close', 'new', 'type'}, True)
         self.assertIsNotNone(self.isl.chat_box)
@@ -858,15 +872,105 @@ class Chat(Dibujo):
         self.isl.on_chat_hit('agent:elyares-architect')
         self.isl.on_chat_hit('new')
         self.assertIsNot(self.isl.chat, architect)
-        self.assertIs(self.isl.chats[''], engineer)
+        self.assertIs(self.isl.chats['', '/x/proj'], engineer)
+
+    def test_cada_proyecto_tiene_su_conversacion_y_el_chat_sigue_a_tmux(self):
+        self.isl.on_control('chat')
+        proj = self.isl.chat
+        self.assertEqual(proj.cwd, '/x/proj')
+        proj.entries.append(app.chatview.chat.Entry('you', 'hola'))
+        self.isl.on_control('chat')                 # se cierra
+        # En tmux se pasa a otra sesión: el chat abre la conversación de ese proyecto.
+        self.tmux_cwd = '/x/tl'
+        self.isl.on_control('chat')
+        tl = self.isl.chat
+        self.assertEqual((tl.cwd, tl.entries), ('/x/tl', []))
+        self.assertIsNot(tl, proj)
+        # Con el panel abierto, cambiar de agente no cambia de proyecto.
+        self.tmux_cwd = '/x/otro'
+        self.isl.on_chat_hit('agent:elyares-auditor')
+        self.assertEqual((self.isl.chat.agent, self.isl.chat.cwd), ('elyares-auditor', '/x/tl'))
+        # De vuelta en el primero, su conversación sigue ahí; «Nuevo» solo empieza otra en ese.
+        self.isl.close_chat()
+        self.tmux_cwd = '/x/proj'
+        self.isl.on_control('chat', {'agent': 'engineer'})
+        self.assertIs(self.isl.chat, proj)
+        self.isl.on_chat_hit('new')
+        self.assertEqual((self.isl.chat.cwd, self.isl.chat.entries), ('/x/proj', []))
+        self.assertIs(self.isl.chats['', '/x/tl'], tl)
+        # Elegido otro con "#", ese se queda a la vista mientras no cambies de sesión en tmux.
+        self.isl.show_chat(tl)
+        self.isl.close_chat()
+        self.isl.on_control('chat')
+        self.assertIs(self.isl.chat, tl)
+        # Sin tmux, el último proyecto.
+        self.isl.close_chat()
+        with mock.patch.object(app.chatview.chat, 'active_cwd', lambda default=None: default):
+            self.isl.on_control('chat')             # se cierra
+            self.isl.on_control('chat')
+        self.assertEqual(self.isl.chat.cwd, '/x/tl')
+
+    def test_con_dir_se_abre_en_esa_carpeta(self):
+        with mock.patch.object(app.os.path, 'isdir', lambda path: path == '/x/aang'):
+            self.isl.on_control('chat', {'cwd': '/x/aang'})
+            self.assertEqual((self.isl.chat.agent, self.isl.chat.cwd), ('', '/x/aang'))
+            # No alterna: otra vez con otra carpeta, pasa a esa sin cerrar el panel.
+            self.isl.on_control('chat', {'cwd': '/no/existe'})
+        self.assertFalse(self.isl.chat_open)        # una carpeta que no existe es la orden de siempre
+
+    def test_la_almohadilla_elige_proyecto(self):
+        self.conversation()
+        self.isl.chats['', '/x/proj'] = self.isl.chat
+        self.isl.chat_whom = 'chat'             # la caja ya es del chat: lo escrito no se pierde
+        self.write('#')
+        # Los abiertos en tmux primero, el usado más recientemente arriba; luego los cerrados.
+        self.assertEqual(self.isl.suggestions(), [('tl-mas-server', '◆ work · /x/tl'),
+                                                  ('proj', '● personal · /x/proj · con conversación'),
+                                                  ('aang-server', '○ work · /x/aang')])
+        self.draw()
+        self.assertIn('#tl-mas-server', self.shown)
+        self.write('mira esto #aa')
+        self.assertEqual([n for n, _ in self.isl.suggestions()], ['aang-server'])
+        # Enter no escribe el nombre: pasa a la conversación de ese proyecto, con lo demás escrito.
+        self.isl.on_chat_enter()
+        self.isl.chat_set_text.assert_called_once_with('mira esto ', 10)
+        self.assertEqual((self.isl.chat.cwd, self.isl.chat_open, self.isl.chat_typing), ('/x/aang', True, True))
+        # Un clic en la carpeta de la cabecera pone la almohadilla en la caja.
+        self.write('hola')
+        self.isl.on_chat_hit('project')
+        self.isl.chat_set_text.assert_called_once_with('hola #')
+        self.draw()
+        self.assertIn('project', [key for kind, key, *_ in self.isl.hits if kind == 'chat'])
+
+    def test_la_que_no_se_usa_suelta_su_proceso(self):
+        sleep = app.chatview.CHAT_SLEEP_SECS
+        self.isl.on_control('chat')
+        seen = self.isl.chat
+        other = self.isl.chat_for('', '/x/tl')
+        busy = self.isl.chat_for('', '/x/aang')
+        for c in (seen, other, busy):
+            c.proc, c.touched, c.close = mock.Mock(poll=lambda: None), 100.0, mock.Mock()
+        busy.busy = True
+        self.isl.chat_tick(100.0 + sleep - 1)
+        other.close.assert_not_called()
+        self.isl.chat_tick(100.0 + sleep + 1)
+        other.close.assert_called_once_with()
+        seen.close.assert_not_called()              # la que se tiene a la vista
+        busy.close.assert_not_called()              # la que trabaja
+        self.isl.close_chat()
+        self.isl.chat_tick(100.0 + sleep + 2)
+        seen.close.assert_called_once_with()
 
     def test_con_la_orden_y_desde_el_tablero_se_le_habla_a_uno(self):
         self.isl.on_control('chat', {'control': 'chat', 'agent': 'reviewer'})
         self.assertEqual(self.isl.chat.agent, 'elyares-reviewer')
         self.isl.close_chat()
+        # Desde un desglose: su conversación del proyecto de esa pestaña, no el de tmux.
+        self.work('a')
+        self.isl.tab = 'a'
         self.isl.on_hit('talk', 'elyares-auditor')
         self.assertTrue(self.isl.chat_open)
-        self.assertEqual(self.isl.chat.agent, 'elyares-auditor')
+        self.assertEqual((self.isl.chat.agent, self.isl.chat.cwd), ('elyares-auditor', '/x/a'))
 
     def test_el_desglose_lleva_a_su_chat(self):
         self.isl.expanded = True
@@ -889,7 +993,7 @@ class Chat(Dibujo):
         self.isl.on_hit('brief', ('a', role))
         self.isl.chat_text = lambda: text
         self.isl.on_chat_enter()
-        return self.isl.chats.get(f'elyares-{role}')
+        return self.isl.chats.get((f'elyares-{role}', '/x/a'))
 
     def sending(self):
         """Mandar sin abrir ningún Claude: el turno queda en curso."""
@@ -942,7 +1046,7 @@ class Chat(Dibujo):
         send.assert_called_once_with(c, 'audita el diff', [])
         # En la carpeta de la pestaña, y de vuelta al tablero, sin el teclado.
         self.assertEqual((c.agent, c.cwd), ('elyares-auditor', '/x/a'))
-        self.assertEqual(self.isl.chat_hosts, {'elyares-auditor': 'a'})
+        self.assertEqual(self.isl.chat_hosts, {('elyares-auditor', '/x/a'): 'a'})
         self.assertEqual((self.isl.focus, self.isl.chat_typing, self.isl.chat_open), (None, False, False))
         # Aún sin noticias de Claude ya sale trabajando, al lado del engineer.
         self.draw()
@@ -1003,28 +1107,27 @@ class Chat(Dibujo):
         self.assertEqual([s.sid for s in self.isl.tabs()], ['s-aud'])
         self.assertEqual(self.isl.tab_session().sid, 's-aud')
 
-    def test_ocupado_en_otro_proyecto_no_se_le_encarga_aqui(self):
+    def test_ocupado_en_un_proyecto_se_le_encarga_tambien_en_otro(self):
         send = self.sending()
         self.work('a')
         self.work('b')
         self.isl.tab = 'a'
         c = self.brief()
-        # Desde la pestaña de otro proyecto, mientras sigue con lo de este.
+        # Desde la pestaña de otro proyecto, mientras sigue con lo de este:
+        # ahí tiene otra conversación, y trabaja en las dos a la vez.
         self.isl.tab = 'b'
         self.draw()
         self.isl.on_hit('brief', ('b', 'auditor'))
         self.isl.on_chat_enter()
-        self.assertEqual(send.call_count, 1)
-        self.assertEqual(self.isl.chat_hosts, {'elyares-auditor': 'a'})
-        self.draw()
-        self.assertIn('ocupado en a: aquí, cuando acabe', self.shown)
-        # Cuando acaba, sí: con una conversación nueva en la carpeta de aquí.
-        c.busy, c.close = False, mock.Mock()
-        self.isl.on_chat_enter()
-        other = self.isl.chats['elyares-auditor']
+        self.assertEqual(send.call_count, 2)
+        other = self.isl.chats['elyares-auditor', '/x/b']
         self.assertIsNot(other, c)
-        c.close.assert_called_once_with()
-        self.assertEqual((other.cwd, self.isl.chat_hosts), ('/x/b', {'elyares-auditor': 'b'}))
+        self.assertTrue(c.busy and other.busy)
+        self.assertEqual(self.isl.chat_hosts, {('elyares-auditor', '/x/a'): 'a', ('elyares-auditor', '/x/b'): 'b'})
+        for tab in ('a', 'b'):
+            self.isl.tab = tab
+            self.draw()
+            self.assertEqual(self.hit('member'), [(tab, 'engineer'), (tab, 'auditor')])
 
     def test_lo_escrito_para_uno_no_se_le_manda_a_otro(self):
         self.work('a')
@@ -1100,6 +1203,324 @@ class Chat(Dibujo):
         # Con espacio ya no es un comando a medias.
         self.isl.chat_text = lambda: '/commit ahora'
         self.assertEqual(self.isl.suggestions(), [])
+
+    def write(self, text, cursor=None):
+        """Lo escrito en la caja, con el cursor en `cursor` (o al final)."""
+        self.isl.chat_text = lambda: text
+        self.isl.chat_cursor = lambda: len(text) if cursor is None else cursor
+        self.isl.chat_set_text = mock.Mock()
+
+    def test_la_barra_vale_con_texto_antes_y_despues(self):
+        self.conversation()
+        self.write('sube los cambios con /co')
+        self.assertEqual([n for n, _ in self.isl.suggestions()], ['commit', 'compact', 'contexto'])
+        # Enter elige de la lista, y lo de antes se queda como estaba.
+        self.isl.on_chat_enter()
+        self.isl.chat_set_text.assert_called_once_with('sube los cambios con /commit ', 29)
+        # Con el cursor en medio del texto, lo de después tampoco se toca.
+        self.write('primero /con y luego el PR', cursor=12)
+        self.assertEqual([n for n, _ in self.isl.suggestions()], ['contexto'])
+        self.isl.complete('contexto')
+        self.isl.chat_set_text.assert_called_once_with('primero /contexto y luego el PR', 18)
+        # Una ruta o una fracción no son un comando.
+        for text in ('abre /home/yared/notas', 'y/o', 'el 10/02'):
+            self.write(text)
+            self.assertEqual(self.isl.suggestions(), [], text)
+
+    def test_el_comando_ya_escrito_se_manda_con_enter(self):
+        c = self.conversation()
+        c.send = mock.Mock(return_value=True)
+        self.write('luego corre /commit')
+        self.isl.on_chat_enter()
+        c.send.assert_called_once_with('luego corre /commit', [])
+
+    def test_la_arroba_nombra_agentes_y_archivos(self):
+        c = self.conversation()
+        c.files, c.files_at = ['elyares/chat.py', 'README.md'], float('inf')
+        self.write('que lo revise @rev')
+        self.assertEqual(self.isl.suggestions(), [('elyares-reviewer', 'agente')])
+        self.draw()
+        self.assertIn('@elyares-reviewer', self.shown)
+        self.isl.on_chat_hit('@elyares-reviewer')
+        self.isl.chat_set_text.assert_called_once_with('que lo revise @elyares-reviewer ', 32)
+        self.write('mira @chat y dime')
+        self.isl.chat_cursor = lambda: 10
+        self.assertEqual(self.isl.suggestions(), [('elyares/chat.py', '')])
+        # Un correo no nombra a nadie.
+        self.write('escríbele a yared@ejemplo.mx')
+        self.assertEqual(self.isl.suggestions(), [])
+
+    def test_las_conversaciones_vuelven_al_arrancar_la_isla(self):
+        c = self.isl.chats['', '/x/proj'] = self.conversation()
+        c.session, c.tokens, c.window = 's-chat', 88000, 1000000
+        self.send('start', 's-chat', cwd='/x/proj')
+        aud = self.isl.chat_for('elyares-auditor', '/x/proj')
+        aud.session = 's-aud'
+        tl = self.isl.chat_for('', '/x/tl')
+        tl.session = 's-tl'
+        self.isl.chat_hosts = {('elyares-auditor', '/x/proj'): 's-chat', ('elyares-reviewer', '/x/proj'): 's-ido'}
+        self.isl.chat_save()
+        saved = self.save_chats.call_args[0][0]
+        self.isl.chat_save()
+        self.save_chats.assert_called_once()        # sin cambios no se vuelve a escribir
+        # Otra isla, recién arrancada, con las mismas sesiones.
+        other = app.Island.__new__(app.Island)
+        other.model, other.settings = self.isl.model, self.isl.settings
+        other.chat_init()
+        other.chat_restore(json.loads(json.dumps(saved)))
+        self.assertEqual(sorted(other.chats), [('', '/x/proj'), ('', '/x/tl'), ('elyares-auditor', '/x/proj')])
+        back = other.chat
+        self.assertEqual((back.agent, back.cwd, back.session, back.context), ('', '/x/proj', 's-chat', 8.8))
+        self.assertEqual([(e.kind, e.text) for e in back.entries], [(e.kind, e.text) for e in c.entries])
+        self.assertIsNone(back.proc)
+        self.assertTrue(other.chat_open)                        # estaba abierto: sigue abierto
+        self.assertFalse(other.chat_typing)                     # pero sin tomar el teclado
+        self.assertEqual(other.chat_sessions, {'s-chat', 's-aud', 's-tl'})
+        # El otro encargo ya no tiene a quién.
+        self.assertEqual(other.chat_hosts, {('elyares-auditor', '/x/proj'): 's-chat'})
+        # Lo que se guardó cuando había una sola conversación por agente se sigue leyendo.
+        old = {'chats': [c.dump(), aud.dump()], 'current': '', 'open': False, 'hosts': {'elyares-auditor': 's-chat'}}
+        other.chat_init()
+        other.chat_restore(json.loads(json.dumps(old)))
+        self.assertEqual((other.chat.session, other.chat_open), ('s-chat', False))
+        # Recién arrancada sigue en la conversación que tenía, aunque tmux esté en otro proyecto...
+        self.tmux_cwd = '/x/tl'
+        other.chat_init()
+        other.chat_restore(json.loads(json.dumps(old)))
+        other.ensure_tick = other.chat_type = lambda *a: None
+        other.open_chat()
+        self.assertEqual(other.chat.session, 's-chat')
+        # ...y un aviso viejo, que no dice de qué conversación es, abre esa.
+        other.close_chat()
+        other.chat_show(True)
+        self.assertEqual(other.chat.session, 's-chat')
+        self.assertEqual(other.chat_hosts, {('elyares-auditor', '/x/proj'): 's-chat'})
+        # Lo guardado a medias o roto no tumba el arranque.
+        for bad in ({}, {'chats': 'x', 'hosts': []}, {'chats': [{}, 3, {'cwd': 7}], 'current': 9}):
+            other.chat_init()
+            other.chat_restore(bad)
+            self.assertEqual((other.chats, other.chat, other.chat_open), ({}, None, False))
+
+    def test_el_contexto_sale_en_la_linea_de_estado_y_en_el_tablero(self):
+        c = self.conversation()
+        self.draw()
+        self.assertFalse([t for t in self.shown if t.startswith('contexto')])
+        c.session = 's-chat'
+        self.send('start', 's-chat', cwd='/x/proj')
+        self.isl.on_chat({'type': 'control_response', 'response': {
+            'subtype': 'success', 'response': {'totalTokens': 88000, 'maxTokens': 1000000}}})
+        self.draw()
+        self.assertIn('contexto 9% · 88k', self.shown)
+        # A la sesión del tablero, que lo muestra junto a sus pestañas.
+        self.assertAlmostEqual(self.isl.model.sessions['s-chat'].context, 8.8)
+        self.isl.close_chat()
+        self.isl.expanded, self.isl.tab = True, 's-chat'
+        self.draw()
+        self.assertIn('contexto 9%', self.shown)
+
+
+@unittest.skipIf(app is None, 'sin gi: usa /usr/bin/python3')
+class Proyectos(Dibujo):
+    """El panel de proyectos y los atajos para empezar en uno sin abrir `claude` en una terminal."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(app.chatview.chat, 'active_cwd', lambda default=None: '/d/work/tl')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.isl.ensure_tick = lambda: None
+        self.isl.close_chat = mock.Mock()
+        P = app.projectview.projects.Project
+        self.isl.projects = [P('patio', '/d/clients/patio', 'clients', key='patio'),
+                             P('devherd', '/d/personal/devherd', 'personal', 'devherd', 10, key='devherd'),
+                             P('sonda', '/d/personal/sonda', 'personal', key='sonda'),
+                             P('aang', '/d/work/aang', 'work', 'aang', 20, key='aang'),
+                             P('tl', '/d/work/tl', 'work', 'tl', 90, True, key='tl'),
+                             P('main', '/home/yo', '', 'main', 5, key='main')]
+
+    def rows(self):
+        return [(kind, value if kind == 'h' else value.name, count) for kind, value, count in self.isl.project_items()]
+
+    def test_el_panel_es_el_sidebar_de_tmux(self):
+        self.isl.on_control('projects')
+        self.assertEqual(self.isl.target(), 'projects')
+        # Solo lo abierto, por workspace, con abiertos/total; las sueltas al final.
+        self.assertEqual(self.rows(), [('h', 'personal', '1/2'), ('p', 'devherd', None),
+                                       ('h', 'work', '2/2'), ('p', 'aang', None), ('p', 'tl', None),
+                                       ('h', 'otras', ''), ('p', 'main', None)])
+        self.draw()
+        for text in ('Proyectos', '4 abiertos en tmux, de 6', 'todos ›', 'personal', '1/2', 'devherd', 'tl'):
+            self.assertIn(text, self.shown)
+        self.assertNotIn('sonda', self.shown)
+        # «todos ›», como ctrl-t en el sidebar: también los cerrados.
+        self.isl.on_hit('projects', 'all')
+        self.assertEqual(self.rows()[:2], [('h', 'clients', '0/1'), ('p', 'patio', None)])
+        self.draw()
+        self.assertIn('sonda', self.shown)
+        self.assertIn('solo abiertos ›', self.shown)
+        self.assertEqual(self.isl.goal()[0], app.projectview.PROJ_W)
+        self.isl.on_control('projects')
+        self.assertFalse(self.isl.projects_open)
+
+    def test_un_clic_en_un_proyecto_abre_su_chat(self):
+        self.isl.open_chat = mock.Mock()
+        self.isl.on_control('projects')
+        self.isl.projects_all = True
+        self.draw()
+        key, x, y, w, h = next((k, x, y, w, h) for kind, k, x, y, w, h in self.isl.hits
+                               if kind == 'project' and k == '/d/personal/sonda')
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.isl.open_chat.assert_called_once_with(typing=True, cwd='/d/personal/sonda')
+        self.assertFalse(self.isl.projects_open)
+
+    def test_dice_como_va_el_claude_de_cada_uno(self):
+        self.send('start', 's1', cwd='/d/work/aang/app')
+        self.send('tool', 's1', cwd='/d/work/aang/app', tool_name='Bash', tool_input={'command': 'make'})
+        self.isl.chats['', '/d/personal/sonda'] = app.chatview.chat.Chat('/d/personal/sonda', None)
+        self.isl.chats['', '/d/personal/sonda'].session = 's-viejo'
+        by = {p.name: p for p in self.isl.projects}
+        self.assertEqual(self.isl.project_claude(by['aang']), ('trabaja', 'cmd'))
+        self.assertEqual(self.isl.project_claude(by['sonda']), ('chat', 'text'))
+        self.assertIsNone(self.isl.project_claude(by['tl']))
+        # Cerrado en tmux pero con conversación: sale aunque solo se vean los abiertos.
+        self.assertIn(('p', 'sonda', None), self.rows())
+        # Una sesión de tmux abierta en la carpeta personal no se queda con lo de los demás...
+        self.isl.projects[-1].path = '/d'
+        self.assertIsNone(self.isl.project_claude(by['main']))
+        self.assertEqual(self.isl.project_claude(by['aang']), ('trabaja', 'cmd'))
+        # ...pero sí con lo que corre en ella y no es de ningún proyecto.
+        self.send('start', 's9', cwd='/d/notas')
+        self.assertEqual(self.isl.project_claude(by['main']), ('trabaja', 'cmd'))
+
+    def test_muchos_proyectos_caben_en_sus_columnas(self):
+        P = app.projectview.projects.Project
+        self.isl.projects = [P(f'p{i:02}', f'/d/w{i % 7}/p{i:02}', f'w{i % 7}', 's', key=f'p{i:02}') for i in range(70)]
+        self.isl.projects.sort(key=lambda p: (p.ws, p.name))
+        columns, per = self.isl.project_columns()
+        self.assertEqual(sum(len(c) for c in columns), 77)
+        self.assertEqual(len(columns), app.projectview.PROJ_COLS)
+        self.assertFalse([c for c in columns if c[-1][0] == 'h'])       # ninguna cabecera sola al pie
+        self.assertLessEqual(self.isl.projects_goal()[1], app.projectview.PROJ_MAX_H)
+        self.isl.projects_open = True
+        self.assertTrue(self.draw())
+
+    def test_en_el_tablero_la_pestana_fantasma_de_donde_estas(self):
+        self.isl.open_chat = mock.Mock()
+        self.isl.expanded = True
+        self.work('s1')                                 # una sesión de otro proyecto (/x/s1)
+        self.draw()
+        self.assertIn('+ tl', self.shown)
+        self.assertEqual(self.hit('start'), ['/d/work/tl'])
+        self.isl.on_hit('start', '/d/work/tl')
+        self.isl.open_chat.assert_called_once_with(typing=True, cwd='/d/work/tl')
+        # Cuando ese proyecto ya tiene un Claude, la fantasma sobra.
+        self.send('start', 's2', cwd='/d/work/tl')
+        self.draw()
+        self.assertNotIn('+ tl', self.shown)
+        self.assertEqual(self.hit('start'), [])
+
+    def test_sin_sesiones_la_cabecera_ofrece_empezar_donde_estas(self):
+        self.isl.expanded, self.isl.dnd = True, False
+        self.isl.extra = lambda mode: 0             # sin pantalla no se mide el detalle
+        self.isl.refresh = app.Island.refresh.__get__(self.isl)
+        with mock.patch.object(app.store, 'save'):
+            self.isl.saved = None
+            self.isl.refresh()
+            self.assertEqual((self.isl.title, self.isl.detail), ('Sin sesiones', 'Estás en tl · empezar ›'))
+            self.draw()
+            self.assertEqual(self.hit('start'), ['/d/work/tl'])
+            # Fuera de tmux no hay nada que ofrecer.
+            self.isl.projects[4].here = False
+            self.isl.refresh()
+        self.assertEqual(self.isl.detail, 'Nada corriendo ahora')
+
+    def test_la_pastilla_mas_abre_el_panel(self):
+        self.isl.expanded = True
+        self.draw()
+        key, x, y, w, h = next(p for p in self.isl.pills if p[0] == app.projectview.PROJECTS_PILL)
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.assertTrue(self.isl.projects_open)
+
+    def test_la_lista_se_refresca_sola_sin_frenar_la_isla(self):
+        self.isl.refresh = mock.Mock()
+        found = list(self.isl.projects)
+        self.isl.on_projects(found)
+        self.isl.refresh.assert_not_called()            # igual que antes: nada que redibujar
+        self.isl.on_projects(found[:2])
+        self.isl.refresh.assert_called_once()
+        with mock.patch.object(app.projectview.threading, 'Thread') as thread:
+            self.isl.projects_tick(0)
+            self.isl.projects_tick(1)
+            self.isl.projects_tick(app.projectview.PROJECTS_SECS)
+        self.assertEqual(thread.call_count, 2)
+
+
+@unittest.skipIf(app is None, 'sin gi: usa /usr/bin/python3')
+class Recarga(IslandCase):
+    """`elyares-ctl reload`: la isla se vuelve a arrancar con el código de su carpeta."""
+
+    def setUp(self):
+        super().setUp()
+        self.isl.reload_check = lambda: ''
+        self.isl.is_service = lambda: True
+        self.isl.ensure_tick = lambda: None
+        timer = mock.patch.object(app.GLib, 'timeout_add', side_effect=lambda ms, fn: fn())
+        self.timer = timer.start()
+        self.addCleanup(timer.stop)
+        popen = mock.patch.object(app.subprocess, 'Popen')
+        self.popen = popen.start()
+        self.addCleanup(popen.stop)
+        save = mock.patch.object(app.store, 'save')
+        self.save = save.start()
+        self.addCleanup(save.stop)
+        self.c = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock())
+        self.c.session = 's-chat'
+        self.isl.chats['', '/x/proj'] = self.isl.chat = self.c
+
+    def reply(self):
+        req = mock.Mock()
+        self.isl.on_control('reload', {}, req)
+        return req.reply.call_args[0][0]
+
+    def test_sin_turnos_en_curso_se_recarga_ya(self):
+        self.assertEqual(self.reply(), {'ok': True, 'note': 'la isla se recarga ya'})
+        self.popen.assert_called_once_with(['systemctl', '--user', '--no-block', 'restart', app.UNIT])
+        self.save.assert_called_once()
+        self.save_chats.assert_called_once()        # las conversaciones quedan guardadas antes
+
+    def test_con_un_turno_en_curso_espera_a_que_acabe(self):
+        self.c.busy = True
+        self.assertEqual(self.reply()['note'], 'la isla se recarga al acabar el turno en curso')
+        self.popen.assert_not_called()
+        self.isl.on_chat({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Listo.'}]}})
+        self.popen.assert_not_called()
+        self.isl.on_chat({'type': 'result', 'subtype': 'success'})
+        self.popen.assert_called_once()
+        self.assertEqual(self.save_chats.call_args[0][0]['chats'][0]['entries'][-1][:2], ['claude', 'Listo.'])
+
+    def test_con_el_codigo_roto_la_isla_se_queda(self):
+        self.isl.reload_check = lambda: "SyntaxError: '(' was never closed"
+        answer = self.reply()
+        self.assertFalse(answer['ok'])
+        self.assertIn('SyntaxError', answer['why'])
+        self.assertFalse(self.isl.reloading)
+        self.popen.assert_not_called()
+
+    def test_a_mano_se_vuelve_a_lanzar_el_mismo_proceso(self):
+        self.isl.is_service = lambda: False
+        with mock.patch.object(app.os, 'execv') as execv:
+            self.reply()
+        execv.assert_called_once_with(app.LAUNCHER, [app.LAUNCHER])
+        self.popen.assert_not_called()
+
+
+
+@unittest.skipIf(app is None, 'sin gi: usa /usr/bin/python3')
+class Arranque(unittest.TestCase):
+    def test_el_codigo_de_la_carpeta_arranca(self):
+        # Lo que comprueba `reload` antes de volver a arrancar la isla.
+        self.assertEqual(app.Island.reload_check(), '')
+        self.assertTrue(os.access(app.LAUNCHER, os.X_OK))
 
 
 class Familia(unittest.TestCase):
