@@ -250,6 +250,7 @@ def rgb(color):
 
 class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowView):
     def __init__(self, app):
+        self.gtk_app = app              # la ventana de los flujos se crea con ella, la primera vez que se abre
         self.model = Model()
         self.model.restore(store.load())
         store.forget_usage()
@@ -1047,8 +1048,6 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return 'chat'
         if self.projects_open:
             return 'projects'
-        if self.wf_open:
-            return 'workflows'
         mode = self.view.mode
         if self.expanded:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
@@ -1139,8 +1138,6 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return chatview.CHAT_W, chatview.CHAT_H
         if mode == 'projects':
             return self.projects_goal()
-        if mode == 'workflows':
-            return self.workflows_goal()
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
@@ -1204,6 +1201,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 LayerShell.set_monitor(self.win, mon)
                 self.screen_w = mon.get_geometry().width
                 self.place()
+                self.flows_monitor()
                 return True
         return False
 
@@ -1230,6 +1228,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         moved = self.moved()
         LayerShell.set_anchor(win, LayerShell.Edge.LEFT, moved)
         LayerShell.set_margin(win, LayerShell.Edge.LEFT, self.offset() if moved else 0)
+        self.flows_follow()
 
     def moved(self):
         """¿Está fuera de su sitio de siempre?"""
@@ -1314,6 +1313,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.next_blink = now + 2 + random.random() * 3.5
         self.update_look(now)
         self.update_region()
+        self.flows_follow()             # la isla de los flujos va pegada a ésta
 
         widget.queue_draw()
         # Una burbuja a medio irse sigue pidiendo cuadros hasta que termina.
@@ -1370,16 +1370,11 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         h = clamp(self.h, 0, WIN_H)
         return (width - w) / 2, w, h
 
-    def draw(self, _da, cr, width, _height):
-        cr.set_operator(cairo.OPERATOR_SOURCE)
-        cr.set_source_rgba(0, 0, 0, 0)
-        cr.paint()
-        cr.set_operator(cairo.OPERATOR_OVER)
-
-        x0, w, h = self.island_rect(width)
-        if h < 0.5 or w < 1:
-            self.tip_pop = 0.0
-            return
+    def island_fill(self, cr, x0, w, h):
+        """El cuerpo de una isla: colgada del borde de arriba, con las esquinas
+        de abajo redondas, y su fondo (translúcido en modo vidrio). Deja el
+        contorno como camino, para recortar con él, y devuelve el filo claro
+        del vidrio (un camino) o None."""
         r = min(26, h / 2, w / 2) if h > 12 else min(8, h)
         cr.move_to(x0, 0)
         cr.line_to(x0 + w, 0)
@@ -1391,7 +1386,19 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         glass = self.settings['glass']
         cr.set_source_rgba(*ISLAND_BG[:3], GLASS_ALPHA if glass else ISLAND_BG[3])
         cr.fill_preserve()
-        edge = cr.copy_path() if glass else None
+        return cr.copy_path() if glass else None
+
+    def draw(self, _da, cr, width, _height):
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+
+        x0, w, h = self.island_rect(width)
+        if h < 0.5 or w < 1:
+            self.tip_pop = 0.0
+            return
+        edge = self.island_fill(cr, x0, w, h)
         cr.save()
         cr.clip()
 
@@ -1412,12 +1419,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 cr.stroke()
             self.chat_place(h)
             return
-        if mode in ('projects', 'workflows'):
-            if mode == 'projects':
-                self.draw_projects(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 90) / 60))
-            else:
-                # Con un solo guardado el panel es bajito: su texto sale entero mucho antes.
-                self.draw_workflows(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 40) / 40))
+        if mode == 'projects':
+            self.draw_projects(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
                 cr.append_path(edge)
@@ -2593,9 +2596,6 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if isinstance(key, str) and key.startswith('chat-'):
                 self.on_chat_button(key)
                 return
-            if isinstance(key, str) and key.startswith('wf-'):
-                self.on_wf_hit(key[3:])
-                return
             if key in ('allow', 'deny'):
                 asking = self.asking()
                 if asking is None:
@@ -2637,7 +2637,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.target() in ('board', 'chat', 'projects', 'workflows') or (self.rows and y > self.rows[0][1]):
+        if self.target() in ('board', 'chat', 'projects') or (self.rows and y > self.rows[0][1]):
             return
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -2653,9 +2653,6 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return
         if kind == 'chat':
             self.on_chat_hit(key)
-            return
-        if kind == 'wf':
-            self.on_wf_hit(key)
             return
         if kind == 'tab':
             if key == self.tab:
