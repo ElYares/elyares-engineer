@@ -51,6 +51,7 @@
 "elyares-ctl chat <agente>" = "El chat de ese agente (architect, designer…)"
 "elyares-ctl chat --dir <carpeta>" = "El chat, en ese proyecto"
 "elyares-ctl projects" = "El panel de proyectos; otra vez, lo cierra"
+"elyares-ctl move left|right|center" = "Corre la isla a lo ancho"
 "elyares-ctl reload" = "Recarga la isla con los cambios; los chats siguen"
 "elyares-ctl tab" = "La pestaña que sigue"
 "elyares-ctl steps" = "El desglose de uno; otra vez, el del que sigue"

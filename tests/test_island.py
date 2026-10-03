@@ -1579,6 +1579,62 @@ class Proyectos(Dibujo):
 
 
 @unittest.skipIf(app is None, 'sin gi: usa /usr/bin/python3')
+class Mover(IslandCase):
+    """`elyares-ctl move`: la isla se corre a lo ancho de la pantalla."""
+
+    def setUp(self):
+        super().setUp()
+        self.isl.ensure_tick = lambda: None
+        self.isl.win, self.isl.screen_w = object(), 3440
+        shell = mock.patch.object(app, 'LayerShell')
+        self.shell = shell.start()
+        self.addCleanup(shell.stop)
+
+    def placed(self):
+        """Cómo quedó la ventana: (anclada a la izquierda, su margen)."""
+        return self.shell.set_anchor.call_args[0][2], self.shell.set_margin.call_args[0][2]
+
+    def test_su_sitio_de_siempre_es_el_centro(self):
+        self.assertEqual(self.isl.position(), 50)
+        self.isl.place()
+        # Anclada solo arriba: la centra el compositor, como antes.
+        self.assertEqual(self.placed(), (False, 0))
+
+    def test_se_corre_de_sitio_en_sitio_y_vuelve_al_centro(self):
+        room = 3440 - app.WIN_W
+        seen = []
+        for where in ('right', 'right', 'right', 'left', 'center', 'left', 'left', 'left'):
+            self.isl.on_control('move', {'where': where})
+            seen.append((self.isl.settings['position'], *self.placed()))
+        self.assertEqual(seen, [(75, True, round(room * .75)), (100, True, room), (100, True, room),
+                                (75, True, round(room * .75)), (50, False, 0),
+                                (25, True, round(room * .25)), (0, True, 0), (0, True, 0)])
+        # Se guarda: al volver a arrancar sigue donde se dejó.
+        self.assertEqual(app.settings.save.call_args[0][0]['position'], 0)
+
+    def test_tambien_a_un_punto_cualquiera(self):
+        self.isl.on_control('move', {'where': '10'})
+        self.assertEqual((self.isl.settings['position'], self.placed()), (10, (True, round((3440 - app.WIN_W) * .1))))
+        # Desde ahí, al sitio que sigue de cada lado.
+        self.isl.on_control('move', {'where': 'right'})
+        self.assertEqual(self.isl.settings['position'], 25)
+        for bad in ('arriba', None, ''):
+            self.isl.on_control('move', {'where': bad})
+            self.assertEqual(self.isl.settings['position'], 25)
+
+    def test_en_otra_pantalla_el_mismo_sitio_es_otro_margen(self):
+        self.isl.settings['position'] = 100
+        self.isl.place()
+        self.assertEqual(self.placed(), (True, 3440 - app.WIN_W))
+        self.isl.screen_w = 1920
+        self.isl.place()
+        self.assertEqual(self.placed(), (True, 1920 - app.WIN_W))
+        # Una preferencia rota no la saca de su sitio.
+        self.isl.settings['position'] = 'derecha'
+        self.assertEqual(self.isl.position(), 50)
+
+
+@unittest.skipIf(app is None, 'sin gi: usa /usr/bin/python3')
 class Recarga(IslandCase):
     """`elyares-ctl reload`: la isla se vuelve a arrancar con el código de su carpeta."""
 

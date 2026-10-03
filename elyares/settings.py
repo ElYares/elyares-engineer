@@ -9,7 +9,10 @@ import os
 
 # `pinned_monitor`: el monitor en el que se fijó la isla, para que se quede ahí.
 # `chat_model` y `chat_effort`: lo último elegido en el chat ('' deja lo de Claude).
-DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'chat_model': '',
+# `position`: dónde va la isla a lo ancho de la pantalla, de 0 (izquierda) a 100
+# (derecha); 50, su sitio de siempre, es el centro.
+DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'position': 50,
+            'chat_model': '',
             'chat_effort': '', 'devherd': True,
             'coffe': True, 'github': True, 'terminal': True, 'usage': True, 'github_accounts': []}
 
