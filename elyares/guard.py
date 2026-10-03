@@ -306,6 +306,8 @@ def gh(args):
         return None
     if DELIVERS and group == 'pr' and verb and verb[0] in GH_PR_DELIVER:
         return None                                   # abrir el PR de la rama, o corregir su título y cuerpo
+    if DELIVERS and group == 'auth' and verb == ['token']:
+        return None                                   # para un solo comando: GH_TOKEN=$(gh auth token --user X) gh …
     return f'`gh {group} {verb[0] if verb else ""}` cambia algo en GitHub o en este repositorio'
 
 

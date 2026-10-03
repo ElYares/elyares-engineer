@@ -144,14 +144,17 @@ class Hook(unittest.TestCase):
                         'git commit -m "feat: x"', 'git push', 'git push -u origin feat/x', 'git fetch origin',
                         'git switch -c feat/x', 'git checkout -b feat/x v2',
                         'gh pr create --base v2 --title x --body-file /tmp/pr-body.md',
-                        'gh pr edit 12 --title x', 'git status && git diff --stat', 'make test'):
+                        'gh pr edit 12 --title x', 'git status && git diff --stat', 'make test',
+                        # con la cuenta que ve el repositorio, sin cambiar la de la máquina
+                        'GH_TOKEN=$(gh auth token --user ElYares) gh pr create --base main --title x',
+                        'GH_TOKEN=$(gh auth token --user ElYares) gh repo view ElYares/x --json name'):
             self.assertEqual(run('entrega', {'tool_input': {'command': command}}), (0, ''), command)
         for command in ('git add -A', 'git add .', 'git commit --amend', 'git commit -m x --no-verify',
                         'git commit -am x', 'git push --force', 'git push -f origin feat/x',
                         'git push --force-with-lease', 'git push origin :feat/x', 'git push origin +feat/x',
                         'git push --delete origin feat/x', 'git reset --hard', 'git checkout -- .',
                         'git checkout main', 'git rebase v2', 'git merge v2', 'git clean -fd', 'git stash',
-                        'gh pr merge 12', 'gh pr close 12', 'gh release create v3', 'rm -rf build',
+                        'gh pr merge 12', 'gh pr close 12', 'gh auth switch --user ElYares', 'gh auth logout', 'gh release create v3', 'rm -rf build',
                         'ssh prod', 'make deploy', 'npm install', "bash -c 'git push --force'"):
             code, said = run('entrega', {'tool_input': {'command': command}})
             self.assertEqual(code, 2, command)

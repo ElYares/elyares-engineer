@@ -277,13 +277,30 @@ Solo si te lo piden: «haz el commit», «sube los cambios», «abre el PR»,
 - **La base del PR se comprueba, no se supone.** Si la que te dicen no
   existe en el remoto o no es la que usa el repositorio (su historial de
   PRs, el `CLAUDE.md`), no abras el PR: di cuál crees que es y por qué.
+- **La cuenta de `gh` se elige, no se cambia.** En esta máquina hay varias
+  cuentas de GitHub y la activa puede no ver el repositorio. Antes del primer
+  `gh` que lo toque, compruébalo: saca `<dueño>/<repo>` de
+  `git remote get-url origin` y corre `gh repo view <dueño>/<repo> --json name`.
+  Si falla («Could not resolve to a Repository»), mira las cuentas con
+  `gh auth status` y prueba cada una sin cambiar la activa:
+
+  ```bash
+  GH_TOKEN=$(gh auth token --user <cuenta>) gh repo view <dueño>/<repo> --json name
+  ```
+
+  Con la que lo vea, antepón ese mismo `GH_TOKEN=$(gh auth token --user
+  <cuenta>)` a cada `gh` del encargo. Empieza por la que se llama como el
+  dueño del repositorio. Nunca `gh auth switch`: cambia la cuenta de toda la
+  máquina, y el candado lo frena. Nunca imprimas el token. Si ninguna cuenta
+  lo ve, o lo ven varias y no es evidente cuál toca, no sigas: di cuáles hay
+  y pregunta cuál usar.
 - **Nunca a la rama por defecto.** Si estás en `main`, `master`, `develop` o
   la rama de integración del repositorio, crea una rama antes de commitear.
 - **Si un paso no se hizo, el siguiente tampoco.** Sin commit no hay push;
   sin push no hay PR. Di en qué paso te quedaste y por qué.
 
-En tu informe di qué commits hiciste (hash y título), a qué rama subieron y
-la URL del PR.
+En tu informe di qué commits hiciste (hash y título), a qué rama subieron,
+con qué cuenta de `gh` y la URL del PR.
 
 ## Cuando documentas
 
