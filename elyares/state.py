@@ -102,7 +102,8 @@ SAVED_TIMES = ('started', 'changed', 'updated')
 # engineer.
 AGENT_ROLES = {'elyares-architect': 'architect', 'elyares-auditor': 'auditor',
                'elyares-reviewer': 'reviewer', 'elyares-designer': 'designer',
-               'elyares-mobile': 'mobile'}
+               'elyares-mobile': 'mobile', 'elyares-devops': 'devops',
+               'elyares-researcher': 'researcher'}
 # Quien trabaja en una sesión mientras no lo haga un subagente de la familia,
 # y su personaje.
 MAIN_AGENT, MAIN_ROLE = 'elyares-engineer', 'engineer'

@@ -164,6 +164,8 @@ TABS_H = 34
 BOARD_H = 172         # el frente (los que trabajan) y la banca (los libres)
 BOARD_PAD, BOARD_GAP = 10, 8
 BENCH_W = 132
+ROW_MOST = 6          # los que caben libres en una sola fila, con su nombre entero
+BENCH_ROWS = 5        # los que caben en la banca uno debajo de otro; más, van en cuadrícula
 FOCUS_H = 236         # el desglose de uno, con sus pasos
 FOCUS_STEPS = 8
 FOCUS_SIDE, FOCUS_MINIS = 150, 34   # a la izquierda, quién es; a la derecha, los demás
@@ -1631,10 +1633,12 @@ class Island(chatview.ChatView, projectview.ProjectView):
         team = self.team(s)
         front = [m for m in team if m.busy]
         if not front or len(front) == len(team):
-            # Todos igual: en fila si están libres, en dos filas de cuadros si trabajan.
-            cols = math.ceil(len(team) / 2) if front else len(team)
+            # Todos igual: en dos filas de cuadros si trabajan; libres, en una
+            # fila mientras quepan (hasta ROW_MOST) y en dos si son más.
+            rows = 2 if front or len(team) > ROW_MOST else 1
+            cols = math.ceil(len(team) / rows)
             cw = (width - (cols - 1) * BOARD_GAP) / cols
-            ch = (body - BOARD_GAP) / 2 if front else body
+            ch = (body - BOARD_GAP) / 2 if rows == 2 else body
             for i, member in enumerate(team):
                 self.draw_member(cr, s, member, left + (i % cols) * (cw + BOARD_GAP),
                                  top + (i // cols) * (ch + BOARD_GAP), cw, ch, alpha, now)
@@ -1717,14 +1721,21 @@ class Island(chatview.ChatView, projectview.ProjectView):
             self.hits.append(('member', (s.sid, role), x, y, cw, ch))
         elif role != MAIN_ROLE:
             self.hits.append(('brief', (s.sid, role), x, y, cw, ch))
-        # Cuatro acomodos según el sitio: en columna (tres al frente, o los
-        # cuatro libres), en cuadro (los cuatro trabajando), a medias (dos) y a
-        # lo ancho (uno). `sx` y `sw` son dónde van sus pasos.
+        # Cuatro acomodos según el sitio: en columna (tres al frente, o todos
+        # libres en una fila), en cuadro (todos trabajando, o libres en dos
+        # filas), a medias (dos) y a lo ancho (uno). `sx` y `sw` son dónde van
+        # sus pasos.
         quad, column = ch < 100, cw < 200 and ch >= 100
         wide = cw >= 300 and not quad
         if column:
             size, fx, fy = 56, x + cw / 2, y + 42
             tx, ty, tw = x + 12, y + 78, cw - 24
+            sx, sw = tx, tw
+        elif quad and cw < 180:
+            # En cuadro y estrecho (toda la familia a la vez): la cara más
+            # chica, para que quepa el nombre del personaje.
+            size, fx, fy = 42, x + 27, y + ch / 2 + 2
+            tx, ty, tw = x + 46, y + 9, cw - 52
             sx, sw = tx, tw
         elif quad:
             size, fx, fy = 54, x + 38, y + ch / 2 + 2
@@ -1811,6 +1822,9 @@ class Island(chatview.ChatView, projectview.ProjectView):
         """La banca: los que no trabajan, en chiquito. Un clic en uno de los
         tres abre su mini chat para encargarle algo."""
         self.panel(cr, x, y, w, h, alpha)
+        if len(members) > BENCH_ROWS:
+            self.draw_bench_grid(cr, s, members, x, y, w, h, alpha)
+            return
         step = h / len(members)
         # Con casi toda la familia en la banca, la cara se achica y las dos
         # líneas van más juntas.
@@ -1831,6 +1845,33 @@ class Island(chatview.ChatView, projectview.ProjectView):
             waits = member.role == MAIN_ROLE and s.delegating
             self.put(cr, 'esperando' if waits else 'encargar ›' if over else 'libre', FONT_DETAIL,
                      x + 48, cy + (0 if tight else 1), MUTED_COLOR, alpha * .7, w - 54)
+
+    def draw_bench_grid(self, cr, s, members, x, y, w, h, alpha):
+        """La banca cuando no caben uno debajo de otro: las caras en dos
+        columnas y, al pie, el nombre del que tiene el cursor encima."""
+        foot = 20
+        rows = math.ceil(len(members) / 2)
+        cw, ch = w / 2, (h - foot - 4) / rows
+        size = min(34, ch - 4)
+        hovered = None
+        for i, member in enumerate(members):
+            cx, cy = x + (i % 2) * cw, y + 4 + (i // 2) * ch
+            over = member.role != MAIN_ROLE and self.over(cx, cy, cw, ch)
+            if over:
+                hovered = member
+                mascot.rrect(cr, cx + 4, cy + 1, cw - 8, ch - 2, 9)
+                cr.set_source_rgba(1, 1, 1, .08 * alpha)
+                cr.fill()
+            if member.role != MAIN_ROLE:
+                self.hits.append(('brief', (s.sid, member.role), cx, cy, cw, ch))
+            self.face(cr, member.role, 'idle', cx + cw / 2, cy + ch / 2 + 1, size, alpha * (.9 if over else .45))
+        if hovered is not None:
+            note, color = f'{hovered.role} ›', rgb(mascot.accent(hovered.role))
+        elif s.delegating and any(m.role == MAIN_ROLE for m in members):
+            note, color = 'engineer esperando', MUTED_COLOR
+        else:
+            note, color = f'{len(members)} libres', MUTED_COLOR
+        self.put(cr, note, FONT_DETAIL, x + w / 2, y + h - foot + 1, color, alpha * (1 if hovered else .7), w - 10, .5)
 
     def draw_focus(self, cr, x, y, width, h, member, s, alpha, now):
         """El desglose de uno: a la izquierda quién es y cuánto lleva; en
