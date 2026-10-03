@@ -262,6 +262,13 @@ respuesta**, que abre el chat para leerla entera.
   nada pregunta. Lo que Claude sigue preguntando aun así (escribir en
   settings, git o la configuración de herramientas) se contesta en la
   tarjeta del tablero o, con el chat abierto, en la de encima de la caja.
+- **Copiar una respuesta:** la conversación va dibujada, no se selecciona
+  con el ratón. El pie de cada respuesta trae **copiar**, que la deja entera
+  y con su markdown en el portapapeles (con `wl-copy`).
+- **Pasársela al engineer:** en el chat de uno de la familia, el pie trae
+  además **al engineer ›**: abre el chat del engineer en ese proyecto con la
+  respuesta en la caja. No se manda sola; Enter la manda, tal cual o con lo
+  que le añadas.
 - **Detener / Nuevo / Cerrar**, arriba a la derecha: cortar el turno (también
   Ctrl+C sin nada seleccionado), empezar otra conversación con el mismo
   agente en este proyecto (las de los demás no se tocan), y cerrar el panel.
@@ -284,6 +291,55 @@ por conversación, que la isla mantiene vivo turno tras turno y que le pasa
 los permisos (`--permission-prompt-tool stdio`). Si el proceso se cierra, lo
 siguiente que escribas lo vuelve a abrir con `--resume` (`elyares/chat.py`,
 `elyares/chatview.py`).
+
+### Los workflows
+
+Un workflow es una cadena ordenada de agentes de la familia, guardada con
+nombre, que se lanza sobre un proyecto: «el designer propone, el engineer lo
+construye, el reviewer lo revisa». `elyares-ctl workflows` (o la pastilla
+**Flujos** del pie) abre su panel; otra vez lo cierra. Es un modo más de la
+isla, como el chat y el panel de proyectos: la isla crece hasta su tamaño y
+lo dibuja ella. Abrir el chat o los proyectos lo quita de la vista sin
+perder lo que se editaba.
+
+- **La lista:** tus workflows guardados, cada uno con **lanzar ›**,
+  **editar** y **borrar** (que pregunta antes: no se puede deshacer).
+- **El editor:** nombre, proyecto y los pasos. El proyecto, por defecto, es
+  **cualquiera**: el workflow corre en el que estés al lanzarlo (el de tu
+  sesión de tmux o, sin tmux, el del chat que tenías a la vista), y la lista
+  dice cuál es ahora (`donde estés (ahora tl-mas-server)`). También se puede fijar a uno. Cada paso es un agente y lo que se le pide; se ordenan
+  con ↑ ↓ y se quitan con ✕. Abajo, qué pasa **si un paso falla**: parar ahí
+  o seguir con el siguiente. **Guardar** lo deja en la lista y **Guardar y
+  lanzar** además lo corre; si no se puede todavía, encima de los botones
+  dice por qué. **Cancelar** con cambios sin guardar pregunta antes.
+- **Escribir:** un clic en un campo pone ahí la caja de texto y la isla toma
+  el teclado, como en el chat. Tab y Enter pasan al campo que sigue,
+  Shift+Tab al anterior y Esc lo suelta. El agente de un paso y el proyecto
+  se eligen en un menú, como el de «con quién hablas».
+- **La ejecución:** los mismos pasos con cómo va cada uno (✓ ● ✗) y lo que
+  tardó. Si uno falla dice cuál y por qué, con **Reintentar paso N** y **ver
+  su chat ›**; mientras corre, **Detener** corta el turno y no sigue.
+- **Cómo corre:** cada paso se le manda al chat de ese agente en el proyecto,
+  como si se lo escribieras tú, y cuando ese turno acaba sale el siguiente
+  con lo que contestó el anterior. Por eso se ve trabajar en el tablero como
+  cualquier otro, y cada paso tiene los permisos de ese chat, ni más ni
+  menos: un paso del engineer puede cambiar código; los de los demás, solo
+  lo que deja su candado. Un agente ocupado con otro turno no empieza, y
+  cuenta como paso fallido.
+- **Un paso puede decir que no salió.** La isla solo ve que el turno del
+  agente acabó, no si hizo lo que se le pedía. Por eso a cada paso se le
+  añade cómo avisar: si no pudo, o lo que había que comprobar no se cumple,
+  acaba su respuesta con una línea `PASO FALLIDO: <motivo>`, y el paso
+  cuenta como fallido con ese motivo. Así un paso «verifica que develop esté
+  al día» para la cadena cuando no lo está.
+- **Con el panel cerrado**, al acabar (o al pararse en un paso) sale un aviso
+  con **Ver workflow**.
+
+Corre un workflow a la vez, con diez pasos como mucho, y una ejecución no
+sobrevive a un reinicio de la isla: los pasos ya hechos quedan en sus chats,
+pero la cadena no sigue sola. Se guardan en
+`~/.config/elyares-engineer/workflows.json` (`elyares/workflows.py`,
+`elyares/workflowview.py`).
 
 ### Moverla
 
@@ -351,11 +407,11 @@ recargan con `/agents`.
 | Agente | Para qué | Herramientas | Reglas |
 |---|---|---|---|
 | `elyares-architect` | decidir, revisar o documentar una arquitectura; elige la que se acomoda al proyecto, no la que más se domina | lee, y escribe solo documentación | `E1`–`E7` y `T14` |
-| `elyares-auditor` | seguridad de un diff, de un repo o de la configuración | solo lee | un núcleo de 28 reglas siempre, y los catálogos por demanda |
-| `elyares-reviewer` | código limpio y mantenible: nombres, funciones, tests, textos de interfaz | solo lee | `C1`–`C11`, `T5`–`T13`, `P2`, `P4`, `P7`, `UX1`–`UX6` |
-| `elyares-designer` | la interfaz: proponer una pantalla antes de construirla, revisar una ya hecha o inventariar el sistema de diseño del repo | solo lee | `UI1`–`UI17`, `UX1`–`UX6`, `A1`–`A12` |
-| `elyares-mobile` | Flutter y React Native: revisar un diff, diagnosticar un build, un permiso o una notificación, comprobar que un release está listo | solo lee | `M1`–`M27` |
-| `elyares-devops` | la operación: revisar un diff, un repo entero o un despliegue antes de hacerlo (CI, contenedores, `Makefile` y scripts de despliegue, migraciones, respaldos, colas) | solo lee, y no entra a ningún servidor | `D1`–`D25` |
+| `elyares-auditor` | seguridad de un diff, de un repo o de la configuración | lee, y escribe solo documentación cuando se le pide | un núcleo de 28 reglas siempre, y los catálogos por demanda |
+| `elyares-reviewer` | código limpio y mantenible: nombres, funciones, tests, textos de interfaz | lee, y escribe solo documentación cuando se le pide | `C1`–`C11`, `T5`–`T13`, `P2`, `P4`, `P7`, `UX1`–`UX6` |
+| `elyares-designer` | la interfaz: proponer una pantalla antes de construirla, revisar una ya hecha o inventariar el sistema de diseño del repo | lee, y escribe solo documentación cuando se le pide | `UI1`–`UI17`, `UX1`–`UX6`, `A1`–`A12` |
+| `elyares-mobile` | Flutter y React Native: revisar un diff, diagnosticar un build, un permiso o una notificación, comprobar que un release está listo | lee, y escribe solo documentación cuando se le pide | `M1`–`M27` |
+| `elyares-devops` | la operación: revisar un diff, un repo entero o un despliegue antes de hacerlo (CI, contenedores, `Makefile` y scripts de despliegue, migraciones, respaldos, colas) | lee, no entra a ningún servidor y, cuando se le pide, entrega un cambio ya hecho (commit, push y PR) y escribe documentación | `D1`–`D25` |
 | `elyares-researcher` | investigar: una duda básica, un tema complejo, un repositorio ajeno, una comparación o una evaluación contra lo que ya tienes; y, cuando se le pide, documentarlo en la bitácora del proyecto en el vault | lee, busca en la web y escribe solo documentación | `R1`–`R14` |
 
 Se usan solo cuando se piden: por nombre ("usa elyares-auditor sobre este
@@ -402,8 +458,14 @@ También puedes decirlo tú: "usa elyares-researcher con opus".
   índice es `INDEX.md`), copiadas a `~/.claude/elyares/seguridad`. No van en
   `~/.claude/rules`: ahí Claude Code las cargaría enteras en cada sesión. El
   auditor nunca lee un catálogo entero: carga las áreas que toca el cambio.
-- "Solo lee" quiere decir sin `Edit` ni `Write`, y con Bash vigilado por un
-  candado (ver abajo).
+- Ninguno cambia código: su Bash va vigilado por un candado y su `Write`
+  solo deja escribir documentación (ver abajo).
+- Los cinco que revisan (auditor, reviewer, designer, mobile y devops)
+  documentan cuando se les pide («documéntalo», «déjaselo al engineer»): un
+  trabajo por hacer va al backlog del proyecto en el vault con el
+  procedimiento de `/todo` (pasos 1 a 4; el Estado y el pomodoro siguen
+  siendo de la sesión principal) y, sin proyecto en el vault, a un `.md` en
+  `/tmp` cuya ruta dicen en su informe.
 - El auditor solo corre escáneres locales (`gitleaks`, `semgrep`,
   `osv-scanner`…) si ya están instalados; no instala nada, y los que mandan
   cargas de ataque (nuclei, ZAP, sqlmap) no los corre nunca.
@@ -411,15 +473,16 @@ También puedes decirlo tú: "usa elyares-researcher con opus".
 ### El candado
 
 `elyares-guard` es un hook `PreToolUse` (el código está en `elyares/guard.py`,
-e `install.sh` lo copia a `~/.local/bin/elyares-guard`). Tiene tres modos:
+e `install.sh` lo copia a `~/.local/bin/elyares-guard`). Tiene cuatro modos:
 
 | Modo | Dónde corre | Qué hace |
 |---|---|---|
-| `solo-lectura` | el Bash de los siete agentes, desde su encabezado | frena el comando que escribe: redirecciones fuera de `/tmp`, `rm`, `mv`, `sed -i`, cualquier `git` que no sea de lectura, instaladores (`npm install`, `composer install`, `flutter pub get`…), formateadores que reescriben, `--fix`, migraciones, `sudo`. Y el que sale de la máquina o toca lo desplegado: `ssh` y `scp`, un `make` que no sea de pruebas (sí deja `make -n`), un `gh` que no sea de consulta, y `kubectl`, `terraform`, `supervisorctl`, `crontab` o `certbot` cuando cambian algo. `git clone` solo pasa hacia `/tmp` |
-| `solo-docs` | el `Edit` y el `Write` del architect y del researcher | solo deja escribir documentación (`.md`, `.mmd`, `.puml`, `.txt`…) |
+| `solo-lectura` | el Bash de los agentes (menos el devops), desde su encabezado | frena el comando que escribe: redirecciones fuera de `/tmp`, `rm`, `mv`, `sed -i`, cualquier `git` que no sea de lectura, instaladores (`npm install`, `composer install`, `flutter pub get`…), formateadores que reescriben, `--fix`, migraciones, `sudo`. Y el que sale de la máquina o toca lo desplegado: `ssh` y `scp`, un `make` que no sea de pruebas (sí deja `make -n`), un `gh` que no sea de consulta, y `kubectl`, `terraform`, `supervisorctl`, `crontab` o `certbot` cuando cambian algo. `git clone` solo pasa hacia `/tmp` |
+| `entrega` | el Bash del devops, en vez de `solo-lectura` | lo mismo, y además deja entregar un cambio: `git add` por ruta, `git commit`, `git push`, una rama nueva, `git fetch`, `gh pr create` o `edit` y `gh auth token`, para usar en un solo comando la cuenta que ve el repositorio (`GH_TOKEN=$(gh auth token --user X) gh …`) sin cambiar la de la máquina. Sigue frenando `add -A`, `--amend`, `--no-verify`, el push forzado o que borra ramas, `merge`, `rebase`, `reset` y mergear o cerrar un PR |
+| `solo-docs` | el `Edit` y el `Write` del architect y del researcher, y el `Write` de los otros cinco | solo deja escribir documentación (`.md`, `.mmd`, `.puml`, `.txt`…) |
 | `config` | el `Edit` y el `Write` de cualquier sesión, desde `settings.json` | pregunta antes de tocar la configuración, ya existente, de lo que revisa el código: ESLint, Prettier, PHPStan y su baseline, Pint, PHPUnit, `analysis_options.yaml`, golangci, ruff, los workflows de GitHub |
 
-Los dos primeros bloquean y le dicen al agente por qué; el tercero no bloquea,
+Los tres primeros bloquean y le dicen al agente por qué; el cuarto no bloquea,
 pregunta: relajar un linter para que algo pase es lo que el estándar prohíbe,
 pero a veces el cambio es intencional y lo decide la persona.
 
@@ -774,6 +837,7 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | `elyares-ctl open` | abre la isla con lo que hace Claude; se cierra sola a los 6 s o al repetir |
 | `elyares-ctl chat [quién] [--dir carpeta]` | abre el chat con Claude, listo para escribir; otra vez lo cierra. Con `architect`, `auditor`, `reviewer` o `engineer`, el de ese agente. Con `--dir`, en el proyecto de esa carpeta |
 | `elyares-ctl projects` | abre el panel de proyectos, para empezar a trabajar en uno; otra vez lo cierra |
+| `elyares-ctl workflows` | abre el panel de workflows: cadenas de agentes que se guardan y se lanzan sobre un proyecto; otra vez lo cierra |
 | `elyares-ctl move <dónde>` | corre la isla a lo ancho de la pantalla: `left` y `right`, al siguiente sitio de ese lado; `center`, a su sitio de siempre; o un número del 0 (izquierda) al 100 (derecha) |
 | `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
 | `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |

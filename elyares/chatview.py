@@ -58,6 +58,12 @@ teclear lo suelta solo: un descuido no deja la máquina sin teclado. Enter
 manda y Shift+Enter cambia de línea; Shift+Tab prende o apaga el modo plan;
 Ctrl+C sin nada seleccionado corta el turno.
 
+La conversación va dibujada, no es texto que se pueda seleccionar: cada
+respuesta se copia entera, con su markdown, con el «copiar» de su pie
+(`chat_copy`). En el chat de uno de la familia el pie trae además «al
+engineer ›», que abre el chat del engineer en ese proyecto con la respuesta en
+la caja, para mandársela tal cual o con lo que le quieras añadir (`chat_pass`).
+
 Las conversaciones se guardan (`chat_save`, en `store`) y se recuperan al
 arrancar (`chat_restore`), con el panel abierto si lo estaba: la isla se puede
 volver a arrancar sin perderlas.
@@ -69,6 +75,7 @@ de dibujo (`_layout`, `tip_text`, `draw_button`, `face`, `ink`, `who`).
 
 import html
 import os
+import subprocess
 import time
 
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
@@ -102,6 +109,7 @@ CHAT_REPLY_SECS = 900         # lo que dura el aviso de «ver respuesta» si no 
 CHAT_REPLY_LINES = 8          # de la respuesta, lo que se lee en su aviso
 CHAT_SLEEP_SECS = 600         # una conversación sin usar tanto rato suelta su proceso de Claude
 CHAT_WATCH_SECS = 6           # al mandar, la isla se abre en el tablero este rato (si no está fijada)
+CHAT_COPIED_SECS = 2          # lo que dura el «copiado» de un pie tras el clic
 MINI_H = 60                   # lo que crece un desglose para su mini chat: la caja y su línea de estado
 MINI_LINES = 3                # lo que crece la caja del mini chat antes de hacer scroll
 FONT_CHAT = 'Sans 10'                             # lo que escribe Claude: prosa, se lee mejor
@@ -169,6 +177,8 @@ class ChatView:
         self.chat_hosts = {}          # los encargos del tablero: clave del chat -> la sesión de la pestaña desde la que se hizo
         self.chat_whom = None         # para quién es lo escrito en la caja: 'chat' o el agente de un mini chat
         self.chat_saved = None        # lo último que se guardó de las conversaciones
+        self.chat_copied = None       # la respuesta recién copiada: (su sitio en la conversación, cuándo)
+        self.chat_single = False      # la caja va en una sola línea: está sobre un campo del panel de workflows
         self.entry = self.entry_box = None
 
     def chat_widgets(self, overlay):
@@ -338,6 +348,8 @@ class ChatView:
             self.chat = c
             self.chat_cache.clear()
             self.chat_scroll, self.chat_menu = 0.0, None
+        if self.wf_open:
+            self.close_workflows()
         self.chat_open, self.off = True, False
         self.projects_open = False
         self.chat_claim('chat')
@@ -370,7 +382,7 @@ class ChatView:
 
     def chat_type(self, on):
         """Toma el teclado para escribir, o lo suelta."""
-        self.chat_typing = bool(on) and (self.chat_open or self.briefing() is not None)
+        self.chat_typing = bool(on) and (self.chat_open or self.wf_open or self.briefing() is not None)
         self.chat_keyed = time.monotonic()
         win = getattr(self, 'win', None)
         if win is not None:
@@ -387,6 +399,8 @@ class ChatView:
         if self.chat_typing and now - self.chat_keyed > CHAT_IDLE_SECS:
             if self.chat_open:
                 self.chat_type(False)
+            elif self.wf_open:
+                self.wf_focus(None)
             else:
                 self.brief_drop()
         for c in self.chats.values():
@@ -542,9 +556,11 @@ class ChatView:
         self.chat_context(c)
         if c.asking and not asked:
             self.chat_ask(c)
+        # Si era el paso de un workflow, con esto sale el siguiente.
+        chained = self.workflow_event(c, event, cut)
         if event.get('type') == 'result' and not cut:
             self.chat_watch = False
-            if not (self.chat_open and c is self.chat) and c.reply():
+            if not chained and not (self.chat_open and c is self.chat) and c.reply():
                 self.chat_notice(c)
         if event.get('type') != 'stream_event':
             self.chat_save()
@@ -728,12 +744,16 @@ class ChatView:
 
     def on_chat_changed(self, _buffer):
         self.chat_pick, self.chat_quiet = 0, False
+        if self.wf_open:
+            self.wf_typed(self.chat_text())     # la caja está sobre un campo del panel de workflows
         self.ensure_tick()
 
     def on_chat_key(self, _ctrl, keyval, _code, mods):
         self.chat_keyed = time.monotonic()
         found = self.suggestions()
         shift, ctrl = mods & Gdk.ModifierType.SHIFT_MASK, mods & Gdk.ModifierType.CONTROL_MASK
+        if self.wf_open and not self.chat_open:
+            return self.on_wf_key(keyval, bool(shift))
         if keyval == Gdk.KEY_Escape:
             if self.chat_menu:
                 self.chat_menu = None
@@ -789,7 +809,43 @@ class ChatView:
             self.chat_images.append(texture.save_to_png_bytes().get_data())
             self.ensure_tick()
 
+    def chat_reply_at(self, index):
+        """La respuesta a la que pertenece el pie que está en `index`, o ''."""
+        entries = self.chat.entries if self.chat is not None else []
+        for e in reversed(entries[:max(index, 0)]):
+            if e.kind in ('you', 'foot'):
+                break
+            if e.kind == 'claude':
+                return e.text
+        return ''
+
+    def chat_copy(self, index):
+        """«copiar» en un pie: la respuesta, con su markdown, al portapapeles.
+        Con wl-copy, que no necesita que la isla tenga el teclado; sin él,
+        por GTK."""
+        text = self.chat_reply_at(index)
+        if not text:
+            return
+        try:
+            subprocess.run(['wl-copy'], input=text.encode(), timeout=2, check=True)
+        except (OSError, subprocess.SubprocessError):
+            self.da.get_clipboard().set(text)
+        self.chat_copied = (index, time.monotonic())
+        GLib.timeout_add(CHAT_COPIED_SECS * 1000 + 100, lambda: self.ensure_tick() or GLib.SOURCE_REMOVE)
+
+    def chat_pass(self, index):
+        """«al engineer ›» en un pie: la respuesta de un agente, a la caja del
+        chat del engineer en ese proyecto. No se manda sola: queda escrita."""
+        c, text = self.chat, self.chat_reply_at(index)
+        if c is None or not c.agent or not text:
+            return
+        self.open_chat(typing=True, agent='', cwd=c.cwd)
+        self.chat_set_text(f'De {c.name}:\n\n{text}\n\n')
+
     def on_chat_scroll(self, _ctrl, _dx, dy):
+        if self.target() == 'workflows':
+            self.on_wf_scroll(dy)
+            return True
         if not (self.chat_open and self.target() == 'chat'):
             return False
         self.chat_scroll = max(0.0, self.chat_scroll - dy * CHAT_SCROLL)
@@ -812,6 +868,10 @@ class ChatView:
             self.chat.toggle_plan()
         elif key.startswith(('model:', 'effort:')):
             self.chat_choose(key)
+        elif key.startswith('copy:'):
+            self.chat_copy(int(key[5:]))
+        elif key.startswith('pass:'):
+            self.chat_pass(int(key[5:]))
         elif key.startswith('img:'):
             index = int(key[4:])
             if index < len(self.chat_images):
@@ -1028,17 +1088,32 @@ class ChatView:
             self.hits.append(('chat', f'img:{i}', x, y, cw, CHAT_CHIP_H))
             x += cw + 6
 
+    def chat_lines(self, single):
+        """La caja, en una sola línea o en las que haga falta. En el chat lo
+        escrito se parte y la caja crece; sobre un campo del panel de
+        workflows va en una línea y, si no cabe, se corre a lo ancho."""
+        if single == self.chat_single:
+            return
+        self.chat_single = single
+        self.entry.set_wrap_mode(Gtk.WrapMode.NONE if single else Gtk.WrapMode.WORD_CHAR)
+        self.entry_box.set_policy(Gtk.PolicyType.EXTERNAL if single else Gtk.PolicyType.NEVER,
+                                  Gtk.PolicyType.EXTERNAL if single else Gtk.PolicyType.AUTOMATIC)
+
     def chat_place(self, h):
         """Pone la caja de texto de verdad sobre la dibujada (la del chat o la
         del mini chat de un desglose), y solo con la isla ya abierta."""
         brief = self.briefing()
-        if self.chat_typing and not self.chat_open and brief is None:
+        if self.chat_typing and not self.chat_open and brief is None and not self.wf_open:
             self.chat_type(False)         # el desglose se cerró: el teclado no se queda tomado
         box = self.entry_box
         if box is None:
             return
+        self.chat_lines(self.target() == 'workflows')
         if self.target() == 'chat':
             show = h > CHAT_H - CHAT_SHOW_AT
+        elif self.target() == 'workflows':
+            # Sobre el campo del panel de workflows en el que se escribe.
+            show = self.wf_field is not None and h > self.goal()[1] - CHAT_SHOW_AT
         else:
             show = brief is not None and brief[1] == self.chat_whom and h > self.goal()[1] - CHAT_SHOW_AT
         show = show and self.chat_box is not None and (self.chat_typing or bool(self.chat_text()))
@@ -1197,7 +1272,8 @@ class ChatView:
         cr.clip()
         y = bottom + self.chat_scroll
         color = self.chat_color()
-        for (layout, hh, role), entry in zip(reversed(items), reversed(c.entries)):
+        for index in range(len(items) - 1, -1, -1):
+            (layout, hh, role), entry = items[index], c.entries[index]
             y -= hh
             if y > bottom:
                 y -= CHAT_GAP
@@ -1216,6 +1292,8 @@ class ChatView:
                 self.tip_text(cr, layout, x, y + CHAT_BLOCK_PAD, mascot.rgba(self.ink('arg'))[:3], alpha, False)
             elif role is None:
                 self.tip_text(cr, layout, x, y + 2, None, alpha, False)
+                if top <= y and y + hh <= bottom:
+                    self.draw_chat_foot_links(cr, index, left + width, y + 2, alpha)
             else:
                 light = .62 if entry.kind == 'note' else None
                 tone = mascot.rgba(self.ink(role, light) if light else self.ink(role))[:3]
@@ -1226,6 +1304,29 @@ class ChatView:
         cr.restore()
         if self.chat_scroll > 0:
             self.put(cr, '↓ más abajo', FONT_STEP, left + width, bottom - 14, (1, 1, 1), .45 * alpha, align=1.0)
+
+    def draw_chat_foot_links(self, cr, index, right, y, alpha):
+        """Los enlaces del pie de un turno, a su derecha: «copiar» y, en el
+        chat de uno de la familia, «al engineer ›»."""
+        if not self.chat_reply_at(index):
+            return
+        copied = self.chat_copied is not None and self.chat_copied[0] == index
+        if copied and time.monotonic() - self.chat_copied[1] > CHAT_COPIED_SECS:
+            copied, self.chat_copied = False, None
+        links = [(f'copy:{index}', 'copiado ✓' if copied else 'copiar')]
+        if self.chat.agent:
+            links.insert(0, (f'pass:{index}', 'al engineer ›'))
+        soft, x = mascot.rgba(self.ink('text', .6))[:3], right
+        for key, label in reversed(links):
+            layout = self._layout(cr, label, FONT_STEP)
+            lw, lh = layout.get_pixel_size()
+            x -= lw
+            over = self.over(x - 4, y - 3, lw + 8, lh + 6)
+            lit = key.startswith('copy:') and copied
+            color = mascot.rgba(self.ink('pass'))[:3] if lit else (1, 1, 1) if over else soft
+            self.tip_text(cr, layout, x, y, color, alpha, False)
+            self.hits.append(('chat', key, x - 4, y - 3, lw + 8, lh + 6))
+            x -= CHAT_LINK_GAP
 
     def draw_chat_empty(self, cr, left, top, width, bottom, alpha):
         """Antes de escribir nada: qué es esto y qué se le puede pedir."""
@@ -1289,4 +1390,5 @@ class ChatView:
             if desc and width - 44 - max(nw, 110) > 40:
                 self.put(cr, desc, FONT_STEP, left + 24 + max(nw, 110), ry + (CHAT_SUGGEST_H - nh) / 2 + 1,
                          soft, alpha, width=width - 44 - max(nw, 110))
-            self.hits.append(('chat', f'{sigil}{name}', left, ry, width, CHAT_SUGGEST_H))
+            # Por delante de lo que tapa: los enlaces de un pie de la conversación.
+            self.hits.insert(0, ('chat', f'{sigil}{name}', left, ry, width, CHAT_SUGGEST_H))

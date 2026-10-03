@@ -84,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, chatview, coffe, commands, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, projectview, settings, sources, state, store, testrun, theme)
+               preview, projectview, settings, sources, state, store, testrun, theme, workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
 MAX_ROWS = 5          # filas de la lista de alertas, con la cabecera de siempre
@@ -248,7 +248,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView):
+class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowView):
     def __init__(self, app):
         self.model = Model()
         self.model.restore(store.load())
@@ -298,6 +298,7 @@ class Island(chatview.ChatView, projectview.ProjectView):
         self.projects_init()
         self.chat_init()
         self.chat_restore(store.load_chats())
+        self.workflows_init()
         self.reloading = False          # se pidió volver a arrancar: en cuanto no haya turnos en curso
         self.tip = None                 # (fuente, centro, opacidad) de la pastilla bajo el cursor
         self.tip_key = None
@@ -471,6 +472,7 @@ class Island(chatview.ChatView, projectview.ProjectView):
         self.seconds += 1
         self.chat_tick(time.monotonic())
         self.projects_tick(self.seconds)
+        self.workflows_tick()
         if self.seconds % REAP_SECS == 0:
             # Las sesiones sin pane (las de segundo plano) no tienen otra
             # forma de irse si se cierran sin avisar.
@@ -681,6 +683,8 @@ class Island(chatview.ChatView, projectview.ProjectView):
                 req.reply(answer)
         elif order == 'projects':
             self.toggle_projects()
+        elif order == 'workflows':
+            self.toggle_workflows()
         elif order == 'move':
             self.move((msg or {}).get('where'))
         elif order == 'chat':
@@ -1043,6 +1047,8 @@ class Island(chatview.ChatView, projectview.ProjectView):
             return 'chat'
         if self.projects_open:
             return 'projects'
+        if self.wf_open:
+            return 'workflows'
         mode = self.view.mode
         if self.expanded:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
@@ -1133,6 +1139,8 @@ class Island(chatview.ChatView, projectview.ProjectView):
             return chatview.CHAT_W, chatview.CHAT_H
         if mode == 'projects':
             return self.projects_goal()
+        if mode == 'workflows':
+            return self.workflows_goal()
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
@@ -1404,8 +1412,12 @@ class Island(chatview.ChatView, projectview.ProjectView):
                 cr.stroke()
             self.chat_place(h)
             return
-        if mode == 'projects':
-            self.draw_projects(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 90) / 60))
+        if mode in ('projects', 'workflows'):
+            if mode == 'projects':
+                self.draw_projects(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 90) / 60))
+            else:
+                # Con un solo guardado el panel es bajito: su texto sale entero mucho antes.
+                self.draw_workflows(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 40) / 40))
             cr.restore()
             if edge:
                 cr.append_path(edge)
@@ -2181,6 +2193,19 @@ class Island(chatview.ChatView, projectview.ProjectView):
         cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
         PangoCairo.show_layout(cr, plus)
         self.pills.append((projectview.PROJECTS_PILL, qx, y, qpw, PILL_H))
+        # Y la de los workflows: sus cadenas de agentes.
+        flows = self._layout(cr, 'Flujos', FONT_PILL)
+        fw, fh = flows.get_pixel_size()
+        fpw = fw + 16
+        fx = qx - PILL_GAP - fpw
+        over_flows = fx <= px <= fx + fpw and y <= py <= y + PILL_H
+        mascot.rrect(cr, fx, y, fpw, PILL_H, PILL_H / 2)
+        cr.set_source_rgba(1, 1, 1, (.13 if over_flows else .07) * alpha)
+        cr.fill()
+        cr.move_to(fx + (fpw - fw) / 2, y + (PILL_H - fh) / 2)
+        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+        PangoCairo.show_layout(cr, flows)
+        self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
         self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
@@ -2568,6 +2593,9 @@ class Island(chatview.ChatView, projectview.ProjectView):
             if isinstance(key, str) and key.startswith('chat-'):
                 self.on_chat_button(key)
                 return
+            if isinstance(key, str) and key.startswith('wf-'):
+                self.on_wf_hit(key[3:])
+                return
             if key in ('allow', 'deny'):
                 asking = self.asking()
                 if asking is None:
@@ -2591,6 +2619,8 @@ class Island(chatview.ChatView, projectview.ProjectView):
                     self.open_chat(typing=True)
                 elif key == projectview.PROJECTS_PILL:
                     self.toggle_projects()
+                elif key == workflowview.WF_PILL:
+                    self.toggle_workflows()
                 return
         for s, ry, rh in self.rows:
             if ry <= y < ry + rh:
@@ -2607,7 +2637,7 @@ class Island(chatview.ChatView, projectview.ProjectView):
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.target() in ('board', 'chat', 'projects') or (self.rows and y > self.rows[0][1]):
+        if self.target() in ('board', 'chat', 'projects', 'workflows') or (self.rows and y > self.rows[0][1]):
             return
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -2623,6 +2653,9 @@ class Island(chatview.ChatView, projectview.ProjectView):
             return
         if kind == 'chat':
             self.on_chat_hit(key)
+            return
+        if kind == 'wf':
+            self.on_wf_hit(key)
             return
         if kind == 'tab':
             if key == self.tab:
@@ -2684,6 +2717,8 @@ class Island(chatview.ChatView, projectview.ProjectView):
                 threading.Thread(target=actions.jump, args=(s,), daemon=True).start()
             elif action.get('chat'):
                 self.chat_show(action['chat'])
+            elif action.get('workflows'):
+                self.open_workflows('run')
             else:
                 threading.Thread(target=actions.run, args=(action,), daemon=True).start()
             if action.get('after'):

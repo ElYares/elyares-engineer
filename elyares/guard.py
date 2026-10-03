@@ -5,6 +5,9 @@ Uso, con el payload del hook por stdin (install.sh lo copia como `elyares-guard`
   elyares-guard solo-lectura   el Bash de un agente que solo lee: frena el
                                comando que escribe, instala, borra, cambia git,
                                entra a un servidor o toca lo desplegado
+  elyares-guard entrega        el Bash del devops: como solo-lectura, y además lo
+                               de entregar un cambio: preparar archivos, hacer
+                               el commit, subir la rama y abrir o editar su PR
   elyares-guard solo-docs      el Edit y el Write de un agente que solo documenta
                                (el architect, el researcher): nada que no sea
                                documentación
@@ -216,11 +219,48 @@ def after_options(args, value_flags=()):
     return args[i:]
 
 
+# Modo `entrega`: además de leer, deja preparar, commitear, subir y abrir el
+# PR. Lo prende `main`; no va como argumento porque `check` y `simple` se
+# llaman una a otra por una docena de sitios.
+DELIVERS = False
+GIT_ADD_ALL = {'-A', '--all', '-u', '--update', '.'}        # lo que barre con todo: se prepara por ruta
+GIT_COMMIT_NO = {'--amend', '--no-verify', '-n', '-a', '--all'}
+GIT_PUSH_NO = {'-f', '--force', '--force-with-lease', '--force-if-includes', '-d', '--delete', '--mirror',
+               '--all', '--tags', '--prune'}
+GH_PR_DELIVER = {'create', 'edit'}
+
+
+def git_delivery(sub, rest):
+    """De un `git` que cambia el repositorio: None si es de los de entregar
+    un cambio (preparar por ruta, commit, subir la rama, rama nueva, traer),
+    o por qué así no pasa. '' si no es de entregar."""
+    flags = {a.split('=')[0] for a in rest if a.startswith('-')}
+    flags |= {f'-{c}' for a in rest if re.fullmatch(r'-[a-zA-Z]{2,}', a) for c in a[1:]}     # -am es -a y -m
+    if sub == 'fetch':
+        return None
+    if sub == 'add':
+        return 'prepara los archivos por su ruta, no todos a la vez' if GIT_ADD_ALL & set(rest) else None
+    if sub == 'commit':
+        bad = sorted(GIT_COMMIT_NO & flags)
+        return f'`git commit {bad[0]}` reescribe, barre o se salta las verificaciones' if bad else None
+    if sub == 'push':
+        if GIT_PUSH_NO & flags or any(a.startswith('+') or a.startswith(':') for a in rest):
+            return '`git push` forzado, o que borra ramas o las sube todas, no es de una entrega'
+        return None
+    if sub in ('switch', 'checkout') and rest[:1] in (['-c'], ['-b']) and len(rest) <= 3:
+        return None                                   # una rama nueva, desde aquí o desde otra
+    return ''
+
+
 def git(args, scratch):
     args = after_options(args, GIT_VALUE_FLAGS)
     if not args or args[0] in GIT_READ:
         return None
     sub, rest = args[0], args[1:]
+    if DELIVERS:
+        reason = git_delivery(sub, rest)
+        if reason != '':
+            return reason
     if sub == 'clone':                                # un repo ajeno, para leerlo: solo en /tmp
         named = [a for a in rest if not a.startswith('-') and not a.isdigit()]     # origen y destino
         return None if len(named) == 2 and writable(named[1], scratch) else '`git clone` fuera de /tmp'
@@ -264,6 +304,10 @@ def gh(args):
     verb = after_options(rest, {'-R', '--repo'})[:1]
     if verb and verb[0] in GH_READ:
         return None
+    if DELIVERS and group == 'pr' and verb and verb[0] in GH_PR_DELIVER:
+        return None                                   # abrir el PR de la rama, o corregir su título y cuerpo
+    if DELIVERS and group == 'auth' and verb == ['token']:
+        return None                                   # para un solo comando: GH_TOKEN=$(gh auth token --user X) gh …
     return f'`gh {group} {verb[0] if verb else ""}` cambia algo en GitHub o en este repositorio'
 
 
@@ -429,7 +473,9 @@ def check(command, scratch=SCRATCH, depth=0):
         if reason:
             return reason
     if depth < DEPTH:                                 # lo que va en $(…) o entre acentos graves
-        for inner in SUBSHELL.findall(command):
+        # El cuerpo de un heredoc entre comillas (<<'EOF') es texto: ahí no corre nada.
+        quoted = HEREDOC.sub(lambda m: f' {m.group(3)}' if m.group(1) else m.group(0), command)
+        for inner in SUBSHELL.findall(quoted):
             reason = check(inner[0] or inner[1], scratch, depth + 1)
             if reason:
                 return reason
@@ -460,11 +506,14 @@ def main(argv=None, stdin=None, out=None, err=None):
     mode = argv[0] if argv else ''
     tool_input = payload.get('tool_input') or {}
     path = tool_input.get('file_path') or ''
-    if mode == 'solo-lectura':
+    if mode in ('solo-lectura', 'entrega'):
+        global DELIVERS
+        DELIVERS = mode == 'entrega'
         scratch = SCRATCH + tuple(d.rstrip('/') + '/' for d in [payload.get('scratchpad_dir')] if d)
         reason = check(tool_input.get('command') or '', scratch)
         if reason:
-            print(f'elyares-guard: este agente solo lee, y el comando no pasó: {reason}. No lo '
+            does = 'lee y entrega (commit, push y PR)' if DELIVERS else 'solo lee'
+            print(f'elyares-guard: este agente {does}, y el comando no pasó: {reason}. No lo '
                   'rodees: si de verdad hace falta, dilo en tu informe para que lo haga el '
                   'engineer. Para un archivo temporal usa /tmp.', file=err)
             return 2
