@@ -2085,18 +2085,19 @@ class Flujos(IslandCase):
     def test_cerrar_no_pierde_lo_que_se_edita_y_cancelar_pregunta(self):
         W = app.workflowview.workflows
         self.isl.open_workflows()
-        self.assertEqual(self.isl.target(), 'workflows')
+        self.assertTrue(self.isl.wf_open)
         self.isl.on_wf_hit('new')
         draft = self.isl.wf_draft
         self.isl.wf_typed('a medias')                   # se escribe en el campo del nombre
         self.assertEqual((self.isl.wf_field, draft.w.name), ('name', 'a medias'))
-        # Cerrar el panel (o abrir el chat) no pierde nada: al volver, ahí sigue.
+        # Cerrar la isla de los flujos no pierde nada: al volver, ahí sigue. Y el chat es aparte.
         self.isl.on_wf_hit('close')
         self.assertFalse(self.isl.wf_open)
         self.isl.open_chat()
+        self.assertTrue(self.isl.chat_open)
         self.isl.toggle_workflows()
-        self.assertFalse(self.isl.chat_open)
-        self.assertEqual((self.isl.target(), self.isl.wf_screen), ('workflows', 'edit'))
+        self.assertTrue(self.isl.chat_open and self.isl.wf_open)    # conviven
+        self.assertEqual((self.isl.target(), self.isl.wf_screen), ('chat', 'edit'))
         self.assertIs(self.isl.wf_draft, draft)
         # Cancelar sí lo pierde: antes pregunta.
         self.isl.on_wf_hit('cancel')
@@ -2151,30 +2152,94 @@ class Flujos(IslandCase):
         self.assertEqual(len(draft.w.steps), app.workflowview.WF_MAX_STEPS)
 
 
-class FlujosDibujo(Dibujo):
-    """El panel de workflows, dibujado en la isla."""
+class FlujosDibujo(IslandCase):
+    """La isla de los flujos, dibujada fuera de pantalla junto a la de siempre."""
+
+    WIDTH = 1920                    # la pantalla
 
     def setUp(self):
         super().setUp()
         W = app.workflowview.workflows
         self.flow = W.Workflow('revisar', '/x/proj', [W.Step('elyares-designer', 'propón'),
                                                       W.Step('elyares-engineer', 'hazlo')])
+        isl = self.isl
+        isl.screen_w, isl.w, isl.h = self.WIDTH, 600, 88        # la isla de siempre, abierta
+        isl.colors = paint.colors()
+        isl.markups = {}
+        isl.pointer = None
+        isl.da = mock.Mock(get_width=lambda: app.WIN_W)
+        isl.pills, isl.card_span, isl.go = [], None, mock.Mock()
+        self.shown = []
+        layout = isl._layout
+        isl._layout = lambda cr, text, *a, **kw: self.shown.append(text) or layout(cr, text, *a, **kw)
+        self.cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, self.WIDTH, app.workflowview.WF_WIN_H))
+
+    def draw(self):
+        """La isla de los flujos ya asentada en su tamaño, dibujada."""
+        isl = self.isl
+        isl.fw, isl.fh = isl.flows_goal() if isl.wf_open else (isl.fw, 0)
+        self.shown.clear()
+        isl.flows_draw(None, self.cr, self.WIDTH, 0)
+        return isl.wf_hits
 
     def click(self, key):
         """Un clic de verdad en lo que quedó dibujado con esa clave."""
-        if f'wf-{key}' in self.isl.buttons:
-            x, y, w, h = self.isl.buttons[f'wf-{key}']
+        isl = self.isl
+        isl.flows_da = mock.Mock(get_width=lambda: self.WIDTH)
+        if f'wf-{key}' in isl.wf_buttons:
+            x, y, w, h = isl.wf_buttons[f'wf-{key}']
         else:
-            _, _, x, y, w, h = next(hit for hit in self.isl.hits if hit[:2] == ('wf', key))
-        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+            _, _, x, y, w, h = next(hit for hit in isl.wf_hits if hit[:2] == ('wf', key))
+        isl.on_flows_click(None, 1, x + w / 2, y + h / 2)
 
-    def test_se_abre_en_la_isla_con_su_pastilla(self):
-        self.isl.expanded = True
-        self.draw()
-        _, x, y, w, h = next(pill for pill in self.isl.pills if pill[0] == app.workflowview.WF_PILL)
-        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
-        self.assertEqual(self.isl.target(), 'workflows')
-        self.assertEqual(self.isl.goal()[0], app.chatview.CHAT_W)       # a nivel del chat: su mismo ancho
+    def test_sale_a_la_izquierda_de_la_isla_y_del_otro_lado_si_no_cabe(self):
+        isl = self.isl
+        isl.open_workflows()
+        isl.fw, isl.fh = isl.flows_goal()
+        win_left = (self.WIDTH - app.WIN_W) / 2
+        ix0, iw, _ = isl.island_rect(app.WIN_W)
+        # Con la isla en el centro: a su izquierda, pegada, y de su misma altura de arriba.
+        x0, w, h = isl.flows_rect(self.WIDTH)
+        self.assertEqual((isl.wf_side, w), ('left', app.workflowview.WF_W))
+        self.assertEqual(x0 + w + app.workflowview.WF_GAP, win_left + ix0)
+        # Corrida hasta la izquierda de la pantalla: no cabe, sale a su derecha.
+        isl.settings['position'] = 0
+        x0, w, h = isl.flows_rect(self.WIDTH)
+        self.assertEqual(isl.wf_side, 'right')
+        self.assertEqual(x0, isl.offset() + ix0 + iw + app.workflowview.WF_GAP)
+        isl.settings['position'] = 25
+        isl.flows_rect(self.WIDTH)
+        self.assertEqual(isl.wf_side, 'right')
+        # Corrida a la derecha sí cabe a su izquierda.
+        for position in (75, 100):
+            isl.settings['position'] = position
+            isl.flows_rect(self.WIDTH)
+            self.assertEqual(isl.wf_side, 'left')
+        # Colapsada o creciendo no cambia de lado: se decide con la ventana de la isla.
+        isl.settings['position'] = 25
+        isl.fw = app.workflowview.WF_PILL_W
+        isl.flows_rect(self.WIDTH)
+        self.assertEqual(isl.wf_side, 'right')
+        # Nunca se sale de la pantalla.
+        isl.settings['position'] = 0
+        isl.fw = app.workflowview.WF_W
+        x0, w, _ = isl.flows_rect(1100)
+        self.assertTrue(0 <= x0 and x0 + w <= 1100)
+
+    def test_se_abre_con_su_pastilla_sin_tocar_la_isla(self):
+        isl = self.isl
+        isl.expanded = True
+        before = isl.target()
+        isl.pills, isl.tip = [], None
+        isl.tip_key, isl.tip_ref, isl.tip_last = None, [], None
+        isl.tip_pop, isl.tip_at, isl.tip_cx = 0.0, 0.0, None
+        isl.sources = {key: {'ok': True, 'note': '', 'tip': [], 'since': 0, 'polled': 0} for key in sources.LABELS}
+        isl.draw_pills(self.cr, 100, 560, 50, 1.0)
+        _, x, y, w, h = next(pill for pill in isl.pills if pill[0] == app.workflowview.WF_PILL)
+        isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.assertTrue(isl.wf_open)
+        self.assertEqual(isl.target(), before)                          # la isla de siempre sigue igual
+        self.assertEqual(isl.flows_goal(), (app.workflowview.WF_W, isl.workflows_goal()[1]))
         self.draw()
         self.assertIn('Crear workflow', self.shown)
         self.assertTrue(any('Todavía no guardaste ningún workflow' in text for text in self.shown))
@@ -2183,23 +2248,65 @@ class FlujosDibujo(Dibujo):
         for text in ('Nuevo workflow', 'Nombre', 'Proyecto', 'Pasos', 'Añadir primer paso', 'Si un paso falla',
                      'Añade al menos un paso para lanzarlo', 'Guardar y lanzar'):
             self.assertIn(text, self.shown)
-        self.assertIsNotNone(self.isl.chat_box)         # la caja de texto, sobre el campo del nombre
+        self.assertIsNotNone(isl.wf_box)                # la caja de texto, sobre el campo del nombre
         self.click('close')
-        self.assertNotEqual(self.isl.target(), 'workflows')
+        self.assertFalse(isl.wf_open)
+        self.assertEqual(isl.flows_goal()[1], 0)        # se encoge hasta irse
+
+    def test_se_colapsa_en_una_pastilla_y_se_abre_con_un_clic(self):
+        isl = self.isl
+        isl.workflows = [self.flow]
+        isl.open_workflows()
+        self.draw()
+        self.assertIn('colapsar ›', self.shown)         # a la izquierda se colapsa hacia la isla
+        self.click('collapse')
+        self.assertTrue(isl.wf_collapsed)
+        self.assertTrue(isl.settings['flows_collapsed'])        # se acuerda
+        self.saved.assert_called()
+        self.assertEqual(isl.flows_goal(), (app.workflowview.WF_PILL_W, app.workflowview.WF_PILL_H))
+        self.draw()
+        self.assertIn('Flujos', self.shown)
+        self.assertIn('1', self.shown)                  # cuántos guardados hay
+        self.assertNotIn('lanzar ›', self.shown)
+        # Con algo corriendo, la pastilla lo dice.
+        isl.wf_run = run = app.workflowview.workflows.Run(self.flow)
+        run.begin(0)
+        self.draw()
+        self.assertIn('paso 1/2', self.shown)
+        # Un clic en cualquier parte de ella la abre.
+        isl.flows_da = mock.Mock(get_width=lambda: self.WIDTH)
+        x0, w, h = isl.flows_rect(self.WIDTH)
+        isl.on_flows_click(None, 1, x0 + w / 2, h / 2)
+        self.assertFalse(isl.wf_collapsed)
+        self.assertFalse(isl.settings['flows_collapsed'])
+        # Un clic fuera de la isla no hace nada.
+        isl.wf_collapse(True)
+        self.draw()
+        isl.on_flows_click(None, 1, 5, 5)
+        self.assertTrue(isl.wf_collapsed)
+
+    def test_un_aviso_abre_la_isla_colapsada_para_verlo(self):
+        isl = self.isl
+        isl.wf_collapsed = True
+        isl.wf_run = app.workflowview.workflows.Run(self.flow)
+        isl.open_workflows('run')
+        self.assertFalse(isl.wf_collapsed)
+        self.assertEqual(isl.wf_screen, 'run')
 
     def test_la_lista_el_editor_y_sus_menus(self):
-        self.isl.workflows = [self.flow]
-        self.isl.open_workflows()
+        isl = self.isl
+        isl.workflows = [self.flow]
+        isl.open_workflows()
         self.draw()
         for text in ('Workflows', '1 guardado', 'revisar', 'lanzar ›', 'editar', 'borrar'):
             self.assertIn(text, self.shown)
-        short = self.isl.goal()[1]
+        short = isl.workflows_goal()[1]
         self.click('delete:0')
         self.draw()
         self.assertIn('¿Borrar el workflow «revisar» y sus 2 pasos? No se puede deshacer.', self.shown)
-        self.assertGreater(self.isl.goal()[1], short)   # la isla crece para la pregunta
+        self.assertGreater(isl.workflows_goal()[1], short)         # la isla crece para la pregunta
         self.click('keep')
-        self.assertEqual(self.isl.workflows, [self.flow])
+        self.assertEqual(isl.workflows, [self.flow])
         self.draw()
         self.click('edit:0')
         self.draw()
@@ -2209,26 +2316,27 @@ class FlujosDibujo(Dibujo):
         # El menú de agentes sale encima de lo demás, y un clic en uno lo elige.
         self.click('agent:1')
         self.draw()
-        self.assertTrue(self.isl.hits[0][1].startswith('pick:'))
+        self.assertTrue(isl.wf_hits[0][1].startswith('pick:'))
         self.click(f'pick:{app.workflowview.AGENTS.index("elyares-reviewer")}')
-        self.assertEqual(self.isl.wf_draft.w.steps[1].agent, 'elyares-reviewer')
+        self.assertEqual(isl.wf_draft.w.steps[1].agent, 'elyares-reviewer')
         self.draw()
         self.assertIn('Sin guardar', self.shown)
         # Un nombre repetido lo dice, y no deja guardar.
-        self.isl.workflows.append(app.workflowview.workflows.Workflow('otro', '/x/proj'))
-        self.isl.wf_draft.w.name = 'Otro'
+        isl.workflows.append(app.workflowview.workflows.Workflow('otro', '/x/proj'))
+        isl.wf_draft.w.name = 'Otro'
         self.draw()
         self.assertIn('Ya existe un workflow con ese nombre. Elige otro.', self.shown)
         self.click('save')
-        self.assertEqual(self.isl.wf_screen, 'edit')
+        self.assertEqual(isl.wf_screen, 'edit')
 
     def test_la_ejecucion_dice_como_va_cada_paso(self):
-        self.isl.wf_run = run = app.workflowview.workflows.Run(self.flow)
+        isl = self.isl
+        isl.wf_run = run = app.workflowview.workflows.Run(self.flow)
         run.begin(0)
         run.finish(True, 'un panel')
         run.begin(1)
-        self.isl.open_workflows()
-        self.assertEqual(self.isl.wf_screen, 'run')
+        isl.open_workflows()
+        self.assertEqual(isl.wf_screen, 'run')
         self.draw()
         for text in ('revisar', '✓', '●', 'elyares-engineer', 'hazlo', 'Corriendo el paso 2 de 2…', 'Detener'):
             self.assertIn(text, self.shown)
@@ -2237,12 +2345,48 @@ class FlujosDibujo(Dibujo):
         self.assertIn('✗', self.shown)
         self.assertIn('El paso 2 (elyares-engineer) falló: sin red. Ábrelo y reintenta desde ese paso.', self.shown)
         self.assertIn('Reintentar paso 2', self.shown)
-        self.isl.workflow_step = mock.Mock()
+        isl.workflow_step = mock.Mock()
         self.click('retry')
-        self.isl.workflow_step.assert_called_once_with(1)
-        self.isl.open_chat = mock.Mock()
+        isl.workflow_step.assert_called_once_with(1)
+        isl.open_chat = mock.Mock()
         self.click('chat')
-        self.isl.open_chat.assert_called_once_with(typing=True, agent='', cwd='/x/proj')
+        isl.open_chat.assert_called_once_with(typing=True, agent='', cwd='/x/proj')
+
+    def test_en_vidrio_la_isla_se_lee_igual(self):
+        isl = self.isl
+        isl.workflows = [self.flow]
+        isl.open_workflows()
+        isl.settings['glass'] = True
+        shadows = []
+        tip_text = isl.tip_text
+        isl.tip_text = lambda cr, layout, x, y, color, alpha, shadow: (
+            shadows.append(shadow), tip_text(cr, layout, x, y, color, alpha, shadow))[1]
+        self.draw()
+        # Cada texto lleva su sombra, y sigue estando todo lo de siempre.
+        self.assertTrue(shadows and all(shadows))
+        for text in ('Workflows', 'revisar', 'lanzar ›', 'editar', 'borrar'):
+            self.assertIn(text, self.shown)
+        self.click('edit:0')
+        self.draw()
+        self.click('agent:0')
+        shadows.clear()
+        self.draw()
+        self.assertTrue(shadows and all(shadows))
+        # Sin vidrio, ninguna.
+        isl.settings['glass'] = False
+        shadows.clear()
+        self.draw()
+        self.assertFalse(any(shadows))
+
+    def test_la_isla_de_siempre_no_pierde_sus_clics(self):
+        isl = self.isl
+        isl.hits, isl.buttons, isl.pointer = [('chat', 'x', 0, 0, 1, 1)], {'allow': (0, 0, 1, 1)}, (3, 4)
+        isl.open_workflows()
+        isl.wf_pointer = (500, 20)
+        self.draw()
+        # Dibujar la de los flujos deja lo pulsable de cada una en su sitio.
+        self.assertEqual((isl.hits, isl.buttons, isl.pointer), ([('chat', 'x', 0, 0, 1, 1)], {'allow': (0, 0, 1, 1)}, (3, 4)))
+        self.assertTrue(isl.wf_hits)
 
 
 if __name__ == '__main__':

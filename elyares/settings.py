@@ -14,6 +14,7 @@ import os
 DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'position': 50,
             'chat_model': '',
             'chat_effort': '', 'devherd': True,
+            'flows_collapsed': False,
             'coffe': True, 'github': True, 'terminal': True, 'usage': True, 'github_accounts': []}
 
 

@@ -297,10 +297,20 @@ siguiente que escribas lo vuelve a abrir con `--resume` (`elyares/chat.py`,
 Un workflow es una cadena ordenada de agentes de la familia, guardada con
 nombre, que se lanza sobre un proyecto: «el designer propone, el engineer lo
 construye, el reviewer lo revisa». `elyares-ctl workflows` (o la pastilla
-**Flujos** del pie) abre su panel; otra vez lo cierra. Es un modo más de la
-isla, como el chat y el panel de proyectos: la isla crece hasta su tamaño y
-lo dibuja ella. Abrir el chat o los proyectos lo quita de la vista sin
-perder lo que se editaba.
+**Flujos** del pie) abre su panel; otra vez lo cierra.
+
+**Es otra isla, junto a la de siempre.** Sale pegada a la izquierda de la
+isla, con su misma forma, su fondo y su modo vidrio, y la sigue mientras se
+mueve (`elyares-ctl move`) o cambia de tamaño. La isla de siempre no se
+toca: el tablero y el chat siguen a lo suyo. Si la isla está corrida tan a la
+izquierda que no cabe, la de los flujos sale a su **derecha**; si no cabe en
+ningún lado, donde haya más sitio, sin salirse de la pantalla.
+
+**Se puede colapsar.** «colapsar ›» (o «‹ colapsar» si sale a la derecha) la
+deja en una pastilla con `Flujos` y cómo va lo que corre (`paso 2/3`, `falló`,
+`terminó`); un clic en ella la abre otra vez, y se acuerda
+(`flows_collapsed` en `settings.json`). Un aviso con **Ver workflow** la abre
+si estaba colapsada.
 
 - **La lista:** tus workflows guardados, cada uno con **lanzar ›**,
   **editar** y **borrar** (que pregunta antes: no se puede deshacer).
@@ -312,8 +322,8 @@ perder lo que se editaba.
   o seguir con el siguiente. **Guardar** lo deja en la lista y **Guardar y
   lanzar** además lo corre; si no se puede todavía, encima de los botones
   dice por qué. **Cancelar** con cambios sin guardar pregunta antes.
-- **Escribir:** un clic en un campo pone ahí la caja de texto y la isla toma
-  el teclado, como en el chat. Tab y Enter pasan al campo que sigue,
+- **Escribir:** un clic en un campo pone ahí una caja de texto y la isla de los
+  flujos toma el teclado, como el chat. Tab y Enter pasan al campo que sigue,
   Shift+Tab al anterior y Esc lo suelta. El agente de un paso y el proyecto
   se eligen en un menú, como el de «con quién hablas».
 - **La ejecución:** los mismos pasos con cómo va cada uno (✓ ● ✗) y lo que
@@ -334,6 +344,10 @@ perder lo que se editaba.
   al día» para la cadena cuando no lo está.
 - **Con el panel cerrado**, al acabar (o al pararse en un paso) sale un aviso
   con **Ver workflow**.
+- **Modo vidrio:** la isla de los flujos lo sigue como la de siempre: fondo translúcido
+  con su filo claro, un menú abierto translúcido como las burbujas de las
+  fuentes y, debajo de cada texto, su sombra, para que se lea sobre lo que haya
+  detrás.
 
 Corre un workflow a la vez, con diez pasos como mucho, y una ejecución no
 sobrevive a un reinicio de la isla: los pasos ya hechos quedan en sus chats,
@@ -812,6 +826,9 @@ estas reglas el fondo queda translúcido pero nítido (`~/.config/hypr/looknfeel
 layerrule = blur on, match:namespace elyares
 layerrule = ignore_alpha 0.20, match:namespace elyares
 ```
+
+La regla es por el nombre entero de la capa, así que la isla de los flujos usa el
+mismo (`elyares`) y se desenfoca igual; con otro nombre se vería nítida.
 
 `ignore_alpha` deja sin desenfocar la parte transparente de la ventana. Sobre
 fondos claros o muy coloridos el texto se lee peor que con el fondo negro.

@@ -178,7 +178,6 @@ class ChatView:
         self.chat_whom = None         # para quién es lo escrito en la caja: 'chat' o el agente de un mini chat
         self.chat_saved = None        # lo último que se guardó de las conversaciones
         self.chat_copied = None       # la respuesta recién copiada: (su sitio en la conversación, cuándo)
-        self.chat_single = False      # la caja va en una sola línea: está sobre un campo del panel de workflows
         self.entry = self.entry_box = None
 
     def chat_widgets(self, overlay):
@@ -348,8 +347,6 @@ class ChatView:
             self.chat = c
             self.chat_cache.clear()
             self.chat_scroll, self.chat_menu = 0.0, None
-        if self.wf_open:
-            self.close_workflows()
         self.chat_open, self.off = True, False
         self.projects_open = False
         self.chat_claim('chat')
@@ -382,7 +379,7 @@ class ChatView:
 
     def chat_type(self, on):
         """Toma el teclado para escribir, o lo suelta."""
-        self.chat_typing = bool(on) and (self.chat_open or self.wf_open or self.briefing() is not None)
+        self.chat_typing = bool(on) and (self.chat_open or self.briefing() is not None)
         self.chat_keyed = time.monotonic()
         win = getattr(self, 'win', None)
         if win is not None:
@@ -399,8 +396,6 @@ class ChatView:
         if self.chat_typing and now - self.chat_keyed > CHAT_IDLE_SECS:
             if self.chat_open:
                 self.chat_type(False)
-            elif self.wf_open:
-                self.wf_focus(None)
             else:
                 self.brief_drop()
         for c in self.chats.values():
@@ -744,16 +739,12 @@ class ChatView:
 
     def on_chat_changed(self, _buffer):
         self.chat_pick, self.chat_quiet = 0, False
-        if self.wf_open:
-            self.wf_typed(self.chat_text())     # la caja está sobre un campo del panel de workflows
         self.ensure_tick()
 
     def on_chat_key(self, _ctrl, keyval, _code, mods):
         self.chat_keyed = time.monotonic()
         found = self.suggestions()
         shift, ctrl = mods & Gdk.ModifierType.SHIFT_MASK, mods & Gdk.ModifierType.CONTROL_MASK
-        if self.wf_open and not self.chat_open:
-            return self.on_wf_key(keyval, bool(shift))
         if keyval == Gdk.KEY_Escape:
             if self.chat_menu:
                 self.chat_menu = None
@@ -843,9 +834,6 @@ class ChatView:
         self.chat_set_text(f'De {c.name}:\n\n{text}\n\n')
 
     def on_chat_scroll(self, _ctrl, _dx, dy):
-        if self.target() == 'workflows':
-            self.on_wf_scroll(dy)
-            return True
         if not (self.chat_open and self.target() == 'chat'):
             return False
         self.chat_scroll = max(0.0, self.chat_scroll - dy * CHAT_SCROLL)
@@ -1088,32 +1076,17 @@ class ChatView:
             self.hits.append(('chat', f'img:{i}', x, y, cw, CHAT_CHIP_H))
             x += cw + 6
 
-    def chat_lines(self, single):
-        """La caja, en una sola línea o en las que haga falta. En el chat lo
-        escrito se parte y la caja crece; sobre un campo del panel de
-        workflows va en una línea y, si no cabe, se corre a lo ancho."""
-        if single == self.chat_single:
-            return
-        self.chat_single = single
-        self.entry.set_wrap_mode(Gtk.WrapMode.NONE if single else Gtk.WrapMode.WORD_CHAR)
-        self.entry_box.set_policy(Gtk.PolicyType.EXTERNAL if single else Gtk.PolicyType.NEVER,
-                                  Gtk.PolicyType.EXTERNAL if single else Gtk.PolicyType.AUTOMATIC)
-
     def chat_place(self, h):
         """Pone la caja de texto de verdad sobre la dibujada (la del chat o la
         del mini chat de un desglose), y solo con la isla ya abierta."""
         brief = self.briefing()
-        if self.chat_typing and not self.chat_open and brief is None and not self.wf_open:
+        if self.chat_typing and not self.chat_open and brief is None:
             self.chat_type(False)         # el desglose se cerró: el teclado no se queda tomado
         box = self.entry_box
         if box is None:
             return
-        self.chat_lines(self.target() == 'workflows')
         if self.target() == 'chat':
             show = h > CHAT_H - CHAT_SHOW_AT
-        elif self.target() == 'workflows':
-            # Sobre el campo del panel de workflows en el que se escribe.
-            show = self.wf_field is not None and h > self.goal()[1] - CHAT_SHOW_AT
         else:
             show = brief is not None and brief[1] == self.chat_whom and h > self.goal()[1] - CHAT_SHOW_AT
         show = show and self.chat_box is not None and (self.chat_typing or bool(self.chat_text()))
