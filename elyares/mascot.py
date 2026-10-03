@@ -4,7 +4,7 @@ Es el mismo dibujo del prototipo web, pasado de canvas a cairo. Todo está en
 unidades propias: la cara mide unos 160 de ancho y la figura completa, con la
 antena, va de y=-130 a y=+123. Quien llama traslada y escala.
 
-Son seis personajes con la misma cara, las mismas gafas, la misma antena y
+Son ocho personajes con la misma cara, las mismas gafas, la misma antena y
 los mismos gestos. Cada uno pone lo suyo en capas: lo que lleva en la cabeza
 (`HATS`), lo que asoma detrás de la cara (`BACK`) o delante de las gafas
 (`FRONT`), lo que trae en las manos al trabajar (`PROPS`) y su color
@@ -18,6 +18,10 @@ los mismos gestos. Cada uno pone lo suyo en capas: lo que lleva en la cabeza
                 pintura en el cachete y una paleta
     mobile      gorro de lana caído, barba y bigote de manubrio, gafas de
                 pasta, y un teléfono con su café
+    devops      capucha negra, chamarra con </> en el pecho, código reflejado
+                en las gafas y una terminal
+    researcher  sombrero de explorador con su brújula, pañoleta al cuello y
+                un cuaderno donde apunta lo que encuentra
 """
 
 import math
@@ -36,11 +40,15 @@ COLORS = {
 
 DEFAULT_ACCENT = COLORS['accent']
 
-ROLES = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile')
+ROLES = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', 'devops', 'researcher')
 # El color de cada personaje: la antena mientras trabaja y su punto en la lista.
-# Ni ámbar, ni rojo, ni verde: esos ya dicen permiso, problema y terminado.
+# Ni ámbar, ni rojo, ni verde: esos ya dicen permiso, problema y terminado. Con
+# ocho ya no quedan tonos lejos de todos: el lima del devops y el naranja del
+# researcher van en los dos huecos más anchos que quedaban, entre el amarillo
+# y el verde y entre el rojo y el amarillo.
 ACCENTS = {'architect': '#22c7dd', 'auditor': '#9a6bff', 'reviewer': '#ff6fb5',
-           'designer': '#e052f0', 'mobile': '#d2a679'}
+           'designer': '#e052f0', 'mobile': '#d2a679', 'devops': '#a6e84a',
+           'researcher': '#ff8a4c'}
 
 
 def set_accent(color):
@@ -1209,17 +1217,304 @@ def _phone(cr, t, motion):
     _hands(cr, t, motion, (-22, 13), 114)
 
 
+# ── devops ───────────────────────────────────────────────────────────────────
+
+HOOD = ('#3a4050', '#15171d')     # la capucha y la chamarra: negro que no se pierde sobre la isla
+
+
+def _code_mark(cr, x, y, k, color, width):
+    """El icono </>, centrado en (x, y) y de tamaño k."""
+    cr.move_to(x - 1.1 * k, y - k); cr.line_to(x - 2.1 * k, y); cr.line_to(x - 1.1 * k, y + k)
+    cr.move_to(x + 1.1 * k, y - k); cr.line_to(x + 2.1 * k, y); cr.line_to(x + 1.1 * k, y + k)
+    cr.move_to(x + .45 * k, y - 1.3 * k); cr.line_to(x - .45 * k, y + 1.3 * k)
+    stroke(cr, width * 1.8, preserve=True)
+    stroke(cr, width, color)
+
+
+def _jacket(cr):
+    """La capucha por detrás de la cabeza y, abajo, la chamarra negra con sus
+    cordones y el </> en el pecho."""
+    cr.new_path()
+    cr.move_to(-94, 96)
+    cr.curve_to(-124, -10, -84, -92, -14, -122)
+    quad(cr, 0, -130, 14, -122)
+    cr.curve_to(84, -92, 124, -10, 94, 96)
+    cr.close_path()
+    g = cairo.LinearGradient(0, -118, 0, 96)
+    g.add_color_stop_rgba(0, *rgba(HOOD[0]))
+    g.add_color_stop_rgba(1, *rgba(HOOD[1]))
+    cr.set_source(g)
+    cr.fill_preserve()
+    stroke(cr, 5.5)
+    # los hombros
+    cr.new_path()
+    cr.move_to(-60, 90)
+    cr.line_to(60, 90)
+    cr.curve_to(92, 96, 104, 112, 106, 126)
+    cr.line_to(-106, 126)
+    cr.curve_to(-104, 112, -92, 96, -60, 90)
+    cr.close_path()
+    fill(cr, HOOD[1], preserve=True)
+    stroke(cr, 5)
+    cr.move_to(0, 100)
+    cr.line_to(0, 126)
+    stroke(cr, 3, 'metal', .7)
+    for g in (-1, 1):
+        cr.move_to(g * 18, 98)
+        quad(cr, g * 22, 108, g * 19, 117)
+        stroke(cr, 5.5, preserve=True)
+        stroke(cr, 2.6, 'face')
+        cr.arc(g * 19, 119, 3, 0, TAU)
+        fill(cr, ACCENTS['devops'])
+    _code_mark(cr, -64, 111, 5.5, ACCENTS['devops'], 2.8)
+
+
+def _hood(cr):
+    """El borde de la capucha, por delante: enmarca la cara y tapa la frente."""
+    def rim():
+        cr.new_path()
+        cr.move_to(-88, 50)
+        cr.curve_to(-104, -44, -62, -106, 0, -106)
+        cr.curve_to(62, -106, 104, -44, 88, 50)
+        cr.curve_to(84, -4, 66, -22, 0, -22)
+        cr.curve_to(-66, -22, -84, -4, -88, 50)
+        cr.close_path()
+
+    rim()
+    g = cairo.LinearGradient(0, -106, 0, 40)
+    g.add_color_stop_rgba(0, *rgba('#454c5e'))
+    g.add_color_stop_rgba(1, *rgba(HOOD[1]))
+    cr.set_source(g)
+    cr.fill()
+    cr.save()
+    rim()
+    cr.clip()
+    # un brillo
+    cr.move_to(-66, -30)
+    quad(cr, -62, -70, -36, -88)
+    cr.set_source_rgba(1, 1, 1, .18)
+    cr.set_line_width(5)
+    cr.stroke()
+    cr.restore()
+    rim()
+    stroke(cr, 5.5)
+    # el dobladillo de la abertura, más claro: es lo que la hace capucha y no pelo
+    cr.move_to(-85, 40)
+    cr.curve_to(-80, 2, -62, -15, 0, -15)
+    cr.curve_to(62, -15, 80, 2, 85, 40)
+    stroke(cr, 9, preserve=True)
+    stroke(cr, 4.5, '#7c869c')
+    _code_mark(cr, 0, -58, 10, ACCENTS['devops'], 4.6)
+
+
+def _glow(cr):
+    """El código de la pantalla, reflejado en las gafas."""
+    for x in (-68, 10):
+        cr.new_path()
+        rrect(cr, x, 12, 58, 44, 13)
+        fill(cr, ACCENTS['devops'], .2)
+        for i, w in enumerate((15, 22, 11)):
+            cr.move_to(x + 9, 21 + i * 6)
+            cr.line_to(x + 9 + w, 21 + i * 6)
+        stroke(cr, 2.2, ACCENTS['devops'], .75)
+
+
+def _terminal(cr, t, motion):
+    """Una terminal negra, con el prompt esperando."""
+    cr.new_path()
+    rrect(cr, -36, 82, 72, 28, 4)
+    fill(cr, '#10131a', preserve=True)
+    stroke(cr, 3.5)
+    rrect(cr, -36, 82, 72, 28, 4)
+    stroke(cr, 1.6, ACCENTS['devops'], .55)
+    cr.move_to(-27, 91)
+    cr.line_to(-21, 96)
+    cr.line_to(-27, 101)
+    stroke(cr, 2.8, ACCENTS['devops'])
+    if (t * 2.2 * max(motion, .01)) % 1 < .6:
+        cr.move_to(-15, 101)
+        cr.line_to(-5, 101)
+        stroke(cr, 2.8, ACCENTS['devops'])
+    cr.move_to(2, 92)
+    cr.line_to(26, 92)
+    cr.move_to(2, 98)
+    cr.line_to(18, 98)
+    stroke(cr, 2.2, 'metal', .7)
+    rrect(cr, -46, 108, 92, 8, 3)
+    fill(cr, '#2a2f3a', preserve=True)
+    stroke(cr, 3.5)
+    _hands(cr, t, motion, (-28, 28))
+
+
+# ── researcher ───────────────────────────────────────────────────────────────
+
+KHAKI = ('#e6cf9c', '#b8935a')    # el sombrero de explorador, de arriba abajo
+
+
+def _neckerchief(cr):
+    """La pañoleta de explorador, con su nudo."""
+    for g in (-1, 1):
+        cr.new_path()
+        cr.move_to(g * 46, 86)
+        cr.line_to(0, 100)
+        cr.line_to(g * 16, 126)
+        cr.line_to(g * 60, 104)
+        cr.close_path()
+        fill(cr, ACCENTS['researcher'], preserve=True)
+        stroke(cr, 4)
+        for x, y in ((g * 34, 98), (g * 26, 110), (g * 44, 106)):
+            cr.arc(x, y, 2.2, 0, TAU)
+            fill(cr, 'face', .9)
+    cr.new_path()
+    rrect(cr, -9, 96, 18, 14, 5)
+    fill(cr, KHAKI[1], preserve=True)
+    stroke(cr, 3.5)
+
+
+def _explorer_hat(cr):
+    """Sombrero de explorador: copa con su hendidura, cinta y ala ancha."""
+    def crown():
+        cr.new_path()
+        cr.move_to(-62, -8)
+        cr.curve_to(-70, -64, -48, -96, -18, -94)
+        quad(cr, 0, -84, 18, -94)
+        cr.curve_to(48, -96, 70, -64, 62, -8)
+        quad(cr, 0, 4, -62, -8)
+        cr.close_path()
+
+    crown()
+    g = cairo.LinearGradient(0, -96, 0, 0)
+    g.add_color_stop_rgba(0, *rgba(KHAKI[0]))
+    g.add_color_stop_rgba(1, *rgba(KHAKI[1]))
+    cr.set_source(g)
+    cr.fill()
+    cr.save()
+    crown()
+    cr.clip()
+    cr.move_to(0, -86)
+    quad(cr, -4, -60, 0, -34)
+    stroke(cr, 3, alpha=.3)
+    cr.move_to(-48, -34)
+    quad(cr, -46, -64, -28, -80)
+    cr.set_source_rgba(1, 1, 1, .45)
+    cr.set_line_width(5)
+    cr.stroke()
+    cr.restore()
+    crown()
+    stroke(cr, 5.5)
+    # la cinta
+    cr.new_path()
+    cr.move_to(-63, -12)
+    quad(cr, 0, 0, 63, -12)
+    cr.line_to(64, -28)
+    quad(cr, 0, -16, -64, -28)
+    cr.close_path()
+    fill(cr, ACCENTS['researcher'], preserve=True)
+    stroke(cr, 4.5)
+    # la brújula, prendida en la cinta
+    cr.new_path()
+    cr.arc(-34, -17, 10, 0, TAU)
+    fill(cr, 'face', preserve=True)
+    stroke(cr, 3.5)
+    cr.move_to(-34, -24)
+    cr.line_to(-31, -17)
+    cr.line_to(-37, -17)
+    cr.close_path()
+    fill(cr, 'red')
+    cr.move_to(-34, -10)
+    cr.line_to(-31, -17)
+    cr.line_to(-37, -17)
+    cr.close_path()
+    fill(cr, 'metal')
+    # el ala
+    cr.new_path()
+    cr.move_to(-104, -2)
+    cr.curve_to(-72, -18, 72, -18, 104, -2)
+    cr.curve_to(110, 12, 60, 16, 0, 16)
+    cr.curve_to(-60, 16, -110, 12, -104, -2)
+    cr.close_path()
+    g = cairo.LinearGradient(0, -14, 0, 16)
+    g.add_color_stop_rgba(0, *rgba(KHAKI[0]))
+    g.add_color_stop_rgba(1, *rgba(KHAKI[1]))
+    cr.set_source(g)
+    cr.fill_preserve()
+    stroke(cr, 5)
+    cr.move_to(-84, 2)
+    quad(cr, 0, -9, 84, 2)
+    cr.set_source_rgba(1, 1, 1, .4)
+    cr.set_line_width(3)
+    cr.stroke()
+
+
+def _notebook(cr, t, motion):
+    """El cuaderno abierto, con lo que va encontrando, y el lápiz que apunta."""
+    for g in (-1, 1):
+        cr.new_path()
+        cr.move_to(0, 88)
+        quad(cr, g * 22, 82, g * 44, 88)
+        cr.line_to(g * 44, 116)
+        quad(cr, g * 22, 110, 0, 116)
+        cr.close_path()
+        fill(cr, 'face', preserve=True)
+        stroke(cr, 3.5)
+    cr.move_to(0, 88)
+    cr.line_to(0, 116)
+    stroke(cr, 3)
+    for i in range(3):
+        cr.move_to(-37, 94 + i * 6)
+        quad(cr, -22, 90 + i * 6, -7, 94 + i * 6)
+    stroke(cr, 2.2, 'metal')
+    cr.move_to(8, 94)
+    quad(cr, 20, 91, 30, 93)
+    stroke(cr, 2.2, 'metal')
+    # el marcador, y una estrella en lo que importa
+    cr.move_to(-30, 84)
+    cr.line_to(-30, 98)
+    cr.line_to(-26.5, 94.5)
+    cr.line_to(-23, 98)
+    cr.line_to(-23, 84)
+    cr.close_path()
+    fill(cr, ACCENTS['researcher'], preserve=True)
+    stroke(cr, 2)
+    star(cr, 14, 104, 5.5)
+    fill(cr, ACCENTS['researcher'], preserve=True)
+    stroke(cr, 1.8)
+    _hands(cr, t, motion * .3, (-52,), 106)
+    # el lápiz, apuntando
+    b = math.sin(t * 9) * 3 * motion
+    cr.save()
+    cr.translate(40 + b, 100 - abs(b) * .6)
+    cr.rotate(0.62)
+    cr.new_path()
+    rrect(cr, -3.5, -22, 7, 26, 2)
+    fill(cr, 'yellow', preserve=True)
+    stroke(cr, 2.6)
+    cr.move_to(-3.5, 4)
+    cr.line_to(0, 13)
+    cr.line_to(3.5, 4)
+    cr.close_path()
+    fill(cr, '#f1d6a8', preserve=True)
+    stroke(cr, 2.6)
+    cr.restore()
+    cr.new_path()
+    cr.arc(54 + b, 98 - abs(b) * .6, 7.5, 0, TAU)
+    fill(cr, 'face', preserve=True)
+    stroke(cr, 3.5)
+
+
 # ── las capas de cada personaje ──────────────────────────────────────────────
 
 HATS = {'engineer': _cap, 'architect': _hardhat, 'auditor': _front_cap, 'reviewer': _eyeshade,
-        'designer': _beret, 'mobile': _beanie}
+        'designer': _beret, 'mobile': _beanie, 'devops': _hood, 'researcher': _explorer_hat}
 PROPS = {'engineer': _laptop, 'architect': _blueprint, 'auditor': _clipboard, 'reviewer': _magnifier,
-         'designer': _palette, 'mobile': _phone}
+         'designer': _palette, 'mobile': _phone, 'devops': _terminal, 'researcher': _notebook}
 BACK = {'architect': lambda cr: _pencil(cr, 89, 4, 0.24, 'yellow'),
         'auditor': _collar,
         'reviewer': lambda cr: _pencil(cr, -89, 4, -0.24, 'red'),
-        'designer': _brush}
-FRONT = {'reviewer': _visor, 'designer': _dabs}
+        'designer': _brush,
+        'devops': _jacket,
+        'researcher': _neckerchief}
+FRONT = {'reviewer': _visor, 'designer': _dabs, 'devops': _glow}
 # Grosor del armazón de las gafas, sobre el de siempre: discreto o de pasta.
 FRAMES = {'auditor': .64, 'mobile': 1.3}
-PALE = {'auditor': .3, 'mobile': .5}        # cuánto se le notan los cachetes
+PALE = {'auditor': .3, 'mobile': .5, 'devops': .5}        # cuánto se le notan los cachetes

@@ -495,9 +495,29 @@ class Tablero(Dibujo):
         self.draw()
         # Solo el auditor está al frente; el engineer espera en la banca.
         self.assertEqual(self.hit('member'), [('a', 'auditor')])
-        for text in ('elyares-auditor', 'Ejecutando gitleaks git', 'esperando', 'libre'):
+        # Con siete en la banca no caben uno debajo de otro: van las caras en
+        # cuadrícula y, al pie, quién espera.
+        for text in ('elyares-auditor', 'Ejecutando gitleaks git', 'engineer esperando'):
             self.assertIn(text, self.shown)
         self.assertNotIn('elyares-engineer', self.shown)
+        briefs = [(key, x, y, w, h) for kind, key, x, y, w, h in self.isl.hits if kind == 'brief']
+        self.assertEqual([key for key, *_ in briefs], [('a', role) for role in state.TEAM[1:] if role != 'auditor'])
+        self.assertEqual(len({x for _, x, *_ in briefs}), 2)            # dos columnas
+        # Con el cursor encima de uno, el pie dice quién es.
+        key, x, y, w, h = next(b for b in briefs if b[0] == ('a', 'devops'))
+        self.isl.pointer = (x + w / 2, y + h / 2)
+        self.draw()
+        self.assertIn('devops ›', self.shown)
+
+    def test_con_pocos_libres_la_banca_es_una_lista(self):
+        self.isl.expanded = True
+        self.work('a', 'elyares-architect', 'elyares-auditor')
+        self.draw()
+        self.assertEqual(len(self.hit('member')), 3)
+        # Cinco en la banca: uno debajo de otro, con su nombre y «libre».
+        briefs = [x for kind, _, x, *_ in self.isl.hits if kind == 'brief']
+        self.assertEqual((len(briefs), len(set(briefs))), (5, 1))
+        self.assertEqual(self.shown.count('libre'), 5)
 
     def test_mide_lo_mismo_trabajen_uno_dos_o_todos(self):
         self.isl.expanded = True
@@ -509,9 +529,9 @@ class Tablero(Dibujo):
             sizes.add(self.isl.goal())
             self.draw()
             front.append(len(self.hit('member')))
-        self.assertEqual(front, [1, 2, 4, 6])
+        self.assertEqual(front, [1, 2, 4, len(state.TEAM)])
         self.assertEqual(len(sizes), 1)
-        # Los seis trabajando caben en dos filas, y cada uno con su nombre.
+        # Todos trabajando caben en dos filas, y cada uno con su nombre.
         self.assertEqual(len({y for kind, _, _, y, _, _ in self.isl.hits if kind == 'member'}), 2)
         for role in state.TEAM:
             self.assertIn(role, self.shown)
@@ -523,10 +543,11 @@ class Tablero(Dibujo):
             self.send('agent-stop', agent_id=f'a-{agent}')
         self.draw()
         self.assertEqual(self.hit('member'), [])
-        self.assertEqual(self.shown.count('libre'), 5)
+        self.assertEqual(self.shown.count('libre'), len(state.TEAM) - 1)
         for role in state.TEAM:
             self.assertIn(role, self.shown)
-        self.assertEqual(len({y for kind, _, _, y, _, _ in self.isl.hits if kind == 'brief'}), 1)
+        # Más de seis no caben en una fila con su nombre: van en dos.
+        self.assertEqual(len({y for kind, _, _, y, _, _ in self.isl.hits if kind == 'brief'}), 2)
 
     def test_un_clic_en_uno_abre_su_desglose(self):
         self.isl.expanded = True
@@ -1110,8 +1131,8 @@ class Chat(Dibujo):
         self.draw()
         self.assertIn('hablarle ›', self.shown)
         self.assertEqual(self.hit('talk'), [''])
-        self.assertEqual(self.hit('brief'), [('a', 'architect'), ('a', 'reviewer'), ('a', 'designer'),
-                                             ('a', 'mobile')])                         # las caritas libres
+        # Las caritas libres: todos menos el del desglose y el auditor, que trabaja.
+        self.assertEqual(self.hit('brief'), [('a', role) for role in state.TEAM[1:] if role != 'auditor'])
 
     def brief(self, role='auditor', text='audita el diff'):
         """Un clic en uno de los tres, libre, y un encargo en su mini chat."""
@@ -1195,7 +1216,8 @@ class Chat(Dibujo):
         self.brief('reviewer', 'revisa el diff')
         self.draw()
         self.assertEqual(self.hit('member'), [('a', 'engineer'), ('a', 'auditor'), ('a', 'reviewer')])
-        self.assertEqual(self.hit('brief'), [('a', 'architect'), ('a', 'designer'), ('a', 'mobile')])
+        self.assertEqual(self.hit('brief'), [('a', role) for role in state.TEAM[1:]
+                                             if role not in ('auditor', 'reviewer')])
 
     def test_el_punto_de_la_pestana_es_del_encargo_si_la_sesion_descansa(self):
         self.sending()
