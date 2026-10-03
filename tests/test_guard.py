@@ -32,6 +32,8 @@ class SoloLectura(unittest.TestCase):
         'curl -I https://ejemplo.mx', 'curl -s https://ejemplo.mx -o /tmp/pagina.html',
         'systemctl --user status elyares-engineer', 'psql -c "select count(*) from users"',
         "python3 - <<'EOF'\nimport json\nprint(json.load(open('a.json'))['rm'])\nEOF",
+        # el cuerpo de un heredoc entre comillas es texto, con sus acentos graves y sus `>`
+        "cat > /tmp/nota.md <<'EOF'\nSe abre con `a > b` o `rm x`.\nEOF\nls -l /tmp/nota.md",
         # operación: ver sin tocar
         'make -n update', 'make --dry-run -C api deploy', 'make lint', 'make -j4 test',
         'gh run view 123 --log-failed', 'gh pr view 12', 'gh pr checks', 'gh pr diff 12',
@@ -136,6 +138,27 @@ class Hook(unittest.TestCase):
         code, said = run('solo-lectura', {'tool_input': {'command': 'git push'}})
         self.assertEqual(code, 2)
         self.assertIn('`git push`', said)
+
+    def test_el_devops_ademas_entrega(self):
+        for command in ('git add elyares/app.py tests/test_island.py', 'git commit -F /tmp/commit-msg-1.txt',
+                        'git commit -m "feat: x"', 'git push', 'git push -u origin feat/x', 'git fetch origin',
+                        'git switch -c feat/x', 'git checkout -b feat/x v2',
+                        'gh pr create --base v2 --title x --body-file /tmp/pr-body.md',
+                        'gh pr edit 12 --title x', 'git status && git diff --stat', 'make test'):
+            self.assertEqual(run('entrega', {'tool_input': {'command': command}}), (0, ''), command)
+        for command in ('git add -A', 'git add .', 'git commit --amend', 'git commit -m x --no-verify',
+                        'git commit -am x', 'git push --force', 'git push -f origin feat/x',
+                        'git push --force-with-lease', 'git push origin :feat/x', 'git push origin +feat/x',
+                        'git push --delete origin feat/x', 'git reset --hard', 'git checkout -- .',
+                        'git checkout main', 'git rebase v2', 'git merge v2', 'git clean -fd', 'git stash',
+                        'gh pr merge 12', 'gh pr close 12', 'gh release create v3', 'rm -rf build',
+                        'ssh prod', 'make deploy', 'npm install', "bash -c 'git push --force'"):
+            code, said = run('entrega', {'tool_input': {'command': command}})
+            self.assertEqual(code, 2, command)
+            self.assertIn('lee y entrega', said)
+        # Lo de entregar sigue frenado para los que solo leen.
+        self.assertEqual(run('solo-lectura', {'tool_input': {'command': 'git commit -m x'}})[0], 2)
+        self.assertEqual(run('solo-lectura', {'tool_input': {'command': 'gh pr create'}})[0], 2)
 
     def test_lo_que_no_entiende_lo_deja_pasar(self):
         self.assertEqual(guard.main(['solo-lectura'], io.StringIO('no es json')), 0)
