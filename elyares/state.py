@@ -153,12 +153,12 @@ def card_lines(lines):
 
 
 def card_actions(items):
-    """Los botones de una alerta: [{label, cmd | url | jump | chat, term, hold, after}].
+    """Los botones de una alerta: [{label, cmd | url | jump | chat | workflows, term, hold, after}].
 
     `cmd` es una lista de argumentos; con `term` corre en una terminal nueva
     (y con `hold` espera una tecla al terminar). `jump` lleva al pane de la
     alerta y `chat` abre el chat de la isla (True) o una de sus conversaciones
-    (el id de su sesión). `after` dice qué pasa con la alerta al pulsarlo:
+    (el id de su sesión); `workflows`, el panel de workflows. `after` dice qué pasa con la alerta al pulsarlo:
     'dismiss' la descarta, 'clear' la quita sin silenciarla.
     """
     out = []
@@ -168,7 +168,7 @@ def card_actions(items):
         cmd = a.get('cmd')
         runs = isinstance(cmd, list) and cmd and all(isinstance(c, str) for c in cmd)
         talks = a.get('chat') is True or (isinstance(a.get('chat'), str) and a['chat'])
-        if runs or isinstance(a.get('url'), str) or a.get('jump') is True or talks:
+        if runs or isinstance(a.get('url'), str) or a.get('jump') is True or talks or a.get('workflows') is True:
             out.append(a)
     return out[:CARD_ACTIONS]
 

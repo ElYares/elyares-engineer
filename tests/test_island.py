@@ -60,6 +60,12 @@ class IslandCase(unittest.TestCase):
         isl.monitor = None
         isl.projects_init()
         isl.chat_init()
+        # Ninguna prueba toca los workflows guardados de verdad.
+        for name, value in (('load', lambda: []), ('save', mock.Mock())):
+            flows = mock.patch.object(app.workflowview.workflows, name, value)
+            flows.start()
+            self.addCleanup(flows.stop)
+        isl.workflows_init()
         isl.reloading = False
         # Ninguna prueba le pregunta a Hyprland de verdad.
         for name, value in (('focused_monitor', None), ('monitors', [])):
@@ -289,7 +295,8 @@ class Consulta(IslandCase):
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
         keys = [key for key, *_ in self.isl.pills]
         self.assertEqual(keys, [key for key, _ in sources.SOURCES]
-                         + [app.projectview.PROJECTS_PILL, app.CHAT_PILL, commands.HELP])
+                         + [app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
+                            commands.HELP])
         for (_, x, _, w, _), (_, nx, *_) in zip(self.isl.pills, self.isl.pills[1:]):
             self.assertLessEqual(x + w, nx)
         self.assertLessEqual(self.isl.pills[-1][1] + self.isl.pills[-1][3], 100 + width - 18)
@@ -1403,6 +1410,46 @@ class Chat(Dibujo):
         self.isl.on_chat_enter()
         c.send.assert_called_once_with('luego corre /commit', [])
 
+    def test_el_pie_de_una_respuesta_la_copia(self):
+        c = self.conversation()
+        E = app.chatview.chat.Entry
+        c.entries.append(E('foot', 'elyares-engineer · Opus · 3 s'))
+        self.draw()
+        self.assertEqual(self.hit('chat').count('copy:2'), 1)
+        self.assertNotIn('pass:2', self.hit('chat'))       # al engineer no se le pasa lo suyo
+        _, key, x, y, w, h = next(hit for hit in self.isl.hits if hit[1] == 'copy:2')
+        with mock.patch.object(app.chatview.subprocess, 'run') as run:
+            self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        # Entera y con su markdown, que es lo que se pega en otro lado.
+        self.assertEqual(run.call_args.kwargs['input'].decode(), c.entries[1].text)
+        self.draw()
+        self.assertIn('copiado ✓', self.shown)
+        # Sin wl-copy, por el portapapeles de GTK.
+        with mock.patch.object(app.chatview.subprocess, 'run', side_effect=FileNotFoundError):
+            self.isl.on_chat_hit('copy:2')
+        self.isl.da.get_clipboard().set.assert_called_once_with(c.entries[1].text)
+        # Un turno cortado sin respuesta no tiene qué copiar.
+        c.entries += [E('you', 'otra cosa'), E('foot', 'elyares-engineer · Opus · 1 s')]
+        self.draw()
+        self.assertNotIn('copy:4', self.hit('chat'))
+
+    def test_lo_de_un_agente_se_le_pasa_al_engineer(self):
+        self.isl.open_chat()
+        engineer = self.isl.chat
+        self.isl.on_chat_hit('agent:elyares-designer')
+        E = app.chatview.chat.Entry
+        self.isl.chat.entries = [E('you', 'propón el panel'), E('claude', '## Panel\nA la derecha.'),
+                                 E('foot', 'elyares-designer · Sonnet · 20 s')]
+        self.draw()
+        self.assertIn('al engineer ›', self.shown)
+        self.isl.chat_set_text = mock.Mock()
+        self.isl.on_chat_hit('pass:2')
+        # No se manda sola: queda en la caja del engineer, en el mismo proyecto.
+        self.assertIs(self.isl.chat, engineer)
+        self.assertTrue(self.isl.chat_typing)
+        self.isl.chat_set_text.assert_called_with('De elyares-designer:\n\n## Panel\nA la derecha.\n\n')
+        self.assertEqual(engineer.entries, [])
+
     def test_la_arroba_nombra_agentes_y_archivos(self):
         c = self.conversation()
         c.files, c.files_at = ['elyares/chat.py', 'README.md'], float('inf')
@@ -1436,6 +1483,7 @@ class Chat(Dibujo):
         other = app.Island.__new__(app.Island)
         other.model, other.settings = self.isl.model, self.isl.settings
         other.chat_init()
+        other.workflows_init()
         other.chat_restore(json.loads(json.dumps(saved)))
         self.assertEqual(sorted(other.chats), [('', '/x/proj'), ('', '/x/tl'), ('elyares-auditor', '/x/proj')])
         back = other.chat
@@ -1450,6 +1498,7 @@ class Chat(Dibujo):
         # Lo que se guardó cuando había una sola conversación por agente se sigue leyendo.
         old = {'chats': [c.dump(), aud.dump()], 'current': '', 'open': False, 'hosts': {'elyares-auditor': 's-chat'}}
         other.chat_init()
+        other.workflows_init()
         other.chat_restore(json.loads(json.dumps(old)))
         self.assertEqual((other.chat.session, other.chat_open), ('s-chat', False))
         # Un aviso viejo, que no dice de qué conversación es, abre la que se tenía a la vista...
@@ -1466,6 +1515,7 @@ class Chat(Dibujo):
         # Lo guardado a medias o roto no tumba el arranque.
         for bad in ({}, {'chats': 'x', 'hosts': []}, {'chats': [{}, 3, {'cwd': 7}], 'current': 9}):
             other.chat_init()
+            other.workflows_init()
             other.chat_restore(bad)
             self.assertEqual((other.chats, other.chat, other.chat_open), ({}, None, False))
 
@@ -1878,6 +1928,311 @@ class Ficha(IslandCase):
         self.assertEqual(self.isl.card_span, (app.OPEN_H, app.OPEN_H + height))
         # Se pintó algo.
         self.assertTrue(any(surface.get_data()))
+
+
+class Flujos(IslandCase):
+    """Un workflow en marcha: cada paso, en el chat de su agente."""
+
+    def setUp(self):
+        super().setUp()
+        isdir = mock.patch.object(app.workflowview.os.path, 'isdir', lambda path: path == '/x/proj')
+        isdir.start()
+        self.addCleanup(isdir.stop)
+        W = app.workflowview.workflows
+        self.flow = W.Workflow('revisar', '/x/proj', [W.Step('elyares-designer', 'propón'),
+                                                      W.Step('elyares-engineer', 'hazlo')])
+        self.chats = {}
+        self.isl.chat_for = self.chat_for
+
+    def chat_for(self, agent, cwd):
+        """El chat de cada agente, de mentira: apunta lo que se le manda."""
+        if agent not in self.chats:
+            c = mock.Mock(busy=False, agent=agent, cwd=cwd, cut=False, asking=None, session='', model_id='',
+                          project='proj', context=0)
+            c.name = agent or state.MAIN_AGENT
+            c.send.return_value = True
+            c.feed.return_value = True
+            c.reply.return_value = f'lo de {agent or "engineer"}'
+            self.chats[agent] = c
+        return self.chats[agent]
+
+    def done(self, agent, **event):
+        self.isl.on_chat({'type': 'result', **event}, self.chats[agent])
+
+    def test_cada_paso_va_al_chat_de_su_agente_con_lo_del_anterior(self):
+        self.isl.workflow_launch(self.flow)
+        run = self.isl.wf_run
+        designer = self.chats['elyares-designer']
+        designer.send.assert_called_once_with('propón')
+        self.assertEqual((run.index, self.isl.wf_screen), (0, 'run'))
+        self.assertNotIn('', self.chats)                # el engineer aún no sabe nada
+        # Lo que llega de otro chat no mueve el workflow.
+        self.isl.on_chat({'type': 'result'}, self.chat_for('elyares-auditor', '/x/proj'))
+        self.assertEqual(run.index, 0)
+        with mock.patch.object(self.isl, 'chat_notice') as notice:
+            self.done('elyares-designer')
+        notice.assert_not_called()                      # un paso intermedio no avisa: sigue el siguiente
+        sent = self.chats[''].send.call_args.args[0]
+        self.assertTrue(sent.startswith('hazlo'))
+        self.assertIn('lo de elyares-designer', sent)
+        self.assertEqual(run.index, 1)
+        self.done('')
+        self.assertTrue(run.done)
+        self.assertIsNone(run.failed)
+        # Con el panel cerrado, un aviso que lo abre en la ejecución.
+        alert = self.isl.model.sessions['workflow:revisar']
+        self.assertIn('terminó', alert.detail)
+        self.isl.open_workflows = mock.Mock()
+        self.isl.expanded = True
+        self.isl.refresh()
+        self.isl.act(alert, 0)
+        self.isl.open_workflows.assert_called_once_with('run')
+
+    def test_si_un_paso_falla_se_queda_ahi_y_se_reintenta(self):
+        self.isl.workflow_launch(self.flow)
+        run = self.isl.wf_run
+        self.done('elyares-designer', is_error=True, result='sin red')
+        self.assertEqual((run.failed, run.running), (0, False))
+        self.assertNotIn('', self.chats)
+        self.assertEqual(self.isl.workflow_trouble(0), 'El paso 1 (elyares-designer) falló: sin red.')
+        self.assertEqual(self.isl.model.sessions['workflow:revisar'].tone, 'bad')
+        self.isl.workflow_step(0)                       # «Reintentar paso 1»
+        self.assertEqual(self.chats['elyares-designer'].send.call_count, 2)
+        self.done('elyares-designer')
+        self.assertEqual(run.index, 1)
+
+    def test_un_agente_ocupado_no_empieza_y_con_seguir_pasa_al_siguiente(self):
+        self.chat_for('elyares-designer', '/x/proj').busy = True
+        self.isl.workflow_launch(self.flow)
+        run = self.isl.wf_run
+        self.chats['elyares-designer'].send.assert_not_called()
+        self.assertEqual(run.why[0], 'no pudo empezar: está ocupado con otro turno')
+        self.assertFalse(run.running)
+        self.flow.on_fail = app.workflowview.workflows.GO
+        self.isl.workflow_launch(self.flow)
+        run = self.isl.wf_run
+        self.assertEqual((run.failed, run.index), (0, 1))
+        self.chats[''].send.assert_called_once_with('hazlo')
+
+    def test_detener_corta_el_turno_y_no_sigue(self):
+        self.isl.workflow_launch(self.flow)
+        run = self.isl.wf_run
+        self.isl.workflow_launch(self.flow)             # con uno en curso, otro no arranca
+        self.assertIs(self.isl.wf_run, run)
+        self.isl.workflow_stop()
+        designer = self.chats['elyares-designer']
+        designer.interrupt.assert_called_once_with()
+        designer.cut = True
+        self.done('elyares-designer')
+        self.assertEqual((run.running, run.status()), (False, 'Lo detuviste.'))
+        self.assertNotIn('', self.chats)
+        self.assertNotIn('workflow:revisar', self.isl.model.sessions)     # lo paraste tú: no hay aviso
+
+    def test_el_de_cualquier_proyecto_corre_donde_estas(self):
+        self.flow.project = ''
+        P = app.projectview.projects.Project
+        self.isl.projects = [P('proj', '/x/proj', here=True, session='proj'), P('otro', '/x/otro')]
+        self.isl.workflow_launch(self.flow)
+        self.assertEqual(self.isl.wf_run.w.project, '/x/proj')
+        self.assertEqual(self.chats['elyares-designer'].cwd, '/x/proj')
+        self.assertEqual(self.flow.project, '')         # el guardado sigue sin proyecto: vale para el siguiente
+        # Sin tmux ni chat no hay dónde: lo dice y no empieza.
+        self.isl.projects, self.isl.wf_run = [], None
+        self.isl.workflow_launch(self.flow)
+        self.assertEqual(self.isl.wf_run.why[0],
+                         'no pudo empezar: no estás en ningún proyecto; entra a uno en tmux o abre su chat')
+
+    def test_sin_la_carpeta_del_proyecto_no_empieza(self):
+        self.flow.project = '/x/borrado'
+        self.isl.workflow_launch(self.flow)
+        self.assertEqual(self.chats, {})
+        self.assertEqual(self.isl.wf_run.why[0], 'no pudo empezar: la carpeta del proyecto ya no existe')
+
+    def test_guardar_y_lanzar_y_lo_que_no_se_pudo_guardar(self):
+        W = app.workflowview.workflows
+        self.isl.wf_draft, self.isl.wf_screen = W.Draft(self.flow), 'edit'
+        self.isl.wf_draft.saved_as = None               # como uno nuevo
+        self.isl.workflows_save(launch=True)
+        W.save.assert_called_once()
+        self.assertEqual([w.name for w in self.isl.workflows], ['revisar'])
+        self.assertTrue(self.isl.wf_run.running)
+        self.assertIsNone(self.isl.wf_draft)
+        # Si no se puede guardar, lo dice con su referencia y los pasos siguen ahí.
+        draft = self.isl.wf_draft = W.Draft(project='/x/proj')
+        draft.w.name = 'otro'
+        draft.add()
+        with mock.patch.object(W, 'save', side_effect=PermissionError(13, 'no')):
+            self.isl.workflows_save()
+        what, ref, again = self.isl.wf_error
+        self.assertEqual((what, ref), ('No pudimos guardar «otro». Tus pasos siguen aquí; vuelve a intentarlo.',
+                                       'EACCES'))
+        self.assertIs(self.isl.wf_draft, draft)
+        self.assertEqual([w.name for w in self.isl.workflows], ['revisar'])
+        again()                                         # «Reintentar»
+        self.assertIsNone(self.isl.wf_error)
+        self.assertEqual([w.name for w in self.isl.workflows], ['revisar', 'otro'])
+
+    def test_cerrar_no_pierde_lo_que_se_edita_y_cancelar_pregunta(self):
+        W = app.workflowview.workflows
+        self.isl.open_workflows()
+        self.assertEqual(self.isl.target(), 'workflows')
+        self.isl.on_wf_hit('new')
+        draft = self.isl.wf_draft
+        self.isl.wf_typed('a medias')                   # se escribe en el campo del nombre
+        self.assertEqual((self.isl.wf_field, draft.w.name), ('name', 'a medias'))
+        # Cerrar el panel (o abrir el chat) no pierde nada: al volver, ahí sigue.
+        self.isl.on_wf_hit('close')
+        self.assertFalse(self.isl.wf_open)
+        self.isl.open_chat()
+        self.isl.toggle_workflows()
+        self.assertFalse(self.isl.chat_open)
+        self.assertEqual((self.isl.target(), self.isl.wf_screen), ('workflows', 'edit'))
+        self.assertIs(self.isl.wf_draft, draft)
+        # Cancelar sí lo pierde: antes pregunta.
+        self.isl.on_wf_hit('cancel')
+        self.assertEqual(self.isl.wf_confirm, ('discard', None))
+        self.isl.on_wf_hit('keep')                      # «Seguir editando»
+        self.assertIs(self.isl.wf_draft, draft)
+        self.isl.on_wf_hit('cancel')
+        self.isl.on_wf_hit('confirm')                   # «Descartar cambios»
+        self.assertEqual((self.isl.wf_draft, self.isl.wf_screen), (None, 'list'))
+        # Sin cambios, cancelar no pregunta.
+        self.isl.workflows = [self.flow]
+        self.isl.on_wf_hit('edit:0')
+        self.isl.on_wf_hit('cancel')
+        self.assertEqual((self.isl.wf_confirm, self.isl.wf_screen), (None, 'list'))
+        self.assertEqual(W.save.call_count, 0)
+
+    def test_el_editor_con_clics_y_teclas(self):
+        self.isl.open_workflows()
+        self.isl.on_wf_hit('new')
+        draft = self.isl.wf_draft
+        self.isl.wf_typed('revisar')
+        self.isl.on_wf_hit('add')                       # el paso nuevo, listo para escribir
+        self.assertEqual(self.isl.wf_field, 0)
+        self.isl.wf_typed('propón\nla pantalla')        # un campo va en una línea
+        self.assertEqual(draft.w.steps[0].text, 'propón la pantalla')
+        self.isl.on_wf_hit('agent:0')
+        self.assertEqual((self.isl.wf_menu, self.isl.wf_field), (('agent', 0), None))
+        self.isl.on_wf_hit(f'pick:{app.workflowview.AGENTS.index("elyares-designer")}')
+        self.assertEqual((draft.w.steps[0].agent, self.isl.wf_menu), ('elyares-designer', None))
+        self.isl.on_wf_hit('add')
+        self.isl.wf_typed('hazlo')
+        self.isl.on_wf_hit('up:1')
+        self.assertEqual([s.text for s in draft.w.steps], ['hazlo', 'propón la pantalla'])
+        self.isl.on_wf_hit('fail:go')
+        self.assertEqual(draft.w.on_fail, 'go')
+        # Tab y Enter pasan al campo que sigue; Shift+Tab, al anterior; Esc suelta.
+        Gdk = app.Gdk
+        self.isl.on_wf_hit('field:name')
+        self.isl.on_wf_key(Gdk.KEY_Tab, False)
+        self.assertEqual(self.isl.wf_field, 0)
+        self.isl.on_wf_key(Gdk.KEY_Return, False)
+        self.assertEqual(self.isl.wf_field, 1)
+        self.isl.on_wf_key(Gdk.KEY_ISO_Left_Tab, True)
+        self.assertEqual(self.isl.wf_field, 0)
+        self.isl.on_wf_key(Gdk.KEY_Escape, False)
+        self.assertIsNone(self.isl.wf_field)
+        self.isl.on_wf_hit('drop:0')
+        self.assertEqual(len(draft.w.steps), 1)
+        # No se pasa de los pasos que caben en la isla.
+        for _ in range(20):
+            self.isl.on_wf_hit('add')
+        self.assertEqual(len(draft.w.steps), app.workflowview.WF_MAX_STEPS)
+
+
+class FlujosDibujo(Dibujo):
+    """El panel de workflows, dibujado en la isla."""
+
+    def setUp(self):
+        super().setUp()
+        W = app.workflowview.workflows
+        self.flow = W.Workflow('revisar', '/x/proj', [W.Step('elyares-designer', 'propón'),
+                                                      W.Step('elyares-engineer', 'hazlo')])
+
+    def click(self, key):
+        """Un clic de verdad en lo que quedó dibujado con esa clave."""
+        if f'wf-{key}' in self.isl.buttons:
+            x, y, w, h = self.isl.buttons[f'wf-{key}']
+        else:
+            _, _, x, y, w, h = next(hit for hit in self.isl.hits if hit[:2] == ('wf', key))
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+
+    def test_se_abre_en_la_isla_con_su_pastilla(self):
+        self.isl.expanded = True
+        self.draw()
+        _, x, y, w, h = next(pill for pill in self.isl.pills if pill[0] == app.workflowview.WF_PILL)
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.assertEqual(self.isl.target(), 'workflows')
+        self.assertEqual(self.isl.goal()[0], app.chatview.CHAT_W)       # a nivel del chat: su mismo ancho
+        self.draw()
+        self.assertIn('Crear workflow', self.shown)
+        self.assertTrue(any('Todavía no guardaste ningún workflow' in text for text in self.shown))
+        self.click('new')
+        self.draw()
+        for text in ('Nuevo workflow', 'Nombre', 'Proyecto', 'Pasos', 'Añadir primer paso', 'Si un paso falla',
+                     'Añade al menos un paso para lanzarlo', 'Guardar y lanzar'):
+            self.assertIn(text, self.shown)
+        self.assertIsNotNone(self.isl.chat_box)         # la caja de texto, sobre el campo del nombre
+        self.click('close')
+        self.assertNotEqual(self.isl.target(), 'workflows')
+
+    def test_la_lista_el_editor_y_sus_menus(self):
+        self.isl.workflows = [self.flow]
+        self.isl.open_workflows()
+        self.draw()
+        for text in ('Workflows', '1 guardado', 'revisar', 'lanzar ›', 'editar', 'borrar'):
+            self.assertIn(text, self.shown)
+        short = self.isl.goal()[1]
+        self.click('delete:0')
+        self.draw()
+        self.assertIn('¿Borrar el workflow «revisar» y sus 2 pasos? No se puede deshacer.', self.shown)
+        self.assertGreater(self.isl.goal()[1], short)   # la isla crece para la pregunta
+        self.click('keep')
+        self.assertEqual(self.isl.workflows, [self.flow])
+        self.draw()
+        self.click('edit:0')
+        self.draw()
+        for text in ('Editar workflow', 'elyares-designer', 'propón', '+ Añadir paso'):
+            self.assertIn(text, self.shown)
+        self.assertNotIn('Sin guardar', self.shown)
+        # El menú de agentes sale encima de lo demás, y un clic en uno lo elige.
+        self.click('agent:1')
+        self.draw()
+        self.assertTrue(self.isl.hits[0][1].startswith('pick:'))
+        self.click(f'pick:{app.workflowview.AGENTS.index("elyares-reviewer")}')
+        self.assertEqual(self.isl.wf_draft.w.steps[1].agent, 'elyares-reviewer')
+        self.draw()
+        self.assertIn('Sin guardar', self.shown)
+        # Un nombre repetido lo dice, y no deja guardar.
+        self.isl.workflows.append(app.workflowview.workflows.Workflow('otro', '/x/proj'))
+        self.isl.wf_draft.w.name = 'Otro'
+        self.draw()
+        self.assertIn('Ya existe un workflow con ese nombre. Elige otro.', self.shown)
+        self.click('save')
+        self.assertEqual(self.isl.wf_screen, 'edit')
+
+    def test_la_ejecucion_dice_como_va_cada_paso(self):
+        self.isl.wf_run = run = app.workflowview.workflows.Run(self.flow)
+        run.begin(0)
+        run.finish(True, 'un panel')
+        run.begin(1)
+        self.isl.open_workflows()
+        self.assertEqual(self.isl.wf_screen, 'run')
+        self.draw()
+        for text in ('revisar', '✓', '●', 'elyares-engineer', 'hazlo', 'Corriendo el paso 2 de 2…', 'Detener'):
+            self.assertIn(text, self.shown)
+        run.finish(False, why='falló: sin red')
+        self.draw()
+        self.assertIn('✗', self.shown)
+        self.assertIn('El paso 2 (elyares-engineer) falló: sin red. Ábrelo y reintenta desde ese paso.', self.shown)
+        self.assertIn('Reintentar paso 2', self.shown)
+        self.isl.workflow_step = mock.Mock()
+        self.click('retry')
+        self.isl.workflow_step.assert_called_once_with(1)
+        self.isl.open_chat = mock.Mock()
+        self.click('chat')
+        self.isl.open_chat.assert_called_once_with(typing=True, agent='', cwd='/x/proj')
 
 
 if __name__ == '__main__':

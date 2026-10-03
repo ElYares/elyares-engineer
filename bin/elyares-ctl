@@ -11,6 +11,8 @@ Uso: elyares-ctl <orden>
               devops o researcher, el chat de ese agente.
               Con --dir: en el proyecto de esa carpeta
     projects  abre el panel de proyectos, para empezar a trabajar en uno; otra vez, lo cierra
+    workflows abre el panel de workflows: cadenas de agentes que se guardan y se
+              lanzan sobre un proyecto; otra vez, lo cierra
     move <dónde>
               corre la isla a lo ancho de la pantalla: left y right, al siguiente
               sitio de ese lado; center, a su sitio de siempre; o un número del
@@ -35,7 +37,7 @@ import os
 import socket
 import sys
 
-ORDERS = ('open', 'chat', 'projects', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
+ORDERS = ('open', 'chat', 'projects', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
           'glass', 'allow', 'deny', 'status', 'toggle')
 REPLIES = ('allow', 'deny', 'status', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
