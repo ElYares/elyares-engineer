@@ -88,7 +88,9 @@ de la elegida, **sus cuatro agentes**.
 - **El desglose:** un clic en uno que trabaja abre todos sus pasos con lo que
   tardó cada uno (los últimos 8; arriba dice cuántos hubo antes). Los demás
   siguen a la vista en miniatura, y un clic en uno de ellos abre el suyo.
-  "‹ volver" regresa al tablero e "ir al pane ›" lleva al pane de tmux.
+  "‹ volver" regresa al tablero e "ir al pane ›" lleva al pane de tmux. Una
+  sesión del chat no tiene pane: su enlace es "ir a su tmux ›", que lleva a la
+  sesión de tmux de ese proyecto (y si no tiene, se la crea en su carpeta).
 - **Encargarle algo a uno de los tres:** un clic en el architect, el auditor
   o el reviewer, aunque esté libre, abre su desglose con un mini chat al pie.
   Escribes qué quieres que haga, Enter se lo manda y la isla vuelve al
@@ -145,6 +147,28 @@ contestar. En el tablero, lo que no cabe en una tarjeta se lee en su desglose.
 
 Un clic en la mascota la enoja; tres rápidos la marean.
 
+### Empezar en un proyecto
+
+No hace falta abrir `claude` en una terminal para que la isla vea trabajo en
+un proyecto: se empieza desde ella.
+
+- **El panel de proyectos:** la pastilla **+** del pie (o `elyares-ctl
+  projects`) abre tus proyectos de `~/develop`, agrupados por workspace como
+  en el sidebar de tmux (Alt+b) y con sus mismas marcas: un rombo donde estás
+  en tmux, un punto lleno si el proyecto tiene sesión de tmux abierta y uno
+  hueco si está cerrado. A la derecha de cada uno, cómo va su Claude si tiene
+  (`trabaja`, `permiso`, `listo`, `chat`). Por defecto salen los abiertos;
+  **todos ›** enseña también los cerrados, como ctrl-t en el sidebar. Un clic
+  en un proyecto abre su chat, listo para escribir.
+- **Donde estás:** si en tmux estás en un proyecto que no tiene ningún Claude,
+  la isla te lo ofrece. En el tablero, con una pestaña fantasma al final de
+  las pestañas (`+ proyecto`); sin ninguna sesión, en la cabecera («Estás en
+  proyecto · empezar ›»). Un clic empieza ahí.
+- Sigue las reglas del sidebar: no salen los workspaces que empiezan por `_`
+  o `.`, ni los de `~/.config/tmux/workspaces.ignore`, y las sesiones de tmux
+  de fuera de `~/develop` van al final, en «otras». La isla vuelve a mirar
+  tmux y la carpeta cada tres segundos.
+
 ### El chat
 
 A Claude se le piden las cosas desde la isla, sin terminal: tmux se queda
@@ -159,8 +183,22 @@ permiso se contesta en su tarjeta del tablero, como el de cualquier sesión.
 Al terminar sale un aviso con el principio de la respuesta y el botón **Ver
 respuesta**, que abre el chat para leerla entera.
 
-- **Dónde trabaja:** en la carpeta del pane de tmux en el que estás al abrirlo
-  (el del cliente de tmux que se usó al último). La cabecera la dice.
+- **Un chat por proyecto:** cada proyecto tiene su conversación con cada
+  agente, y pasar a otro no tira la del anterior. La cabecera dice en cuál
+  estás (`agente | proyecto` y su carpeta).
+- **Sigue a tmux:** al abrirlo, si desde la última vez pasaste a otra sesión
+  de tmux, sale la conversación del proyecto de esa sesión (la carpeta del
+  pane en el que estás; si ese proyecto no tiene, una vacía ahí). Si sigues
+  en la misma sesión, sale la que tenías a la vista. No hace falta abrir
+  `claude` en una terminal para que la isla vea trabajo en un proyecto.
+- **Elegir proyecto:** al escribir `#` salen tus proyectos de `~/develop`,
+  los abiertos en tmux primero (el usado más recientemente arriba) y luego
+  los cerrados, con su marca, su workspace, su carpeta y si ya tienen
+  conversación; se filtra al seguir escribiendo (`#tl-`) y Enter pasa a ese
+  proyecto, con lo demás que llevabas escrito. Un clic en la carpeta de la cabecera (`▾`) hace
+  lo mismo. Desde tmux, sin adivinar: `elyares-ctl chat --dir <carpeta>`.
+- **Las que no se usan duermen:** una conversación que lleva diez minutos sin
+  usarse suelta su proceso de Claude; lo siguiente que le escribas la retoma.
 - **La caja:** crece con lo que escribes hasta seis líneas y luego hace
   scroll. Enter manda; Shift+Enter, otra línea. **Ctrl+V** pega texto y
   también imágenes: van en etiquetas encima de la caja (`imagen 1 ×`) y salen
@@ -206,17 +244,18 @@ respuesta**, que abre el chat para leerla entera.
   y lo que hace no saca pestaña propia: se ve en su tarjeta de la pestaña
   desde la que se lo encargaste, al lado de los que ya trabajaban. Si pide
   permiso se contesta ahí mismo, y al terminar sale el aviso con **Ver
-  respuesta**. La conversación de cada agente es una sola: si sigue ocupado
-  en otro proyecto, su mini chat lo dice y no se le encarga nada hasta que
-  acabe. Si la pestaña desde la que se lo encargaste se cierra, su sesión
-  saca la suya. El engineer no tiene mini chat: a él se le habla en el chat.
+  respuesta**. Cada agente tiene una conversación por proyecto: ocupado
+  en uno, se le puede encargar otra cosa desde la pestaña de otro, y trabaja
+  en los dos a la vez. Si la pestaña desde la que se lo encargaste se cierra,
+  su sesión saca la suya. El engineer no tiene mini chat: a él se le habla en
+  el chat.
 - **Permisos:** el chat corre en bypass (`bypassPermissions`), así que casi
   nada pregunta. Lo que Claude sigue preguntando aun así (escribir en
   settings, git o la configuración de herramientas) se contesta en la
   tarjeta del tablero o, con el chat abierto, en la de encima de la caja.
 - **Detener / Nuevo / Cerrar**, arriba a la derecha: cortar el turno (también
   Ctrl+C sin nada seleccionado), empezar otra conversación con el mismo
-  agente en la carpeta del pane de ahora, y cerrar el panel.
+  agente en este proyecto (las de los demás no se tocan), y cerrar el panel.
 - **El teclado:** mientras escribes, el chat lo toma entero. Esc lo suelta sin
   cerrar el chat y un clic en la caja lo vuelve a tomar; si pasan 90 s sin
   teclear, lo suelta solo.
@@ -638,7 +677,8 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | Orden | Qué hace |
 |---|---|
 | `elyares-ctl open` | abre la isla con lo que hace Claude; se cierra sola a los 6 s o al repetir |
-| `elyares-ctl chat [quién]` | abre el chat con Claude, listo para escribir; otra vez lo cierra. Con `architect`, `auditor`, `reviewer` o `engineer`, el de ese agente |
+| `elyares-ctl chat [quién] [--dir carpeta]` | abre el chat con Claude, listo para escribir; otra vez lo cierra. Con `architect`, `auditor`, `reviewer` o `engineer`, el de ese agente. Con `--dir`, en el proyecto de esa carpeta |
+| `elyares-ctl projects` | abre el panel de proyectos, para empezar a trabajar en uno; otra vez lo cierra |
 | `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
 | `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |
 | `elyares-ctl pin` | fija la isla abierta con todo a la vista; otra vez, la suelta. Como el clic central |

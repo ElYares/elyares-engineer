@@ -155,8 +155,9 @@ def card_actions(items):
 
     `cmd` es una lista de argumentos; con `term` corre en una terminal nueva
     (y con `hold` espera una tecla al terminar). `jump` lleva al pane de la
-    alerta y `chat` abre el chat de la isla. `after` dice qué pasa con la
-    alerta al pulsarlo: 'dismiss' la descarta, 'clear' la quita sin silenciarla.
+    alerta y `chat` abre el chat de la isla (True) o una de sus conversaciones
+    (el id de su sesión). `after` dice qué pasa con la alerta al pulsarlo:
+    'dismiss' la descarta, 'clear' la quita sin silenciarla.
     """
     out = []
     for a in items if isinstance(items, list) else []:
@@ -164,7 +165,8 @@ def card_actions(items):
             continue
         cmd = a.get('cmd')
         runs = isinstance(cmd, list) and cmd and all(isinstance(c, str) for c in cmd)
-        if runs or isinstance(a.get('url'), str) or a.get('jump') is True or a.get('chat') is True:
+        talks = a.get('chat') is True or (isinstance(a.get('chat'), str) and a['chat'])
+        if runs or isinstance(a.get('url'), str) or a.get('jump') is True or talks:
             out.append(a)
     return out[:CARD_ACTIONS]
 

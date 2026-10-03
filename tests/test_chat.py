@@ -205,6 +205,38 @@ class EntreReinicios(ChatCase):
         self.assertEqual((back.tokens, back.plan, back.session), (0, False, ''))
 
 
+class Permisos(ChatCase):
+    """El chat trabaja sin pedir permiso, salvo en modo plan."""
+
+    def modes(self):
+        return [m['request']['mode'] for m in self.procs[0].sent()
+                if m.get('type') == 'control_request' and m['request']['subtype'] == 'set_permission_mode']
+
+    def test_al_aprobar_un_plan_vuelve_a_trabajar_sin_preguntar(self):
+        self.c.send('planea')
+        self.c.feed({'type': 'system', 'subtype': 'init', 'session_id': 's-1', 'permissionMode': 'plan'})
+        self.assertTrue(self.c.plan)
+        self.assertEqual(self.modes(), [])
+        # Aprobado el plan, Claude sale al modo de preguntar por todo: se le devuelve al del chat.
+        self.c.feed({'type': 'system', 'subtype': 'status', 'permissionMode': 'default'})
+        self.assertFalse(self.c.plan)
+        self.assertEqual(self.modes(), ['bypassPermissions'])
+        self.c.feed({'type': 'system', 'subtype': 'status', 'permissionMode': 'bypassPermissions'})
+        self.assertEqual(self.modes(), ['bypassPermissions'])       # ya está: no se insiste
+
+    def test_una_conversacion_retomada_en_otro_modo_tambien(self):
+        self.c.send('sigue')
+        self.c.feed({'type': 'system', 'subtype': 'init', 'session_id': 's-1', 'permissionMode': 'acceptEdits'})
+        self.assertEqual(self.modes(), ['bypassPermissions'])
+
+    def test_arranca_pudiendo_pasar_a_bypass_aunque_empiece_en_plan(self):
+        self.c.plan = True
+        self.c.send('planea')
+        cmd = self.procs[0].args[0]
+        self.assertIn('--allow-dangerously-skip-permissions', cmd)
+        self.assertEqual(cmd[cmd.index('--permission-mode') + 1], 'plan')
+
+
 class Contexto(ChatCase):
     """Cuánto lleva lleno el contexto de la conversación."""
 
@@ -330,14 +362,20 @@ class ModeloEsfuerzoPlan(ChatCase):
 class Carpeta(unittest.TestCase):
     def test_la_del_pane_de_tmux_usado_al_ultimo(self):
         with tempfile.TemporaryDirectory() as old, tempfile.TemporaryDirectory() as new:
-            out = f'100 {old}\n300 {new}\n200 /no/existe\n'
+            out = f'100\tWork\t{old}\n300\ttl-mas-server\t{new}\n200\tx\t/no/existe\n'
             with mock.patch.object(chat.glob, 'glob', lambda pattern: ['/tmp/tmux-1000/default']), \
                     mock.patch.object(chat.subprocess, 'run', lambda *a, **k: mock.Mock(stdout=out)):
                 self.assertEqual(chat.active_cwd(), new)
+            # Un cliente anidado (la terminal flotante, en su sesión oculta) no cuenta.
+            out = f'100\tWork\t{old}\n900\t_flotante\t{new}\n'
+            with mock.patch.object(chat.glob, 'glob', lambda pattern: ['/tmp/tmux-1000/default']), \
+                    mock.patch.object(chat.subprocess, 'run', lambda *a, **k: mock.Mock(stdout=out)):
+                self.assertEqual(chat.active_cwd(), old)
 
     def test_sin_tmux_la_carpeta_personal(self):
         with mock.patch.object(chat.glob, 'glob', lambda pattern: []):
             self.assertEqual(chat.active_cwd(), os.path.expanduser('~'))
+            self.assertEqual(chat.active_cwd('/x/ultimo'), '/x/ultimo')
 
     def test_los_comandos_locales_con_su_descripcion(self):
         with tempfile.TemporaryDirectory() as home:

@@ -22,7 +22,16 @@ respuesta», que abre el chat.
 Con el chat abierto, el permiso sale también en una tarjeta encima de la
 caja.
 
-Cada uno de la familia tiene su conversación (`chats`): en la línea de
+Hay una conversación por proyecto y agente (`chats`, con la clave de
+`chat_key`). El chat sigue a tmux: al abrirlo, si desde la última vez pasaste
+a otra sesión de tmux, sale la conversación de ese proyecto; si sigues en la
+misma, la que tenías a la vista (`chat_spot`). Con "#" en la caja (o un clic
+en la carpeta de la cabecera) se elige otro de entre tus proyectos de
+`~/develop`, abiertos en tmux o no (`chat_projects`, con la lista de
+`projectview`). Las que llevan un
+rato sin usarse sueltan su proceso de Claude y lo retoman al escribirles.
+
+Cada uno de la familia tiene la suya: en la línea de
 estado, un clic en el nombre del agente elige con quién hablas, y en el tablero el desglose de cada uno tiene
 «hablarle ›». La de un agente corre como él (`claude -p --agent X`), con su
 modelo; en el tablero sale con su cara. Al escribir "/" sale la lista de
@@ -55,12 +64,13 @@ de dibujo (`_layout`, `tip_text`, `draw_button`, `face`, `ink`, `who`).
 """
 
 import html
+import os
 import time
 
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
-from . import chat, mascot, paint, settings, state, store
+from . import chat, mascot, paint, projects, settings, state, store
 
 CHAT_W, CHAT_H = 600, 620     # el panel: ancho de la isla con vista previa, y alto
 CHAT_PAD = 16                 # margen por dentro
@@ -86,6 +96,7 @@ CHAT_LINK_GAP = 14            # entre los enlaces de la cabecera (Detener, Nuevo
 CHAT_IDLE_SECS = 90           # sin teclear tanto rato, el chat suelta el teclado solo
 CHAT_REPLY_SECS = 900         # lo que dura el aviso de «ver respuesta» si no se atiende
 CHAT_REPLY_LINES = 8          # de la respuesta, lo que se lee en su aviso
+CHAT_SLEEP_SECS = 600         # una conversación sin usar tanto rato suelta su proceso de Claude
 CHAT_WATCH_SECS = 6           # al mandar, la isla se abre en el tablero este rato (si no está fijada)
 MINI_H = 60                   # lo que crece un desglose para su mini chat: la caja y su línea de estado
 MINI_LINES = 3                # lo que crece la caja del mini chat antes de hacer scroll
@@ -96,8 +107,8 @@ FONT_STEP = 'JetBrainsMono Nerd Font 9'          # sus pasos y la línea de esta
 FONT_LINK = 'Sans Semi-Bold 9'
 FONT_HINT = 'Sans 10'
 TITLE = (.95, .96, 1)
-PLACEHOLDER = 'Pídele algo a {agent} · / comandos · @ agentes y archivos · Shift+Enter, otra línea'
-SIGILS = '/@'                 # lo que abre una lista para completar: comandos, y agentes y archivos
+PLACEHOLDER = 'Pídele algo a {agent} · / comandos · @ archivos · # proyecto'
+SIGILS = '/@#'                # lo que abre una lista: comandos, agentes y archivos, y proyectos
 CSS = '''
 textview.elyares-chat, textview.elyares-chat text, scrolledwindow.elyares-chat {
   background: transparent; border: none; box-shadow: none; outline: none;
@@ -147,11 +158,12 @@ class ChatView:
         self.chat_scroll, self.chat_pick, self.chat_cache = 0.0, 0, {}
         self.chat_menu, self.chat_images = None, []
         self.chat_sessions = set()    # las sesiones (del tablero) que son de un chat
-        self.chats = {}               # la conversación de cada uno: agente ('' el engineer) -> Chat
+        self.chats = {}               # las conversaciones: (agente, raíz del proyecto) -> Chat
+        self.chat_spot = None         # el proyecto de tu tmux la última vez que se abrió el chat
         self.chat_watch = False       # se acaba de mandar algo: el tablero sigue a su sesión
         self.chat_box = None          # dónde va el texto de la caja, como lo midió el último dibujo
         self.chat_keyed = 0.0         # cuándo se tecleó por última vez en el chat
-        self.chat_hosts = {}          # los encargos del tablero: agente -> la sesión de la pestaña desde la que se hizo
+        self.chat_hosts = {}          # los encargos del tablero: clave del chat -> la sesión de la pestaña desde la que se hizo
         self.chat_whom = None         # para quién es lo escrito en la caja: 'chat' o el agente de un mini chat
         self.chat_saved = None        # lo último que se guardó de las conversaciones
         self.entry = self.entry_box = None
@@ -251,32 +263,50 @@ class ChatView:
         else:
             self.open_chat(typing=True)
 
-    def chat_for(self, agent, cwd=''):
-        """La conversación con uno de la familia ('' es el engineer); si no
-        hay, una nueva en `cwd` o, sin él, en la carpeta de la que se tenía a
-        la vista o en la del pane activo. La de un agente usa su modelo, no el
-        elegido para el engineer. Con `cwd` de otro proyecto, la que tenía en
-        reposo se cierra y empieza una ahí."""
-        c = self.chats.get(agent)
-        if c is not None and cwd and not c.busy and state.project_root(c.cwd) != state.project_root(cwd):
-            c.close()
-            c = None
+    @staticmethod
+    def chat_key(agent, cwd):
+        """La clave de una conversación: con quién ('' es el engineer) y en
+        qué proyecto."""
+        return agent, state.project_root(cwd)
+
+    def chat_for(self, agent, cwd):
+        """La conversación con uno de la familia ('' es el engineer) en el
+        proyecto de `cwd`; si no hay, una nueva ahí. La de un agente usa su
+        modelo, no el elegido para el engineer."""
+        key = self.chat_key(agent, cwd)
+        c = self.chats.get(key)
         if c is None:
-            cwd = cwd or (self.chat.cwd if self.chat is not None else chat.active_cwd())
             pick = {} if agent else {'model': self.settings.get('chat_model', ''),
                                      'effort': self.settings.get('chat_effort', '')}
             c = chat.Chat(cwd, None, agent=agent, **pick)
             c.emit = lambda ev, c=c: GLib.idle_add(self.on_chat, ev, c)
-            self.chats[agent] = c
+            self.chats[key] = c
         return c
 
-    def open_chat(self, typing=False, agent=None):
-        """Abre el chat; con `agent`, el de ese de la familia ('' el engineer)."""
-        if agent is not None or self.chat is None:
-            self.chat = self.chat_for(agent or '')
+    def open_chat(self, typing=False, agent=None, cwd=None):
+        """Abre el chat. Sin `agent`, con el mismo de la última vez ('' es el
+        engineer). Sin `cwd`, en el proyecto que se tenía a la vista, salvo
+        que desde la última vez hayas pasado a otra sesión de tmux: entonces,
+        en el de esa. Con el panel ya abierto no se mira tmux."""
+        if agent is None:
+            agent = self.chat.agent if self.chat is not None else ''
+        last = self.chat.cwd if self.chat is not None else ''
+        if not cwd:
+            here = '' if self.chat_open else chat.active_cwd('')
+            spot = state.project_root(here) if here else None
+            moved = spot is not None and spot != self.chat_spot
+            self.chat_spot = spot or self.chat_spot
+            cwd = here if here and (moved or not last) else last or os.path.expanduser('~')
+        self.show_chat(self.chat_for(agent, cwd), typing)
+
+    def show_chat(self, c, typing=False):
+        """Abre el panel con esa conversación."""
+        if c is not self.chat:
+            self.chat = c
             self.chat_cache.clear()
             self.chat_scroll, self.chat_menu = 0.0, None
         self.chat_open, self.off = True, False
+        self.projects_open = False
         self.chat_claim('chat')
         if self.chat.session:
             # Ya se está leyendo: su aviso sobra.
@@ -294,14 +324,16 @@ class ChatView:
         self.ensure_tick()
 
     def new_chat(self):
-        """Empieza otra conversación con el mismo agente, en la carpeta del
-        pane activo de ahora."""
-        agent = self.chat.agent if self.chat is not None else ''
-        if self.chat is not None:
-            self.chat.close()
-        self.chats.pop(agent, None)
+        """Empieza otra conversación con el mismo agente en el mismo proyecto.
+        Las de los demás proyectos no se tocan."""
+        old = self.chat
+        if old is None:
+            self.open_chat(typing=True)
+            return
+        old.close()
+        self.chats.pop(self.chat_key(old.agent, old.cwd), None)
         self.chat = None
-        self.open_chat(typing=True, agent=agent)
+        self.show_chat(self.chat_for(old.agent, old.cwd), typing=True)
 
     def chat_type(self, on):
         """Toma el teclado para escribir, o lo suelta."""
@@ -317,13 +349,19 @@ class ChatView:
         self.ensure_tick()
 
     def chat_tick(self, now):
-        """Cada segundo: suelta el teclado si hace rato que no se teclea, y
-        guarda las conversaciones si cambiaron."""
+        """Cada segundo: suelta el teclado si hace rato que no se teclea,
+        duerme las conversaciones que no se usan y las guarda si cambiaron."""
         if self.chat_typing and now - self.chat_keyed > CHAT_IDLE_SECS:
             if self.chat_open:
                 self.chat_type(False)
             else:
                 self.brief_drop()
+        for c in self.chats.values():
+            # Con un chat por proyecto, un Claude vivo por cada uno sería
+            # mucho: el que no se usa se cierra y lo siguiente lo retoma.
+            watched = self.chat_open and c is self.chat
+            if c.alive and not c.busy and not watched and now - c.touched > CHAT_SLEEP_SECS:
+                c.close()
         self.chat_save()
 
     # ── entre reinicios de la isla ──────────────────────────────────────────
@@ -332,8 +370,9 @@ class ChatView:
         """Las conversaciones, para guardarlas: las que ya tienen algo, cuál
         se tenía a la vista, si el panel estaba abierto y los encargos."""
         chats = [c.dump() for c in self.chats.values() if c.session or c.entries]
-        return {'chats': chats, 'current': self.chat.agent if self.chat is not None else None,
-                'open': self.chat_open, 'hosts': dict(self.chat_hosts)}
+        current = list(self.chat_key(self.chat.agent, self.chat.cwd)) if self.chat is not None else None
+        return {'chats': chats, 'current': current, 'open': self.chat_open,
+                'hosts': [[*key, sid] for key, sid in self.chat_hosts.items()]}
 
     def chat_save(self):
         data = self.chat_dump()
@@ -348,15 +387,34 @@ class ChatView:
             if c is None:
                 continue
             c.emit = lambda ev, c=c: GLib.idle_add(self.on_chat, ev, c)
-            self.chats[c.agent] = c
+            self.chats[self.chat_key(c.agent, c.cwd)] = c
             if c.session:
                 self.chat_sessions.add(c.session)
-        self.chat = self.chats.get(data.get('current'))
-        hosts = data.get('hosts') if isinstance(data.get('hosts'), dict) else {}
-        self.chat_hosts = {agent: sid for agent, sid in hosts.items()
-                           if agent in self.chats and sid in self.model.sessions}
+        self.chat = self.chats.get(self.chat_saved_key(data.get('current')))
+        hosts = data.get('hosts')
+        if isinstance(hosts, dict):         # como se guardaba antes: {agente: sesión}
+            hosts = [[agent, sid] for agent, sid in hosts.items()]
+        for item in hosts if isinstance(hosts, list) else []:
+            key = self.chat_saved_key(item[:-1] if isinstance(item, list) and len(item) > 1 else None)
+            if key in self.chats and item[-1] in self.model.sessions:
+                self.chat_hosts[key] = item[-1]
         self.chat_open = self.chat is not None and data.get('open') is True
         self.chat_saved = self.chat_dump()
+        if self.chat is not None:
+            # La conversación que se tenía sigue a la vista mientras no cambies de sesión en tmux.
+            here = chat.active_cwd('')
+            self.chat_spot = state.project_root(here) if here else None
+
+    def chat_saved_key(self, saved):
+        """La clave de una conversación como se guardó: [agente, raíz] o, como
+        se guardaba cuando había una sola por agente, el agente."""
+        if isinstance(saved, list) and len(saved) == 1:
+            saved = saved[0]
+        if isinstance(saved, str):
+            return next((key for key in self.chats if key[0] == saved), None)
+        if isinstance(saved, list) and len(saved) == 2 and all(isinstance(v, str) for v in saved):
+            return tuple(saved)
+        return None
 
     def chat_busy(self):
         """¿Hay algún turno en curso, en el chat que sea?"""
@@ -391,7 +449,7 @@ class ChatView:
         """La conversación a la que va lo que se teclea: la del chat o, en un
         mini chat, la de ese agente (None si aún no tiene)."""
         brief = self.briefing()
-        return self.chats.get(brief[1]) if brief else self.chat
+        return self.chats.get(self.chat_key(brief[1], brief[0].cwd)) if brief else self.chat
 
     def brief(self):
         """Toma el teclado para escribirle al del desglose abierto. La isla
@@ -408,23 +466,14 @@ class ChatView:
         self.chat_type(False)
         self.expand(CHAT_WATCH_SECS)
 
-    def brief_away(self, s, agent):
-        """El proyecto en el que ese agente tiene un turno en curso, si no es
-        el de `s`: hasta que acabe, aquí no se le puede encargar nada."""
-        c = self.chats.get(agent)
-        if c is not None and c.busy and state.project_root(c.cwd) != state.project_root(s.cwd):
-            return c.project
-        return ''
-
     def brief_send(self, s, agent, text):
-        """Enter en el mini chat: se le encarga a ese agente, en la carpeta de
-        la pestaña, y la isla vuelve al tablero para verlos trabajar a todos."""
-        if self.brief_away(s, agent):
-            return
+        """Enter en el mini chat: se le encarga a ese agente, en su
+        conversación del proyecto de la pestaña, y la isla vuelve al tablero
+        para verlos trabajar a todos."""
         c = self.chat_for(agent, s.cwd)
         if not c.send(text, self.chat_images):
             return
-        self.chat_hosts[agent] = s.sid
+        self.chat_hosts[self.chat_key(agent, s.cwd)] = s.sid
         self.chat_set_text('')
         self.chat_images = []
         self.focus = None
@@ -433,14 +482,14 @@ class ChatView:
     def crew(self, s):
         """Los de la familia a los que se les encargó algo desde la pestaña
         de `s`: {personaje: su conversación}."""
-        return {state.AGENT_ROLES[agent]: self.chats[agent] for agent, sid in self.chat_hosts.items()
-                if sid == s.sid and agent in self.chats}
+        return {state.AGENT_ROLES[key[0]]: self.chats[key] for key, sid in self.chat_hosts.items()
+                if sid == s.sid and key in self.chats}
 
     def host(self, s):
         """La sesión en cuya pestaña se ve `s`: ella misma, salvo la de un
         encargo, que va en la pestaña desde la que se hizo mientras siga ahí."""
-        for agent, sid in self.chat_hosts.items():
-            c, other = self.chats.get(agent), self.model.sessions.get(sid)
+        for key, sid in self.chat_hosts.items():
+            c, other = self.chats.get(key), self.model.sessions.get(sid)
             if c is None or c.session != s.sid or other is None or other is s:
                 continue
             if other.state != 'alert':
@@ -521,7 +570,16 @@ class ChatView:
                            'message': f'{c.name} terminó · ver respuesta', 'tone': 'ok',
                            'ttl': CHAT_REPLY_SECS, 'where': c.name, 'note': chat.model_name(c.model_id),
                            'lines': lines[:CHAT_REPLY_LINES],
-                           'actions': [{'label': 'Ver respuesta', 'chat': c.agent or True, 'after': 'clear'}]})
+                           'actions': [{'label': 'Ver respuesta', 'chat': c.session or True, 'after': 'clear'}]})
+
+    def chat_show(self, which):
+        """El botón de un aviso del chat: abre la conversación de esa sesión;
+        si ya no está (o el aviso no dice cuál), el chat sin más."""
+        c = next((c for c in self.chats.values() if c.session and c.session == which), self.chat)
+        if c is not None:
+            self.show_chat(c, typing=True)
+        else:
+            self.open_chat(typing=True)
 
     # ── modelo, esfuerzo y plan ─────────────────────────────────────────────
 
@@ -570,17 +628,45 @@ class ChatView:
         sigil, word = token[0], token[1].lower()
         if sigil == '@':
             return self.chat.mentions(word)
+        if sigil == '#':
+            return self.chat_projects(word)
         return sorted(((name, desc) for name, desc in self.chat.commands.items()
                        if name.lower().startswith(word)), key=lambda it: (len(it[0]), it[0]))
 
+    def chat_projects(self, word=''):
+        """Tus proyectos que casan con `word`: [(nombre, su marca del sidebar,
+        su workspace, su carpeta y si ya hay conversación)]. Primero los que
+        empiezan así; de ellos, los abiertos en tmux (el usado más
+        recientemente arriba) antes que los cerrados."""
+        if not self.projects:
+            self.projects = projects.listing()      # aún no se ha mirado: ahora
+        agent = self.chat.agent if self.chat is not None else ''
+        found = []
+        for p in self.projects:
+            if word not in p.key.lower():
+                continue
+            c = self.chats.get(self.chat_key(agent, p.path))
+            note = ' · trabajando' if c is not None and c.busy else ' · con conversación' if c is not None else ''
+            mark = '◆' if p.here else '●' if p.open else '○'
+            rank = (not p.name.lower().startswith(word), not p.open, -p.activity, p.key.lower())
+            found.append((rank, (p.key, f'{mark} {p.ws or projects.LOOSE} · {state.tilde(p.path)}{note}')))
+        return [item for _, item in sorted(found, key=lambda it: it[0])]
+
     def complete(self, name):
         """Pone el elegido de la lista en el sitio de la palabra a medias, con
-        lo de antes y lo de después tal cual, y el cursor justo detrás."""
+        lo de antes y lo de después tal cual, y el cursor justo detrás. Un
+        proyecto ("#") no se escribe: el chat pasa a su conversación."""
         token = self.chat_token()
         if token is None:
             return
         sigil, _, start, end = token
         text = self.chat_text()
+        if sigil == '#':
+            path = next((p.path for p in self.projects if p.key == name), '')
+            self.chat_set_text(text[:start] + text[end:].lstrip(' '), start)
+            if path:
+                self.open_chat(typing=True, cwd=path)
+            return
         head = f'{text[:start]}{sigil}{name} '
         self.chat_set_text(head + text[end:].lstrip(' '), len(head))
 
@@ -590,7 +676,7 @@ class ChatView:
         if found:
             name = found[min(self.chat_pick, len(found) - 1)][0]
             sigil, _, start, end = self.chat_token()
-            if text[start:end] != f'{sigil}{name}':
+            if sigil == '#' or text[start:end] != f'{sigil}{name}':
                 # Enter sobre la lista elige de ella; otro Enter lo manda.
                 self.complete(name)
                 return
@@ -702,6 +788,11 @@ class ChatView:
                 del self.chat_images[index]
         elif key.startswith(tuple(SIGILS)):
             self.complete(key[1:])
+            self.chat_type(True)
+        elif key == 'project':
+            # La lista de proyectos es la de "#": se pone en la caja y se elige ahí.
+            text = self.chat_text()
+            self.chat_set_text(text + ('' if not text or text[-1:].isspace() else ' ') + '#')
             self.chat_type(True)
         elif key == 'type':
             self.chat_type(True)
@@ -851,7 +942,7 @@ class ChatView:
             items = []
             for role in state.TEAM:
                 agent = '' if role == state.MAIN_ROLE else state.ROLE_AGENTS[role]
-                other = self.chats.get(agent)
+                other = self.chats.get(self.chat_key(agent, c.cwd))
                 key = f'agent:{agent}'
                 faces[key] = (role, 'working' if other is not None and other.busy else 'idle')
                 items.append((key, state.ROLE_AGENTS[role], role == self.chat_role()))
@@ -957,11 +1048,9 @@ class ChatView:
             self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, (1, 1, 1), .38 * alpha,
                      width=text_w)
         soft = mascot.rgba(self.ink('text', .66))[:3]
-        away, c = self.brief_away(s, agent), self.chats.get(agent)
+        c = self.chats.get(self.chat_key(agent, s.cwd))
         images = len(self.chat_images) if mine else 0
-        if away:
-            note, tone = f'ocupado en {away}: aquí, cuando acabe', mascot.rgba(self.ink('bad'))[:3]
-        elif c is not None and c.busy:
+        if c is not None and c.busy:
             note, tone = 'trabajando · lo que mandes va después', color
         elif images:
             note, tone = ('1 imagen' if images == 1 else f'{images} imágenes'), color
@@ -993,8 +1082,13 @@ class ChatView:
         where = state.tilde(self.chat.cwd) if self.chat is not None else ''
         sw = self.put(cr, status, FONT_LINK, tx, mid + 2, mascot.rgba(self.ink(color_role))[:3], alpha)
         if where and room - sw - 6 > 40:
-            self.put(cr, f'· {where}', FONT_STEP, tx + sw + 6, mid + 3, mascot.rgba(self.ink('text', .62))[:3],
-                     alpha, width=room - sw - 6)
+            # La carpeta, con su clic: abre la lista de proyectos.
+            layout = self._layout(cr, f'· {where} ▾', FONT_STEP, room - sw - 6)
+            ww, wh = layout.get_pixel_size()
+            over = self.over(tx + sw + 2, mid, ww + 8, wh + 6)
+            tone = (1, 1, 1) if over else mascot.rgba(self.ink('text', .62))[:3]
+            self.tip_text(cr, layout, tx + sw + 6, mid + 3, tone, alpha, False)
+            self.hits.append(('chat', 'project', tx + sw + 2, mid, ww + 8, wh + 6))
         x = left + width
         for key, label in links:
             layout = self._layout(cr, label, FONT_LINK)
@@ -1107,7 +1201,8 @@ class ChatView:
         name = self.chat.name if self.chat is not None else state.MAIN_AGENT
         lines = [(f'Pídele algo a {name}', 'Sans Semi-Bold 12', 'arg'),
                  (f'Trabaja en {where}', FONT_HINT, 'path'),
-                 ('Escribe / para tus comandos: /contexto, /bitacora, /commit…', FONT_HINT, 'text')]
+                 ('Escribe / para tus comandos: /contexto, /bitacora, /commit…', FONT_HINT, 'text'),
+                 ('y # para pasar a otro proyecto', FONT_HINT, 'text')]
         y = top + (bottom - top) / 2 - 36
         for text, font, role in lines:
             layout = self._layout(cr, text, font, width)
@@ -1134,8 +1229,8 @@ class ChatView:
         self.draw_button(cr, 'chat-deny', 'Denegar', right - 2 * 84 - 8, by, False, alpha)
 
     def draw_chat_suggest(self, cr, left, width, bottom, found, alpha):
-        """La lista de comandos al escribir "/", o la de agentes y archivos
-        con "@", justo encima de la caja."""
+        """La lista de comandos al escribir "/", la de agentes y archivos con
+        "@" o la de proyectos con "#", justo encima de la caja."""
         token = self.chat_token()
         sigil = token[0] if token else '/'
         pick = min(self.chat_pick, len(found) - 1)

@@ -1,9 +1,13 @@
-"""Lo que elyares-engineer hace fuera de sí mismo: saltar al pane, correr el botón
-de una alerta y leer No Molestar."""
+"""Lo que elyares-engineer hace fuera de sí mismo: saltar al pane (o a la
+sesión de tmux de un proyecto), correr el botón de una alerta y leer No
+Molestar."""
 
+import os
 import shlex
 import shutil
 import subprocess
+
+from . import state
 
 TERM_CLASS = 'com.mitchellh.ghostty'
 
@@ -42,7 +46,9 @@ def jump(session):
     Es la misma lógica que jump() de claude-notify.sh. TMUX trae
     "socket,pid,índice": el daemon corre fuera de tmux y necesita el socket.
 
-    Una alerta no tiene pane: trae una URL y el clic la abre.
+    Una alerta no tiene pane: trae una URL y el clic la abre. Una sesión del
+    chat de la isla tampoco (su Claude no corre en una terminal): va a la
+    sesión de tmux de su proyecto.
     """
     if session and session.url:
         _run('xdg-open', session.url, timeout=5.0)
@@ -50,7 +56,11 @@ def jump(session):
     _run('hyprctl', 'dispatch', 'focuswindow', f'class:{TERM_CLASS}')
     pane = session.pane if session else ''
     sock = (session.tmux or '').split(',')[0] if session else ''
-    if not pane or not shutil.which('tmux'):
+    if not shutil.which('tmux'):
+        return
+    if not pane:
+        if session and getattr(session, 'cwd', ''):
+            jump_project(session.cwd)
         return
     tmux = ['tmux', '-S', sock] if sock else ['tmux']
     sess = _run(*tmux, 'display-message', '-p', '-t', pane, '#{session_name}')
@@ -63,6 +73,31 @@ def jump(session):
             _run(*tmux, 'switch-client', '-c', max(clients)[1], '-t', sess)
     _run(*tmux, 'select-window', '-t', pane)
     _run(*tmux, 'select-pane', '-t', pane)
+
+
+def jump_project(cwd):
+    """Lleva tmux a la sesión del proyecto de esa carpeta: la que se abrió
+    ahí. Si no hay, la crea con el nombre del proyecto. Mueve el cliente que
+    se usó más recientemente; sin ninguna terminal con tmux, abre una."""
+    root = state.project_root(cwd)
+    tmux = ['tmux']
+    sessions = [line.partition('\t')[::2] for line in
+                _run(*tmux, 'list-sessions', '-F', '#{session_name}\t#{session_path}').splitlines()]
+    name = next((name for name, path in sessions
+                 if not name.startswith('_') and (path.rstrip('/') or '/') == root), '')
+    if not name:
+        # tmux no admite puntos ni dos puntos en el nombre de una sesión.
+        name = (os.path.basename(root) or 'proyecto').replace('.', '_').replace(':', '_')
+        if any(name == known for known, _ in sessions):
+            name += '-isla'               # otra carpeta ya usa ese nombre
+        _run(*tmux, 'new-session', '-d', '-s', name, '-c', root)
+    clients = _real_clients(tmux)
+    if any(sess == name for _, _, sess in clients):
+        return
+    if clients:
+        _run(*tmux, 'switch-client', '-c', max(clients)[1], '-t', f'={name}')
+    else:
+        run({'cmd': ['tmux', 'attach', '-t', f'={name}'], 'term': True, 'label': name})
 
 
 def run(action):

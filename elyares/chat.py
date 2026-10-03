@@ -55,11 +55,17 @@ from dataclasses import dataclass
 from . import state
 
 CMD = ['claude', '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
-       '--include-partial-messages', '--permission-prompts', 'host', '--permission-prompt-tool', 'stdio']
+       '--include-partial-messages', '--permission-prompts', 'host', '--permission-prompt-tool', 'stdio',
+       '--allow-dangerously-skip-permissions']
 # En bypass, Claude no pide permiso para casi nada; lo poco que sigue
 # preguntando (escribir en settings, git o la configuración de herramientas)
 # llega a la isla por el stdio. El modo plan se prende encima y, al
-# apagarlo, se vuelve a este.
+# apagarlo, se vuelve a este. `--allow-dangerously-skip-permissions` deja
+# pasar a bypass a una conversación que arrancó en modo plan.
+#
+# Al aprobar un plan, Claude no vuelve al modo de antes: sale al de preguntar
+# por todo ('default'). El chat lo devuelve a este (`Chat._mode`); si no, el
+# resto del turno pide permiso para cada comando y cada edición.
 BASE_MODE = 'bypassPermissions'
 # Los modelos que se eligen desde el chat: (alias para Claude, nombre).
 MODELS = (('opus', 'Opus 5.5'), ('sonnet', 'Sonnet 5.5'), ('haiku', 'Haiku 4.5'), ('fable', 'Fable 5.1'))
@@ -75,22 +81,29 @@ FILES_SECS = 30           # cada cuánto se vuelven a listar los archivos del pr
 DENY_MESSAGE = 'El usuario lo denegó desde el chat de elyares-engineer.'
 
 
-def active_cwd():
-    """La carpeta del pane de tmux en el que estás (el del cliente que se usó
-    al último), o la carpeta personal si no hay tmux."""
-    best = (-1, '')
+def _tmux(*args):
+    """Lo que contesta cada servidor de tmux a una orden: [líneas]."""
+    lines = []
     for sock in glob.glob(f'/tmp/tmux-{os.getuid()}/*'):
         try:
-            out = subprocess.run(['tmux', '-S', sock, 'list-clients', '-F',
-                                  '#{client_activity} #{pane_current_path}'],
-                                 capture_output=True, text=True, timeout=1).stdout
+            out = subprocess.run(['tmux', '-S', sock, *args], capture_output=True, text=True, timeout=1).stdout
         except (OSError, subprocess.SubprocessError):
             continue
-        for line in out.splitlines():
-            when, _, path = line.partition(' ')
-            if when.isdigit() and os.path.isdir(path) and int(when) > best[0]:
-                best = (int(when), path)
-    return best[1] or os.path.expanduser('~')
+        lines += out.splitlines()
+    return lines
+
+
+def active_cwd(default=None):
+    """La carpeta del pane de tmux en el que estás (el del cliente que se usó
+    al último), o `default` (la carpeta personal) si no hay tmux. Los clientes
+    anidados (sesiones ocultas `_*`, como la terminal flotante) no cuentan."""
+    best = (-1, '')
+    for line in _tmux('list-clients', '-F', '#{client_activity}\t#{client_session}\t#{pane_current_path}'):
+        when, _, rest = line.partition('\t')
+        name, _, path = rest.partition('\t')
+        if when.isdigit() and not name.startswith('_') and os.path.isdir(path) and int(when) > best[0]:
+            best = (int(when), path)
+    return best[1] or (os.path.expanduser('~') if default is None else default)
 
 
 def local_commands(cwd=''):
@@ -198,6 +211,7 @@ class Chat:
         self.streaming = False    # la última entrada de Claude se sigue escribiendo
         self.cut = False          # se pidió cortar el turno en curso
         self.closing = False
+        self.touched = time.monotonic()   # cuándo se usó por última vez
 
     @property
     def project(self):
@@ -303,6 +317,7 @@ class Chat:
             return False
         if not self.alive:
             self.start()
+        self.touched = time.monotonic()
         content = text
         if images:
             content = [{'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/png',
@@ -382,10 +397,11 @@ class Chat:
     def feed(self, event):
         """Un evento de Claude. True si cambió lo que se ve."""
         kind = event.get('type')
+        self.touched = time.monotonic()
         if kind == 'system' and event.get('subtype') == 'init':
             self.session = event.get('session_id') or self.session
             self.model_id = event.get('model') or self.model_id
-            self.plan = event.get('permissionMode', '') == 'plan'
+            self._mode(event.get('permissionMode', ''))
             # Los suyos manda Claude; las descripciones, las que ya se sabían.
             names = [*(event.get('slash_commands') or []), *(event.get('skills') or [])]
             self.commands = {n: self.commands.get(n, '') for n in names if isinstance(n, str)}
@@ -394,7 +410,7 @@ class Chat:
             self._control({'subtype': 'get_context_usage'})
             return True
         if kind == 'system' and event.get('subtype') == 'status' and event.get('permissionMode'):
-            self.plan = event['permissionMode'] == 'plan'
+            self._mode(event['permissionMode'])
             return True
         if kind in ('stream_event', 'assistant') and event.get('parent_tool_use_id'):
             return False                      # lo de un subagente: ni es la respuesta ni gasta este contexto
@@ -461,6 +477,14 @@ class Chat:
             self.entries[-1].text += delta.get('text') or ''
             return True
         return False
+
+    def _mode(self, mode):
+        """El modo de permisos que dice Claude. Fuera del modo plan, el del
+        chat es `BASE_MODE`: si Claude está en otro (al aprobar un plan sale a
+        'default'), se le devuelve."""
+        self.plan = mode == 'plan'
+        if mode and mode not in ('plan', BASE_MODE):
+            self._control({'subtype': 'set_permission_mode', 'mode': BASE_MODE})
 
     def _spent(self, usage):
         """Lo que ocupaba el contexto al pedir esta respuesta, según su gasto."""
