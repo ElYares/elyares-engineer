@@ -49,10 +49,10 @@ Abierta a mano (o con el ratón encima) y con alguna sesión de Claude, la isla
 es un tablero: una pestaña por sesión y, de la elegida, sus cuatro agentes
 (`state.Session.team`). Los que trabajan van al frente, en grande, con su gesto
 y sus últimos pasos; los libres, en chiquito en la banca. El frente se parte
-según cuántos trabajen, y con los cuatro son cuatro cuadros. Un clic en uno
-abre su desglose: todos sus pasos y lo que tardó cada uno. El de uno de los
-tres (architect, auditor, reviewer) trae un mini chat para encargarle algo, y
-lo que hace se ve en su tarjeta de esa misma pestaña (`team`, `chatview`). Un clic en la
+según cuántos trabajen, y con todos son dos filas de cuadros. Un clic en uno
+abre su desglose: todos sus pasos y lo que tardó cada uno. El de cualquiera
+menos el engineer trae un mini chat para encargarle algo, y lo que hace se ve
+en su tarjeta de esa misma pestaña (`team`, `chatview`). Un clic en la
 pestaña elegida lleva al pane de tmux de esa sesión. La pestaña se va sola a
 la sesión que pide permiso o acaba de terminar y, cuando la elegida se queda
 en reposo, a la que sigue trabajando. Debajo del tablero van las alertas, una
@@ -1552,9 +1552,9 @@ class Island(chatview.ChatView, projectview.ProjectView):
         return labels
 
     def draw_board(self, cr, x0, w, body, alpha, now):
-        """El tablero: las pestañas y, de la sesión elegida, sus cuatro. Los
-        que trabajan van al frente y los libres a la banca; con los cuatro
-        trabajando son cuatro cuadros, y con ninguno, los cuatro en fila."""
+        """El tablero: las pestañas y, de la sesión elegida, su familia. Los
+        que trabajan van al frente y los libres a la banca; con todos
+        trabajando son dos filas de cuadros, y con ninguno, todos en fila."""
         s = self.tab_session()
         self.draw_tabs(cr, x0, w, s, alpha)
         left, top, width = x0 + BOARD_PAD, TABS_H, w - 2 * BOARD_PAD
@@ -1565,8 +1565,8 @@ class Island(chatview.ChatView, projectview.ProjectView):
         team = self.team(s)
         front = [m for m in team if m.busy]
         if not front or len(front) == len(team):
-            # Todos igual: en fila si están libres, en cuatro cuadros si trabajan.
-            cols = 2 if front else len(team)
+            # Todos igual: en fila si están libres, en dos filas de cuadros si trabajan.
+            cols = math.ceil(len(team) / 2) if front else len(team)
             cw = (width - (cols - 1) * BOARD_GAP) / cols
             ch = (body - BOARD_GAP) / 2 if front else body
             for i, member in enumerate(team):
@@ -1680,8 +1680,11 @@ class Island(chatview.ChatView, projectview.ProjectView):
         self.face(cr, role, pet, fx, fy, size, alpha * (1 if busy else .35), now if busy else None,
                   now - s.changed)
         name_color = rgb(mascot.accent(role)) if busy else MUTED_COLOR
+        # Si el nombre entero no cabe (y todos empiezan igual), va el del personaje.
+        fits = self._layout(cr, member.name, FONT_ROW).get_pixel_size()[0] <= (tw if column else tw - 22)
+        name = member.name if fits else role
         if column:
-            self.put(cr, member.name, FONT_ROW, x + cw / 2, ty, name_color, alpha, tw, .5)
+            self.put(cr, name, FONT_ROW, x + cw / 2, ty, name_color, alpha, tw, .5)
         else:
             cr.new_sub_path()
             cr.arc(tx + 4, ty + 8, 3.5, 0, 2 * math.pi)
@@ -1689,12 +1692,16 @@ class Island(chatview.ChatView, projectview.ProjectView):
             cr.fill()
             took = elapsed(now - member.since) if member.state == 'working' and member.since else ''
             if wide or quad:
-                # Cuánto lleva, a la derecha del nombre; a medias no cabe y va debajo.
+                # Cuánto lleva, a la derecha del nombre; a medias no cabe y va
+                # debajo. En un cuadro estrecho, si se comería el nombre, no va.
+                room = tw - 22 - (self._layout(cr, took, FONT_DETAIL).get_pixel_size()[0] if took else 0)
+                if took and room < self._layout(cr, name, FONT_ROW).get_pixel_size()[0]:
+                    took = ''
                 took_w = self.put(cr, took, FONT_DETAIL, tx + tw, ty + 1, MUTED_COLOR, alpha, align=1) \
                     if took else 0
-                self.put(cr, member.name, FONT_ROW, tx + 14, ty, name_color, alpha, tw - 22 - took_w)
+                self.put(cr, name, FONT_ROW, tx + 14, ty, name_color, alpha, tw - 22 - took_w)
             else:
-                self.put(cr, member.name, FONT_ROW, tx + 14, ty, name_color, alpha, tw - 14)
+                self.put(cr, name, FONT_ROW, tx + 14, ty, name_color, alpha, tw - 14)
                 if took:
                     self.put(cr, took, FONT_DETAIL, tx + 14, ty + 19, MUTED_COLOR, alpha, tw - 14)
         if not busy:
@@ -1739,6 +1746,10 @@ class Island(chatview.ChatView, projectview.ProjectView):
         tres abre su mini chat para encargarle algo."""
         self.panel(cr, x, y, w, h, alpha)
         step = h / len(members)
+        # Con casi toda la familia en la banca, la cara se achica y las dos
+        # líneas van más juntas.
+        tight = step < 40
+        size = min(34, step - 6)
         for i, member in enumerate(members):
             cy = y + step * i + step / 2
             over = member.role != MAIN_ROLE and self.over(x, cy - step / 2, w, step)
@@ -1748,12 +1759,12 @@ class Island(chatview.ChatView, projectview.ProjectView):
                 cr.fill()
             if member.role != MAIN_ROLE:
                 self.hits.append(('brief', (s.sid, member.role), x, cy - step / 2, w, step))
-            self.face(cr, member.role, 'idle', x + 26, cy + 1, 34, alpha * (.8 if over else .4))
-            self.put(cr, member.role, FONT_ROW, x + 48, cy - 15, TITLE_COLOR if over else MUTED_COLOR, alpha,
-                     w - 54)
+            self.face(cr, member.role, 'idle', x + 26, cy + 1, size, alpha * (.8 if over else .4))
+            self.put(cr, member.role, FONT_ROW, x + 48, cy - (14 if tight else 15),
+                     TITLE_COLOR if over else MUTED_COLOR, alpha, w - 54)
             waits = member.role == MAIN_ROLE and s.delegating
             self.put(cr, 'esperando' if waits else 'encargar ›' if over else 'libre', FONT_DETAIL,
-                     x + 48, cy + 1, MUTED_COLOR, alpha * .7, w - 54)
+                     x + 48, cy + (0 if tight else 1), MUTED_COLOR, alpha * .7, w - 54)
 
     def draw_focus(self, cr, x, y, width, h, member, s, alpha, now):
         """El desglose de uno: a la izquierda quién es y cuánto lleva; en

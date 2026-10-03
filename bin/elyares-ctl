@@ -7,7 +7,8 @@ Uso: elyares-ctl <orden>
     chat [quién] [--dir carpeta]
               abre el chat con Claude, listo para escribir, en el proyecto de la
               sesión de tmux en la que estás; otra vez, lo cierra.
-              Con quién: engineer, architect, auditor o reviewer, el chat de ese agente.
+              Con quién: engineer, architect, auditor, reviewer, designer o mobile,
+              el chat de ese agente.
               Con --dir: en el proyecto de esa carpeta
     projects  abre el panel de proyectos, para empezar a trabajar en uno; otra vez, lo cierra
     hide      esconde la isla del todo; otra vez, la vuelve a mostrar
@@ -34,7 +35,7 @@ ORDERS = ('open', 'chat', 'projects', 'hide', 'compact', 'pin', 'tab', 'steps', 
           'allow', 'deny', 'status', 'toggle')
 REPLIES = ('allow', 'deny', 'status', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
-AGENTS = ('engineer', 'architect', 'auditor', 'reviewer')
+AGENTS = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile')
 STATES = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
 
 

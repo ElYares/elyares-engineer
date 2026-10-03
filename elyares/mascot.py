@@ -4,7 +4,7 @@ Es el mismo dibujo del prototipo web, pasado de canvas a cairo. Todo está en
 unidades propias: la cara mide unos 160 de ancho y la figura completa, con la
 antena, va de y=-130 a y=+123. Quien llama traslada y escala.
 
-Son cuatro personajes con la misma cara, las mismas gafas, la misma antena y
+Son seis personajes con la misma cara, las mismas gafas, la misma antena y
 los mismos gestos. Cada uno pone lo suyo en capas: lo que lleva en la cabeza
 (`HATS`), lo que asoma detrás de la cara (`BACK`) o delante de las gafas
 (`FRONT`), lo que trae en las manos al trabajar (`PROPS`) y su color
@@ -14,6 +14,10 @@ los mismos gestos. Cada uno pone lo suyo en capas: lo que lleva en la cabeza
     architect   casco de obra, lápiz en la oreja y un plano
     auditor     cachucha de frente con </>, camisa y gafete, y un clipboard
     reviewer    visera de editor, lápiz rojo y una lupa sobre el código
+    designer    boina, flequillo teñido de colores, un pincel en la oreja,
+                pintura en el cachete y una paleta
+    mobile      gorro de lana caído, barba y bigote de manubrio, gafas de
+                pasta, y un teléfono con su café
 """
 
 import math
@@ -32,10 +36,11 @@ COLORS = {
 
 DEFAULT_ACCENT = COLORS['accent']
 
-ROLES = ('engineer', 'architect', 'auditor', 'reviewer')
+ROLES = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile')
 # El color de cada personaje: la antena mientras trabaja y su punto en la lista.
 # Ni ámbar, ni rojo, ni verde: esos ya dicen permiso, problema y terminado.
-ACCENTS = {'architect': '#22c7dd', 'auditor': '#9a6bff', 'reviewer': '#ff6fb5'}
+ACCENTS = {'architect': '#22c7dd', 'auditor': '#9a6bff', 'reviewer': '#ff6fb5',
+           'designer': '#e052f0', 'mobile': '#d2a679'}
 
 
 def set_accent(color):
@@ -918,13 +923,303 @@ def _magnifier(cr, t, motion):
     _hands(cr, t, motion, (-54,))
 
 
+# ── designer ─────────────────────────────────────────────────────────────────
+
+# Los colores con los que pinta: el flequillo teñido y las pinturas de la paleta.
+PAINTS = ('#ff5fa2', '#ff9a3d', '#ffd23f', '#3fe0a8', '#4f9bff', '#c86bff')
+
+
+def _brush(cr):
+    """Un pincel detrás de la oreja, con las cerdas hacia arriba y pintura fresca."""
+    cr.save()
+    cr.translate(89, 4)
+    cr.rotate(0.24)
+    cr.new_path()
+    rrect(cr, -4, -12, 8, 42, 3)
+    fill(cr, '#c98b5a', preserve=True)
+    stroke(cr, 3)
+    rrect(cr, -5, -22, 10, 11, 2)
+    fill(cr, 'metal', preserve=True)
+    stroke(cr, 3)
+    cr.move_to(-5.5, -22)
+    quad(cr, -8, -34, 0, -43)
+    quad(cr, 8, -34, 5.5, -22)
+    cr.close_path()
+    fill(cr, PAINTS[0], preserve=True)
+    stroke(cr, 3)
+    cr.restore()
+
+
+def _beret(cr):
+    """Flequillo teñido de colores y, encima, la boina ladeada."""
+    def fringe():
+        cr.new_path()
+        cr.move_to(-78, 8)
+        cr.curve_to(-86, -34, -74, -60, -60, -64)
+        cr.line_to(56, -74)
+        cr.curve_to(76, -70, 88, -34, 78, 8)
+        for cx, cy, x, y in ((70, -8, 60, 6), (52, -12, 42, 4), (32, -14, 22, 8), (12, -12, 2, 2),
+                             (-8, -14, -18, 8), (-28, -12, -38, 4), (-48, -12, -58, 8), (-68, -6, -78, 8)):
+            quad(cr, cx, cy, x, y)
+        cr.close_path()
+
+    fringe()
+    g = cairo.LinearGradient(-78, 0, 78, 0)
+    for i, color in enumerate(PAINTS):
+        g.add_color_stop_rgba(i / (len(PAINTS) - 1), *rgba(color))
+    cr.set_source(g)
+    cr.fill_preserve()
+    stroke(cr, 5)
+    for x in (-62, -42, -22, -2, 18, 38, 58):
+        cr.move_to(x, -34 - (x + 62) * .1)
+        quad(cr, x + 3, -18, x - 2, -4)
+    cr.set_source_rgba(1, 1, 1, .34)
+    cr.set_line_width(2.4)
+    cr.stroke()
+
+    def beret():
+        cr.new_path()
+        cr.move_to(-90, -24)
+        cr.curve_to(-110, -80, -52, -110, 0, -104)
+        cr.curve_to(50, -100, 96, -92, 82, -54)
+        quad(cr, 4, -26, -90, -24)
+        cr.close_path()
+
+    beret()
+    g = cairo.LinearGradient(0, -104, 0, -24)
+    g.add_color_stop_rgba(0, *rgba('#f590ff'))
+    g.add_color_stop_rgba(1, *rgba('#a93fd0'))
+    cr.set_source(g)
+    cr.fill()
+    cr.save()
+    beret()
+    cr.clip()
+    cr.move_to(-74, -52)
+    quad(cr, -64, -84, -30, -94)
+    cr.set_source_rgba(1, 1, 1, .5)
+    cr.set_line_width(6)
+    cr.stroke()
+    cr.restore()
+    beret()
+    stroke(cr, 5.5)
+    # la banda y el rabito
+    cr.new_path()
+    cr.move_to(-90, -24)
+    quad(cr, 4, -26, 82, -54)
+    cr.line_to(80, -43)
+    quad(cr, 4, -14, -87, -13)
+    cr.close_path()
+    fill(cr, '#7a2a9e', preserve=True)
+    stroke(cr, 4.5)
+    cr.move_to(-36, -101)
+    cr.line_to(-42, -114)
+    stroke(cr, 8, preserve=True)
+    stroke(cr, 3.5, '#a93fd0')
+
+
+def _dabs(cr):
+    """Pintura en el cachete: se le fue la mano."""
+    for x, y, r, color in ((-63, 59, 5.5, PAINTS[3]), (-71, 71, 3.6, PAINTS[2]), (-55, 76, 2.6, PAINTS[4])):
+        cr.new_path()
+        cr.arc(x, y, r, 0, TAU)
+        fill(cr, color, preserve=True)
+        stroke(cr, 2.2)
+
+
+def _palette(cr, t, motion):
+    """La paleta, con sus pinturas, y el pincel en la otra mano."""
+    ellipse(cr, -8, 101, 46, 18)
+    fill(cr, '#f1d6a8', preserve=True)
+    stroke(cr, 3.5)
+    ellipse(cr, -38, 105, 6, 4.5)
+    fill(cr, '#8a6a45', preserve=True)
+    stroke(cr, 2.5)
+    for (x, y), color in zip(((-24, 93), (-9, 91), (6, 92), (20, 96), (24, 107)), PAINTS):
+        cr.new_path()
+        cr.arc(x, y, 5.2, 0, TAU)
+        fill(cr, color, preserve=True)
+        stroke(cr, 2)
+    _hands(cr, t, motion * .3, (-52,), 108)
+    # el pincel, que va y viene
+    b = math.sin(t * 6) * 5 * motion
+    cr.save()
+    cr.translate(52 + b * .4, 104 + b)
+    cr.rotate(-0.62)
+    cr.new_path()
+    rrect(cr, -3.5, -6, 7, 26, 3)
+    fill(cr, '#c98b5a', preserve=True)
+    stroke(cr, 3)
+    rrect(cr, -4.5, -14, 9, 9, 2)
+    fill(cr, 'metal', preserve=True)
+    stroke(cr, 2.6)
+    cr.move_to(-5, -14)
+    quad(cr, -7, -24, 0, -31)
+    quad(cr, 7, -24, 5, -14)
+    cr.close_path()
+    fill(cr, ACCENTS['designer'], preserve=True)
+    stroke(cr, 2.6)
+    cr.restore()
+    cr.new_path()
+    cr.arc(56 + b * .4, 110 + b, 7.5, 0, TAU)
+    fill(cr, 'face', preserve=True)
+    stroke(cr, 3.5)
+
+
+# ── mobile ───────────────────────────────────────────────────────────────────
+
+BEARD = ('#d08a4a', '#a8622c')    # la barba pelirroja, de arriba abajo
+KNIT = ('#3f9d92', '#1f5a55')     # el gorro de lana
+
+
+def _beanie(cr):
+    """Barba y bigote de manubrio y, arriba, el gorro de lana caído."""
+    # La barba es clara para que la boca, que va encima en oscuro, se siga viendo.
+    cr.new_path()
+    cr.move_to(-80, 34)
+    quad(cr, -66, 58, -40, 63)
+    quad(cr, -18, 67, 0, 61)
+    quad(cr, 18, 67, 40, 63)
+    quad(cr, 66, 58, 80, 34)
+    cr.curve_to(88, 86, 46, 118, 0, 118)
+    cr.curve_to(-46, 118, -88, 86, -80, 34)
+    cr.close_path()
+    g = cairo.LinearGradient(0, 40, 0, 118)
+    g.add_color_stop_rgba(0, *rgba(BEARD[0]))
+    g.add_color_stop_rgba(1, *rgba(BEARD[1]))
+    cr.set_source(g)
+    cr.fill_preserve()
+    stroke(cr, 5)
+    for x0, y0, x1, y1 in ((-58, 70, -50, 96), (-34, 84, -26, 108), (34, 84, 26, 108), (58, 70, 50, 96),
+                           (0, 96, 0, 112)):
+        cr.move_to(x0, y0)
+        quad(cr, (x0 + x1) / 2 - 3, (y0 + y1) / 2, x1, y1)
+    cr.set_source_rgba(1, 1, 1, .26)
+    cr.set_line_width(2.4)
+    cr.stroke()
+    # el bigote, con las puntas enroscadas
+    for g in (-1, 1):
+        cr.move_to(g * 1, 63)
+        cr.curve_to(g * 12, 55, g * 30, 57, g * 37, 66)
+        quad(cr, g * 44, 74, g * 52, 60)
+    stroke(cr, 10, preserve=True)
+    stroke(cr, 5, '#6b3a17')
+
+    # la punta del gorro, que cuelga hacia atrás
+    cr.save()
+    cr.translate(-66, -84)
+    cr.rotate(-0.7)
+    ellipse(cr, 0, 0, 27, 17)
+    cr.restore()
+    fill(cr, KNIT[1], preserve=True)
+    stroke(cr, 5.5)
+
+    def dome():
+        cr.new_path()
+        cr.move_to(-80, 2)
+        cr.curve_to(-92, -70, -74, -110, -22, -106)
+        cr.curve_to(40, -104, 92, -78, 80, 2)
+        quad(cr, 0, -12, -80, 2)
+        cr.close_path()
+
+    dome()
+    g = cairo.LinearGradient(0, -106, 0, 4)
+    g.add_color_stop_rgba(0, *rgba(KNIT[0]))
+    g.add_color_stop_rgba(1, *rgba(KNIT[1]))
+    cr.set_source(g)
+    cr.fill()
+    cr.save()
+    dome()
+    cr.clip()
+    # el tejido, y un brillo
+    for x in range(-70, 80, 14):
+        cr.move_to(x, -112)
+        quad(cr, x * 1.12, -50, x * 1.04, 6)
+    stroke(cr, 2.6, alpha=.32)
+    cr.move_to(-64, -40)
+    quad(cr, -60, -74, -36, -90)
+    cr.set_source_rgba(1, 1, 1, .3)
+    cr.set_line_width(5)
+    cr.stroke()
+    cr.restore()
+    dome()
+    stroke(cr, 5.5)
+    # el doblez, con su etiqueta de cuero
+    cr.new_path()
+    cr.move_to(-82, 6)
+    quad(cr, 0, 20, 82, 6)
+    cr.line_to(80, -14)
+    quad(cr, 0, -2, -80, -14)
+    cr.close_path()
+    fill(cr, '#55b8ab', preserve=True)
+    stroke(cr, 5)
+    for x in range(-66, 72, 12):
+        cr.move_to(x, -9 + abs(x) * .03)
+        cr.line_to(x, 9 - abs(x) * .04)
+    stroke(cr, 2.4, alpha=.3)
+    cr.new_path()
+    rrect(cr, 34, -9, 22, 15, 3)
+    fill(cr, ACCENTS['mobile'], preserve=True)
+    stroke(cr, 3)
+    cr.arc(45, -1.5, 2.2, 0, TAU)
+    fill(cr, 'line')
+
+
+def _phone(cr, t, motion):
+    """El teléfono, con una app a medias, y el café al lado."""
+    # el café para llevar, con su vapor
+    for i in range(2):
+        p = (t * .5 * motion + i / 2) % 1
+        x = 46 + i * 9
+        cr.move_to(x, 82 - p * 10)
+        quad(cr, x + 4, 77 - p * 10, x, 72 - p * 10)
+        stroke(cr, 2.4, 'metal', math.sin(p * math.pi) * .8)
+    cr.new_path()
+    cr.move_to(36, 90)
+    cr.line_to(62, 90)
+    cr.line_to(58, 122)
+    cr.line_to(40, 122)
+    cr.close_path()
+    fill(cr, 'face', preserve=True)
+    stroke(cr, 3.2)
+    cr.move_to(38.5, 99)
+    cr.line_to(59.5, 99)
+    cr.line_to(58.2, 111)
+    cr.line_to(39.8, 111)
+    cr.close_path()
+    fill(cr, ACCENTS['mobile'], preserve=True)
+    stroke(cr, 2.4)
+    rrect(cr, 33.5, 84, 31, 7.5, 3)
+    fill(cr, '#4a5370', preserve=True)
+    stroke(cr, 3)
+    # el teléfono
+    cr.new_path()
+    rrect(cr, -22, 78, 34, 46, 7)
+    fill(cr, '#262a35', preserve=True)
+    stroke(cr, 3.5)
+    rrect(cr, -18, 83, 26, 36, 3.5)
+    fill(cr, 'face')
+    rrect(cr, -18, 83, 26, 9, 3.5)
+    fill(cr, ACCENTS['mobile'])
+    for i, w in enumerate((17, 12)):
+        cr.move_to(-14, 98 + i * 6)
+        cr.line_to(-14 + w, 98 + i * 6)
+    stroke(cr, 2.6, 'metal')
+    rrect(cr, -14, 109, 18, 6.5, 3)
+    fill(cr, KNIT[0])
+    _hands(cr, t, motion, (-22, 13), 114)
+
+
 # ── las capas de cada personaje ──────────────────────────────────────────────
 
-HATS = {'engineer': _cap, 'architect': _hardhat, 'auditor': _front_cap, 'reviewer': _eyeshade}
-PROPS = {'engineer': _laptop, 'architect': _blueprint, 'auditor': _clipboard, 'reviewer': _magnifier}
+HATS = {'engineer': _cap, 'architect': _hardhat, 'auditor': _front_cap, 'reviewer': _eyeshade,
+        'designer': _beret, 'mobile': _beanie}
+PROPS = {'engineer': _laptop, 'architect': _blueprint, 'auditor': _clipboard, 'reviewer': _magnifier,
+         'designer': _palette, 'mobile': _phone}
 BACK = {'architect': lambda cr: _pencil(cr, 89, 4, 0.24, 'yellow'),
         'auditor': _collar,
-        'reviewer': lambda cr: _pencil(cr, -89, 4, -0.24, 'red')}
-FRONT = {'reviewer': _visor}
-FRAMES = {'auditor': .64}     # grosor del armazón de las gafas, sobre el de siempre
-PALE = {'auditor': .3}        # cuánto se le notan los cachetes
+        'reviewer': lambda cr: _pencil(cr, -89, 4, -0.24, 'red'),
+        'designer': _brush}
+FRONT = {'reviewer': _visor, 'designer': _dabs}
+# Grosor del armazón de las gafas, sobre el de siempre: discreto o de pasta.
+FRAMES = {'auditor': .64, 'mobile': 1.3}
+PALE = {'auditor': .3, 'mobile': .5}        # cuánto se le notan los cachetes
