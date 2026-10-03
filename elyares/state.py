@@ -43,6 +43,11 @@ la mascota se vuelve ese personaje mientras trabaja (`View.role`).
 Una sesión se nombra «agente | proyecto» (`View.agent_name` y `View.title`): el
 agente es `elyares-engineer` salvo mientras trabaja un subagente de la familia.
 
+Una sesión puede ser entera de uno de la familia (`claude --agent X`, como los
+chats de cada agente en la isla): sus eventos traen `agent_type` sin
+`agent_id`. Esa sesión es de él (`Session.main_agent`): en el tablero trabaja
+él y el engineer queda libre.
+
 Para el tablero de la isla, cada sesión dice cómo están sus cuatro
 (`Session.team`): quién trabaja, quién pide permiso y quién está libre, cada
 uno con sus pasos (lo que fue haciendo, con la hora de cada cosa). Mientras la
@@ -88,7 +93,7 @@ RUN_RANK = 1.5            # unas pruebas corriendo: sobre una sesión trabajando
 
 # Lo que se guarda de cada sesión entre reinicios del daemon.
 SAVED_TEXT = ('cwd', 'pane', 'tmux', 'state', 'detail', 'last_tool', 'name', 'url', 'tone',
-              'label', 'kind', 'proc')
+              'label', 'kind', 'proc', 'main_agent')
 SAVED_NUM = ('ttl', 'context')
 SAVED_TIMES = ('started', 'changed', 'updated')
 
@@ -146,12 +151,12 @@ def card_lines(lines):
 
 
 def card_actions(items):
-    """Los botones de una alerta: [{label, cmd | url | jump, term, hold, after}].
+    """Los botones de una alerta: [{label, cmd | url | jump | chat, term, hold, after}].
 
     `cmd` es una lista de argumentos; con `term` corre en una terminal nueva
     (y con `hold` espera una tecla al terminar). `jump` lleva al pane de la
-    alerta. `after` dice qué pasa con la alerta al pulsarlo: 'dismiss' la
-    descarta, 'clear' la quita sin silenciarla.
+    alerta y `chat` abre el chat de la isla. `after` dice qué pasa con la
+    alerta al pulsarlo: 'dismiss' la descarta, 'clear' la quita sin silenciarla.
     """
     out = []
     for a in items if isinstance(items, list) else []:
@@ -159,7 +164,7 @@ def card_actions(items):
             continue
         cmd = a.get('cmd')
         runs = isinstance(cmd, list) and cmd and all(isinstance(c, str) for c in cmd)
-        if runs or isinstance(a.get('url'), str) or a.get('jump') is True:
+        if runs or isinstance(a.get('url'), str) or a.get('jump') is True or a.get('chat') is True:
             out.append(a)
     return out[:CARD_ACTIONS]
 
@@ -309,6 +314,7 @@ class Session:
     label: str = ''           # el nombre que le puso Claude Code, si es de segundo plano
     kind: str = ''            # 'bg' si corre en segundo plano, sin terminal
     proc: str = ''            # su proceso de Claude, "pid:arranque": si muere, se olvida
+    main_agent: str = ''      # el de la familia del que es la sesión entera (claude --agent X)
     # ¿Ha hecho algo? Claude Code tiene lista una sesión de repuesto que solo
     # pinta su barra de estado: hasta que alguien la usa, no es de nadie.
     used: bool = False
@@ -336,9 +342,15 @@ class Session:
         return max(family, key=lambda a: a.started) if family else None
 
     @property
+    def owner(self):
+        """El personaje de quien trabaja la sesión cuando no hay un subagente de
+        la familia: el engineer, o el agente del que es la sesión entera."""
+        return AGENT_ROLES.get(self.main_agent, MAIN_ROLE)
+
+    @property
     def role(self):
-        """El personaje que le toca a la mascota: el de ese subagente, o el engineer."""
-        return self.lead.role if self.lead else MAIN_ROLE
+        """El personaje que le toca a la mascota: el de ese subagente, o el dueño de la sesión."""
+        return self.lead.role if self.lead else self.owner
 
     @property
     def agent_name(self):
@@ -346,7 +358,9 @@ class Session:
         engineer. Una alerta no es de ningún agente: ''."""
         if self.state == 'alert':
             return ''
-        return self.lead.name if self.lead else MAIN_AGENT
+        if self.lead:
+            return self.lead.name
+        return self.main_agent if self.owner != MAIN_ROLE else MAIN_AGENT
 
     def team(self):
         """Cómo están los cuatro de la familia en esta sesión, en el orden de `TEAM`."""
@@ -368,9 +382,17 @@ class Session:
             # recuperada de un reinicio, que vuelve sin sus pasos. Con uno de
             # la familia trabajando no: lo último de la sesión es de él.
             add_step(steps, self.detail, self.changed)
-        members = [Member(MAIN_ROLE, MAIN_AGENT, state, steps, self.started)]
+        owner = self.owner
+        if owner != MAIN_ROLE:
+            # La sesión entera es de uno de la familia: trabaja él, no el engineer.
+            members = [Member(MAIN_ROLE, MAIN_AGENT)]
+        else:
+            members = [Member(MAIN_ROLE, MAIN_AGENT, state, steps, self.started)]
         for role in TEAM[1:]:
             mine = [a for a in family if a.role == role]
+            if role == owner and not mine:
+                members.append(Member(role, self.main_agent, state, steps, self.started))
+                continue
             if not mine:
                 members.append(Member(role, ROLE_AGENTS[role]))
                 continue
@@ -539,6 +561,8 @@ class Model:
         s.proc = msg.get('proc') or s.proc
         s.kind = msg.get('kind') or s.kind
         s.label = short(msg.get('label'), 60) or s.label
+        if not agent and msg.get('agent_type') in AGENT_ROLES:
+            s.main_agent = msg['agent_type']
         if ev != 'status':
             s.used = True
         root = project_root(s.cwd)
