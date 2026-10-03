@@ -285,6 +285,18 @@ los permisos (`--permission-prompt-tool stdio`). Si el proceso se cierra, lo
 siguiente que escribas lo vuelve a abrir con `--resume` (`elyares/chat.py`,
 `elyares/chatview.py`).
 
+### Moverla
+
+Su sitio de siempre es el centro, debajo de Waybar, pero se puede correr a lo
+ancho de la pantalla: `elyares-ctl move left` y `elyares-ctl move right` la
+llevan al siguiente sitio de ese lado (hay cinco: los dos bordes, el centro y
+los dos puntos medios), `elyares-ctl move center` la devuelve a su sitio y
+`elyares-ctl move 80` la pone en ese punto exacto, de 0 (izquierda) a 100
+(derecha). Sigue pegada arriba: su forma cuelga del borde. El sitio se guarda
+(`position` en `settings.json`) y vale en cualquier monitor: al pasar a otro
+queda en el mismo punto de su ancho. Los atajos de mover ventanas de Hyprland
+no sirven aquí, porque la isla es una capa y no una ventana.
+
 ### La familia
 
 ElYares no trabaja solo. La sesión es el **engineer**, y hay cinco subagentes de
@@ -693,6 +705,7 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | `elyares-ctl open` | abre la isla con lo que hace Claude; se cierra sola a los 6 s o al repetir |
 | `elyares-ctl chat [quién] [--dir carpeta]` | abre el chat con Claude, listo para escribir; otra vez lo cierra. Con `architect`, `auditor`, `reviewer` o `engineer`, el de ese agente. Con `--dir`, en el proyecto de esa carpeta |
 | `elyares-ctl projects` | abre el panel de proyectos, para empezar a trabajar en uno; otra vez lo cierra |
+| `elyares-ctl move <dónde>` | corre la isla a lo ancho de la pantalla: `left` y `right`, al siguiente sitio de ese lado; `center`, a su sitio de siempre; o un número del 0 (izquierda) al 100 (derecha) |
 | `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
 | `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |
 | `elyares-ctl pin` | fija la isla abierta con todo a la vista; otra vez, la suelta. Como el clic central |
@@ -718,6 +731,9 @@ bindd = SUPER CTRL ALT, Y, Engineer: modo compacto, exec, elyares-ctl compact
 bindd = SUPER ALT, U, Engineer: fijar o soltar, exec, elyares-ctl pin
 bindd = SUPER ALT, I, Engineer: la pestaña que sigue, exec, elyares-ctl tab
 bindd = SUPER ALT, O, Engineer: el desglose que sigue, exec, elyares-ctl steps
+bindd = SUPER ALT, H, Engineer: correr a la izquierda, exec, elyares-ctl move left
+bindd = SUPER ALT, L, Engineer: correr a la derecha, exec, elyares-ctl move right
+bindd = SUPER ALT, period, Engineer: volver al centro, exec, elyares-ctl move center
 ```
 
 Fijada, la isla se queda abierta como cuando le pasas el ratón por encima (el
