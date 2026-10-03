@@ -1884,15 +1884,17 @@ class Island(chatview.ChatView, projectview.ProjectView):
         self.panel(cr, x, y, cw, h, alpha, tint if member.busy else None)
         cx = x + FOCUS_SIDE / 2
         pet = MEMBER_PET.get(member.state, 'idle')
-        self.face(cr, role, pet, cx, y + 64, 84, alpha, now, now - s.changed)
-        self.put(cr, member.name, FONT_ROW, cx, y + 116, rgb(mascot.accent(role)), alpha,
+        # Arriba, quién es; abajo, sus enlaces. Con tres enlaces lo de arriba
+        # se junta un poco, para que no se monten.
+        self.face(cr, role, pet, cx, y + 58, 78, alpha, now, now - s.changed)
+        self.put(cr, member.name, FONT_ROW, cx, y + 104, rgb(mascot.accent(role)), alpha,
                  FOCUS_SIDE - 12, .5)
-        self.put(cr, self.tab_labels()[s.sid], FONT_DETAIL, cx, y + 134, MUTED_COLOR, alpha,
+        self.put(cr, self.tab_labels()[s.sid], FONT_DETAIL, cx, y + 121, MUTED_COLOR, alpha,
                  FOCUS_SIDE - 12, .5)
         n = len(member.steps)
         took = f' · {elapsed(now - member.since)}' if member.busy and member.since else ''
         self.put(cr, f'{n} paso{"" if n == 1 else "s"}{took}' if n or member.busy else 'libre', FONT_DETAIL,
-                 cx, y + 156, rgb(self.colors['arg']), alpha, FOCUS_SIDE - 12, .5)
+                 cx, y + 140, rgb(self.colors['arg']), alpha, FOCUS_SIDE - 12, .5)
         # Al pie, dos enlaces: al pane de la sesión y de vuelta al tablero.
         # Y su chat: con el engineer, para hablarle; con uno de los tres, que
         # ya tiene aquí su mini chat, para leer lo que contestó.
@@ -1950,14 +1952,18 @@ class Island(chatview.ChatView, projectview.ProjectView):
         # Los demás siguen a la vista; un clic en uno abre el suyo.
         others = [m for m in self.team(s) if m.role != role]
         mx = x + cw + FOCUS_MINIS / 2 + 2
+        # Se reparten el alto del desglose: con toda la familia no caben a 40
+        # cada uno, y los últimos se salían por abajo.
+        gap = min(40, (h - 12) / max(1, len(others)))
+        size = min(28, gap - 4)
         for i, other in enumerate(others):
-            my = y + 30 + i * 40
-            self.face(cr, other.role, MEMBER_PET.get(other.state, 'idle'), mx, my, 28,
+            my = y + 6 + gap * (i + .5)
+            self.face(cr, other.role, MEMBER_PET.get(other.state, 'idle'), mx, my, size,
                       alpha * (1 if other.busy else .35))
             if other.steps:
-                self.hits.append(('member', (s.sid, other.role), mx - 16, my - 18, 32, 36))
+                self.hits.append(('member', (s.sid, other.role), mx - 16, my - gap / 2, 32, gap))
             elif other.role != MAIN_ROLE:
-                self.hits.append(('brief', (s.sid, other.role), mx - 16, my - 18, 32, 36))
+                self.hits.append(('brief', (s.sid, other.role), mx - 16, my - gap / 2, 32, gap))
 
     def draw_rows(self, cr, x0, w, top, alpha, rows, limit):
         """Una fila por alerta: su punto, de quién es y qué pasa."""
