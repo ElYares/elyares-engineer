@@ -1977,8 +1977,10 @@ class Island(chatview.ChatView, projectview.ProjectView):
         y = top + body + (CARD_BUTTONS - BUTTON_H) / 2 - 2
         buttons = [('dismiss', 'Descartar')] + [(i, a['label']) for i, a in enumerate(s.actions)]
         for n, (key, label) in enumerate(reversed(buttons)):
-            x -= BUTTON_W
-            self.draw_button(cr, key, label, x, y, n == 0 and key != 'dismiss', alpha)
+            # Tan ancho como pida su texto: «Ver respuesta» no cabe en el de siempre.
+            bw = max(BUTTON_W, self._layout(cr, label, FONT_BUTTON).get_pixel_size()[0] + 24)
+            x -= bw
+            self.draw_button(cr, key, label, x, y, n == 0 and key != 'dismiss', alpha, bw)
             x -= BUTTON_GAP
 
     def draw_pills(self, cr, x0, w, bottom, alpha):
@@ -2433,7 +2435,8 @@ class Island(chatview.ChatView, projectview.ProjectView):
         for key, (bx, by, bw, bh) in self.buttons.items():
             if not (bx <= x <= bx + bw and by <= y <= by + bh):
                 continue
-            if key.startswith('chat-'):
+            # Los botones de una ficha van por su número: no son los del chat.
+            if isinstance(key, str) and key.startswith('chat-'):
                 self.on_chat_button(key)
                 return
             if key in ('allow', 'deny'):

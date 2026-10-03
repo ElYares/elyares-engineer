@@ -850,9 +850,18 @@ class Chat(Dibujo):
         alert = self.isl.model.sessions['chat:s-chat']
         self.assertIn('ver respuesta', alert.detail)
         self.assertEqual(alert.lines, ['Hecho', 'Las 22 pruebas pasan.'])
-        # Su botón abre el chat, y el aviso se va.
-        self.isl.act(alert, 0)
+        # Su botón, con un clic de verdad, abre el chat, y el aviso se va.
+        self.isl.chats['', '/x/proj'] = c
+        self.isl.expanded, self.isl.pin = True, 'chat:s-chat'
+        self.isl.refresh()
+        self.draw()
+        self.assertIs(self.isl.view.session, alert)
+        self.assertIn('Ver respuesta', self.shown)
+        x, y, w, h = self.isl.buttons[0]
+        self.assertGreater(w, app.BUTTON_W)             # tan ancho como su texto: no se corta
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
         self.assertTrue(self.isl.chat_open)
+        self.assertIs(self.isl.chat, c)
         self.assertNotIn('chat:s-chat', self.isl.model.sessions)
 
     def test_cada_agente_tiene_su_conversacion(self):
