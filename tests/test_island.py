@@ -739,16 +739,23 @@ class Chat(Dibujo):
 
     def setUp(self):
         super().setUp()
-        self.tmux_cwd = '/x/proj'           # la carpeta de la sesión de tmux en la que se está
-        patcher = mock.patch.object(app.chatview.chat, 'active_cwd', lambda default=None: self.tmux_cwd)
+        self.tmux_cwd = '/x/proj'           # la carpeta de la sesión de tmux en la que se está (None: sin tmux)
+        patcher = mock.patch.object(app.chatview.projects, 'listing', self.listing)
         patcher.start()
         self.addCleanup(patcher.stop)
-        P = app.projectview.projects.Project
-        self.isl.projects = [P('proj', '/x/proj', 'personal', 'proj', 50, key='proj'),
-                             P('aang-server', '/x/aang', 'work', key='aang-server'),
-                             P('tl-mas-server', '/x/tl', 'work', 'tl-mas-server', 90, True, key='tl-mas-server')]
+        self.isl.projects = self.listing()
         self.isl.ensure_tick = lambda: None
         self.isl.expand = mock.Mock()
+
+    def listing(self):
+        """Los proyectos, como los daría tmux ahora: se está en el de `tmux_cwd`."""
+        P = app.projectview.projects.Project
+        found = [P('proj', '/x/proj', 'personal', 'proj', 50, key='proj'),
+                 P('aang-server', '/x/aang', 'work', key='aang-server'),
+                 P('tl-mas-server', '/x/tl', 'work', 'tl-mas-server', 90, key='tl-mas-server')]
+        for p in found:
+            p.here = p.path == self.tmux_cwd
+        return found
 
     def conversation(self):
         c = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock())
@@ -907,17 +914,87 @@ class Chat(Dibujo):
         self.isl.on_chat_hit('new')
         self.assertEqual((self.isl.chat.cwd, self.isl.chat.entries), ('/x/proj', []))
         self.assertIs(self.isl.chats['', '/x/tl'], tl)
-        # Elegido otro con "#", ese se queda a la vista mientras no cambies de sesión en tmux.
+        # Aunque se haya visto otra (con "#" o con «Ver respuesta»), al abrirlo manda tmux:
+        # sale la del proyecto en el que estás.
         self.isl.show_chat(tl)
         self.isl.close_chat()
         self.isl.on_control('chat')
-        self.assertIs(self.isl.chat, tl)
-        # Sin tmux, el último proyecto.
+        self.assertEqual(self.isl.chat.cwd, '/x/proj')
+        # Sin tmux, la última que se tuvo a la vista.
+        self.isl.show_chat(tl)
         self.isl.close_chat()
-        with mock.patch.object(app.chatview.chat, 'active_cwd', lambda default=None: default):
-            self.isl.on_control('chat')             # se cierra
-            self.isl.on_control('chat')
-        self.assertEqual(self.isl.chat.cwd, '/x/tl')
+        self.tmux_cwd = None
+        self.isl.on_control('chat')
+        self.assertIs(self.isl.chat, tl)
+
+    def test_cada_pestana_manda_sobre_su_chat(self):
+        send = self.sending()
+        # Dos proyectos en el tablero: una conversación empezada en /x/tl, cuyo Claude
+        # anda ahora por la carpeta de /x/proj, y una sesión de terminal en /x/proj.
+        tl = self.isl.chat_for('', '/x/tl')
+        tl.session = 's-tl'
+        self.isl.chat_sessions.add('s-tl')
+        self.send('start', 's-tl', cwd='/x/proj/sub')
+        self.send('start', 'term', cwd='/x/proj')
+        self.isl.expanded = True
+        self.tmux_cwd = '/x/aang'                   # en tmux se está en un tercero: no cuenta
+        # Con el tablero a la vista, el botón Chat abre el de la pestaña elegida.
+        self.isl.tab = 's-tl'
+        self.isl.open_chat()
+        self.assertIs(self.isl.chat, tl)
+        self.isl.close_chat()
+        # En la pestaña de una sesión de terminal, el chat de ese proyecto.
+        self.isl.tab = 'term'
+        self.isl.open_chat()
+        self.assertEqual((self.isl.chat.agent, self.isl.chat.cwd), ('', '/x/proj'))
+        self.isl.close_chat()
+        # Un encargo desde la pestaña de /x/tl va a la conversación de ese proyecto,
+        # no a la del proyecto por el que anda su Claude.
+        self.isl.tab = 's-tl'
+        self.draw()
+        self.isl.on_hit('brief', ('s-tl', 'auditor'))
+        self.isl.chat_text = lambda: 'audita esto'
+        self.isl.on_chat_enter()
+        self.assertEqual(sorted(k for k in self.isl.chats if k[0]), [('elyares-auditor', '/x/tl')])
+        self.assertEqual(self.isl.chat_hosts, {('elyares-auditor', '/x/tl'): 's-tl'})
+        send.assert_called_once()
+        # Y su proyecto ya tiene Claude: no se ofrece como si estuviera sin empezar.
+        self.tmux_cwd = '/x/tl'
+        self.isl.projects = self.listing()
+        self.assertIsNone(self.isl.project_start())
+        by = {p.name: p for p in self.isl.projects}
+        self.assertEqual([s.sid for s in self.isl.project_sessions(by['tl-mas-server'])], ['s-tl'])
+        self.assertEqual([s.sid for s in self.isl.project_sessions(by['proj'])], ['term'])
+
+    def test_la_pestana_de_un_chat_abre_su_conversacion(self):
+        # Una conversación empezada en /x/tl cuyo Claude anda ahora por otra carpeta.
+        tl = self.isl.chat_for('', '/x/tl')
+        tl.session = 's-tl'
+        self.isl.chat_sessions.add('s-tl')
+        self.send('start', 's-tl', cwd='/x/proj/sub')
+        self.work('a')
+        self.isl.expanded = True
+        self.draw()
+        # Su pestaña lleva el nombre del proyecto en el que se empezó, no el de por donde anda.
+        self.assertIn('tl-mas-server · chat', self.shown)
+        # Un clic la elige; otro, ya elegida, abre su conversación (no la del proyecto de tmux).
+        self.isl.tab = 'a'
+        self.isl.on_hit('tab', 's-tl')
+        self.assertFalse(self.isl.chat_open)
+        self.isl.on_hit('tab', 's-tl')
+        self.assertTrue(self.isl.chat_open)
+        self.assertIs(self.isl.chat, tl)
+        self.isl.go.assert_not_called()
+        # Y «hablarle ›» en su desglose, lo mismo.
+        self.isl.close_chat()
+        self.isl.on_hit('talk', '')
+        self.assertIs(self.isl.chat, tl)
+        # La de una sesión de terminal sigue llevando a su pane.
+        self.isl.close_chat()
+        self.isl.on_hit('tab', 'a')
+        self.isl.on_hit('tab', 'a')
+        self.isl.go.assert_called_once()
+        self.assertFalse(self.isl.chat_open)
 
     def test_con_dir_se_abre_en_esa_carpeta(self):
         with mock.patch.object(app.os.path, 'isdir', lambda path: path == '/x/aang'):
@@ -933,8 +1010,8 @@ class Chat(Dibujo):
         self.isl.chat_whom = 'chat'             # la caja ya es del chat: lo escrito no se pierde
         self.write('#')
         # Los abiertos en tmux primero, el usado más recientemente arriba; luego los cerrados.
-        self.assertEqual(self.isl.suggestions(), [('tl-mas-server', '◆ work · /x/tl'),
-                                                  ('proj', '● personal · /x/proj · con conversación'),
+        self.assertEqual(self.isl.suggestions(), [('tl-mas-server', '● work · /x/tl'),
+                                                  ('proj', '◆ personal · /x/proj · con conversación'),
                                                   ('aang-server', '○ work · /x/aang')])
         self.draw()
         self.assertIn('#tl-mas-server', self.shown)
@@ -969,6 +1046,38 @@ class Chat(Dibujo):
         self.isl.close_chat()
         self.isl.chat_tick(100.0 + sleep + 2)
         seen.close.assert_called_once_with()
+
+    def test_los_menus_de_la_linea_de_estado_se_eligen_con_un_clic(self):
+        c = self.conversation()
+        self.isl.chats['', '/x/proj'] = c
+        self.isl.chat_whom = 'chat'
+        self.isl.chat_images = [b'png']                 # con algo pegado encima de la caja
+        self.isl.chat_text = lambda: 'una\ndos\ntres'   # y la caja crecida
+
+        def click(menu, option):
+            """Abre el menú y pulsa esa opción, con un clic de verdad."""
+            self.isl.show_chat(c)
+            self.isl.on_chat_hit(menu)
+            self.draw()
+            hits = [h for h in self.isl.hits if h[0] == 'chat']
+            box = next(h for h in hits if h[1] == 'type')
+            rows = [h for h in hits if str(h[1]).startswith(f'{menu}:')]
+            # Ninguna opción cae sobre la caja: ahí manda el widget, no el dibujo.
+            self.assertTrue(all(y + h <= box[3] for _, _, _, y, _, h in rows))
+            _, _, x, y, w, h = next(r for r in rows if r[1] == option)
+            self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+
+        # Los cuatro agentes, también el de más abajo, que antes caía sobre la caja.
+        for agent in ('elyares-architect', 'elyares-auditor', 'elyares-reviewer', ''):
+            click('agent', f'agent:{agent}')
+            self.assertEqual(self.isl.chat.agent, agent)
+            self.assertIsNone(self.isl.chat_menu)
+        for alias, _ in app.chatview.chat.MODELS:
+            click('model', f'model:{alias}')
+            self.assertEqual(c.model, alias)
+        for level in app.chatview.chat.EFFORTS:
+            click('effort', f'effort:{level}')
+            self.assertEqual(c.effort, level)
 
     def test_con_la_orden_y_desde_el_tablero_se_le_habla_a_uno(self):
         self.isl.on_control('chat', {'control': 'chat', 'agent': 'reviewer'})
@@ -1292,17 +1401,16 @@ class Chat(Dibujo):
         other.chat_init()
         other.chat_restore(json.loads(json.dumps(old)))
         self.assertEqual((other.chat.session, other.chat_open), ('s-chat', False))
-        # Recién arrancada sigue en la conversación que tenía, aunque tmux esté en otro proyecto...
+        # Un aviso viejo, que no dice de qué conversación es, abre la que se tenía a la vista...
         self.tmux_cwd = '/x/tl'
-        other.chat_init()
-        other.chat_restore(json.loads(json.dumps(old)))
         other.ensure_tick = other.chat_type = lambda *a: None
-        other.open_chat()
-        self.assertEqual(other.chat.session, 's-chat')
-        # ...y un aviso viejo, que no dice de qué conversación es, abre esa.
-        other.close_chat()
+        other.target = lambda: 'open'               # sin tablero a la vista
         other.chat_show(True)
         self.assertEqual(other.chat.session, 's-chat')
+        # ...y el botón del chat, la del proyecto en el que estás en tmux.
+        other.close_chat()
+        other.open_chat()
+        self.assertEqual(other.chat.cwd, '/x/tl')
         self.assertEqual(other.chat_hosts, {('elyares-auditor', '/x/proj'): 's-chat'})
         # Lo guardado a medias o roto no tumba el arranque.
         for bad in ({}, {'chats': 'x', 'hosts': []}, {'chats': [{}, 3, {'cwd': 7}], 'current': 9}):
@@ -1334,9 +1442,6 @@ class Proyectos(Dibujo):
 
     def setUp(self):
         super().setUp()
-        patcher = mock.patch.object(app.chatview.chat, 'active_cwd', lambda default=None: '/d/work/tl')
-        patcher.start()
-        self.addCleanup(patcher.stop)
         self.isl.ensure_tick = lambda: None
         self.isl.close_chat = mock.Mock()
         P = app.projectview.projects.Project

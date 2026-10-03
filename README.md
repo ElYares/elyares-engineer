@@ -186,11 +186,20 @@ respuesta**, que abre el chat para leerla entera.
 - **Un chat por proyecto:** cada proyecto tiene su conversación con cada
   agente, y pasar a otro no tira la del anterior. La cabecera dice en cuál
   estás (`agente | proyecto` y su carpeta).
-- **Sigue a tmux:** al abrirlo, si desde la última vez pasaste a otra sesión
-  de tmux, sale la conversación del proyecto de esa sesión (la carpeta del
-  pane en el que estás; si ese proyecto no tiene, una vacía ahí). Si sigues
-  en la misma sesión, sale la que tenías a la vista. No hace falta abrir
-  `claude` en una terminal para que la isla vea trabajo en un proyecto.
+- **Cada pestaña manda sobre su chat:** una pestaña del tablero es un
+  proyecto. Con el tablero a la vista, la pastilla **Chat** (y `elyares-ctl
+  chat`) abre el chat de la pestaña elegida: su conversación o, si la sesión
+  es de una terminal, la del chat de ese proyecto. Lo mismo un clic en la
+  pestaña ya elegida de una sesión del chat, «hablarle ›» en su desglose y
+  «Ver respuesta» en su aviso. Los encargos a architect, auditor y reviewer
+  desde una pestaña van a las conversaciones de ese proyecto y de ningún otro.
+- **El proyecto de una pestaña** es aquel en el que se empezó su conversación,
+  y así se llama, aunque Claude acabe trabajando en otra carpeta.
+- **Sin tablero, sigue a tmux:** si no hay ninguna sesión a la vista, el chat
+  se abre en el proyecto de la sesión de tmux en la que estás (y si no tiene,
+  una conversación vacía ahí); sin tmux, en la última que tuviste a la vista.
+  No hace falta abrir `claude` en una terminal para que la isla vea trabajo
+  en un proyecto.
 - **Elegir proyecto:** al escribir `#` salen tus proyectos de `~/develop`,
   los abiertos en tmux primero (el usado más recientemente arriba) y luego
   los cerrados, con su marca, su workspace, su carpeta y si ya tienen
