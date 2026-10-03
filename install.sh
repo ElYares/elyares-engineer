@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Instala elyares-engineer: enlaces en ~/.local/bin, servicio systemd de usuario, hooks
-# de Claude Code, los agentes de la familia, la envoltura de su barra de
+# de Claude Code, los agentes de la familia y su candado, la envoltura de su barra de
 # estado, el aviso de comandos largos en ~/.bashrc y, en omarchy, el hook de
 # cambio de tema. Se puede correr las veces que sea: reemplaza lo suyo y no
 # toca lo demás.
@@ -70,6 +70,12 @@ if [ ${#agents[@]} -gt 0 ]; then
     install -m 644 "$f" "$agents_dir/"
   done
   echo "✓ ${#agents[@]} agentes en $agents_dir (valen para las sesiones nuevas de Claude)"
+  # Su candado: el hook que frena lo que escribe un agente que solo lee. Copia
+  # y no enlace, como ellos: un hook que no se encuentra no frena nada, y un
+  # enlace a esta carpeta se rompe con otra rama.
+  rm -f "$bin_dir/elyares-guard"
+  install -m 755 "$here/elyares/guard.py" "$bin_dir/elyares-guard"
+  echo "✓ candado de los agentes en $bin_dir/elyares-guard"
 fi
 if [ ${#rules[@]} -gt 0 ]; then
   [ -L "$rules_dir" ] && rm -f "$rules_dir"

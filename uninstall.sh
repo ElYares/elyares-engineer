@@ -20,7 +20,7 @@ for name in elyares-engineer elyares-mascota; do
     && sed -i --follow-symlinks "/^# >>> $name >>>/,/^# <<< $name <<</d" "$bashrc"
 done
 systemctl --user daemon-reload
-for f in elyares-hook elyares-ctl elyares-demo elyares-statusline; do
+for f in elyares-hook elyares-ctl elyares-demo elyares-statusline elyares-guard; do
   rm -f "$HOME/.local/bin/$f"
 done
 rules_dir="$HOME/.claude/elyares/seguridad"
