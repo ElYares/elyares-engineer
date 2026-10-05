@@ -927,6 +927,18 @@ class Chat(Dibujo):
         self.assertIs(self.isl.chat, c)
         self.assertNotIn('chat:s-chat', self.isl.model.sessions)
 
+    def test_el_aviso_de_terminado_se_va_cuando_empieza_otro_turno(self):
+        c = self.conversation()
+        self.isl.chat_open = False
+        c.session, c.busy = 's-chat', True
+        c.entries.append(app.chatview.chat.Entry('claude', 'Listo.'))
+        self.isl.on_chat({'type': 'result', 'subtype': 'success', 'duration_ms': 1000})
+        self.assertIn('chat:s-chat', self.isl.model.sessions)
+        # Se le manda otra cosa: el «terminó» de antes ya no es verdad.
+        c.busy = True
+        self.isl.on_chat({'type': 'system', 'subtype': 'init', 'session_id': 's-chat'})
+        self.assertNotIn('chat:s-chat', self.isl.model.sessions)
+
     def test_cada_agente_tiene_su_conversacion(self):
         self.isl.settings['chat_model'] = 'haiku'
         self.isl.open_chat()

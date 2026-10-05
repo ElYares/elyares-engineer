@@ -548,6 +548,9 @@ class ChatView:
             self.chat_sessions.add(c.session)
             if self.chat_watch:
                 self.tab = c.session
+            if c.busy:
+                # Otro turno en curso: el «terminó» del anterior ya no es verdad.
+                self.model.sessions.pop(f'chat:{c.session}', None)
         self.chat_context(c)
         if c.asking and not asked:
             self.chat_ask(c)
