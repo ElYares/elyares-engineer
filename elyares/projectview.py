@@ -94,7 +94,7 @@ class ProjectView:
         for name in CLAUDE_RANK:
             if name in states:
                 return CLAUDE_NOTES[name]
-        chats = [c for c in self.chats.values() if self.project_of(c.cwd) is p]
+        chats = [c for c in self.all_chats() if self.project_of(c.cwd) is p]
         if any(c.busy for c in chats):
             return CLAUDE_NOTES['working']
         if states or any(c.session or c.entries for c in chats):

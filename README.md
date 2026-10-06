@@ -276,6 +276,15 @@ respuesta**, que abre el chat para leerla entera.
 - **Detener / Nuevo / Cerrar**, arriba a la derecha: cortar el turno (también
   Ctrl+C sin nada seleccionado), empezar otra conversación con el mismo
   agente en este proyecto (las de los demás no se tocan), y cerrar el panel.
+- **Otra:** con el mismo agente y en el mismo proyecto, abre una conversación
+  nueva sin tocar la que ya trabaja: sirve para pedirle algo más sin esperar a
+  que acabe. Con más de una, debajo de la cabecera sale la fila de las del
+  agente (`● ` si trabaja, `! ` si espera respuesta; un clic pasa a ella y la ×
+  cierra las que no trabajan; **Nuevo** en una la empieza de cero en su lugar).
+  Hasta 5. Solo los que no modifican el repo (architect, auditor, reviewer,
+  designer, researcher): el engineer, el mobile y el devops tienen una sola por
+  proyecto, porque dos suyas sobre la misma carpeta se pisarían
+  (`chat.SINGLE_AGENTS`). Los workflows siguen usando la de siempre.
 - **El teclado:** mientras escribes, el chat lo toma entero. Esc lo suelta sin
   cerrar el chat y un clic en la caja lo vuelve a tomar; si pasan 90 s sin
   teclear, lo suelta solo.
