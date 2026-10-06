@@ -389,6 +389,29 @@ class Carpeta(unittest.TestCase):
 
 
 class Markdown(unittest.TestCase):
+    def test_el_codigo_sale_resaltado_sobre_su_fondo_y_se_puede_copiar(self):
+        ink = {role: '#aabbcc' for role in ('cmd', 'str', 'flag', 'num', 'dim', 'arg')}
+        blocks = []
+        out = paint.markdown('hola `x`\n```python\nimport os  # c\nx = 3\n```\n```\n$ ls -la\n```',
+                             ink=ink, shade='#101010', blocks=blocks)
+        self.assertEqual(blocks, [('python', 'import os  # c\nx = 3'), ('', '$ ls -la')])
+        self.assertEqual((out.count(paint.CODE_MARK), out.count(paint.CODE_END)), (2, 2))   # arriba y abajo de cada bloque
+        self.assertEqual(out.count('background="#101010"'), 1)  # solo el inline: el fondo del bloque lo pinta la isla
+        self.assertIn('<span foreground="#aabbcc">import</span>', out)
+
+    def test_un_papel_que_el_tema_no_trae_no_rompe_el_dibujo(self):
+        ink = {'cmd': '#111111', 'arg': '#222222'}
+        out = paint.markdown('```bash\ncd ~/x --f $HOME 3\n```', ink=ink, shade='#000000')
+        self.assertIn('foreground="#222222"', out)
+
+    def test_un_bloque_sin_cerrar_tambien_se_copia(self):
+        blocks = []
+        paint.markdown('```sh\nls', ink={'cmd': '#111111', 'arg': '#111111', 'flag': '#111111', 'str': '#111111',
+                                         'num': '#111111', 'dim': '#111111'}, shade='#000000', blocks=blocks)
+        self.assertEqual(blocks, [('sh', 'ls')])
+        out = paint.markdown('```sh\nls', ink={'cmd': '#1', 'arg': '#1'}, shade='#000000')
+        self.assertEqual((out.count(paint.CODE_MARK), out.count(paint.CODE_END)), (1, 1))
+
     def test_lo_justo_para_leerlo(self):
         out = paint.markdown('## Hecho **ya**\n- uno `a<b`\n```\nx <y>\n```\n| a | b |\nfin & listo',
                              code='#111111', head='#ffffff')

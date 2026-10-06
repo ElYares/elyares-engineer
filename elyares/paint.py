@@ -152,7 +152,8 @@ CODE = re.compile(r'`([^`]+)`')
 DIVIDER_WIDTH = 28
 
 
-def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=None):
+def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=None,
+             ink=None, shade=None, blocks=None):
     """Lo que escribe Claude (markdown) como marcado de Pango, con lo justo
     para leerlo en la isla: negritas, `código` y títulos, viñetas, y los
     bloques de código y las tablas en monoespaciado, para que no se
@@ -162,13 +163,20 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
     su color (más claro que el texto), las cursivas y los enlaces, las
     viñetas y los números en el acento, las listas con su sangría, las citas
     con su barra, la raya `---` como una línea suave, y un respiro antes de
-    cada título. Sin ellos sale como siempre."""
+    cada título. Sin ellos sale como siempre.
+
+    Con `ink` (papel -> #rrggbb) y `shade` (un #rrggbb de fondo), los bloques
+    de código salen resaltados según su lenguaje y sobre ese fondo, y el
+    código inline también. `blocks` recibe [(lenguaje, texto)] de cada bloque,
+    en orden. Cada bloque va entre dos líneas de respiro que llevan CODE_MARK
+    y CODE_END: con ellas la isla sabe dónde pintar su fondo."""
     rich = bool(bold or dim or accent)
     mono = f'<span font_family="monospace" foreground="{code}">'
-    out, fenced, table = [], False, []
+    out, fenced, table, lang, body = [], False, [], '', []
+    shaded = f'<span font_family="monospace" foreground="{code}" background="{shade}">' if shade else mono
 
     def inline(line):
-        return _inline(line, mono, bold, rich)
+        return _inline(line, shaded, bold, rich)
 
     for line in (text or '').split('\n'):
         if line.lstrip().startswith('|') and not fenced:
@@ -179,9 +187,22 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
             table = []
         if FENCE.match(line):
             fenced = not fenced
+            if fenced:
+                lang, body = line.strip()[3:].strip().lower(), []
+                if shade and ink:
+                    out.append(f'{mono} {CODE_MARK}</span>')       # el borde de arriba: lleva el «copiar»
+            else:
+                if blocks is not None and body:
+                    blocks.append((lang, '\n'.join(body)))
+                if shade and ink:
+                    out.append(f'<span size="small"> {CODE_END}</span>')
             continue
         if fenced:
-            out.append(f'{mono}{html.escape(line, quote=False)}</span>')
+            if shade and ink:
+                out.append(_code_line(line, lang, ink, mono))
+            else:
+                out.append(f'{mono}{html.escape(line, quote=False)}</span>')
+            body.append(line)
             continue
         if rich and not line.strip():
             if out and out[-1] != '':
@@ -216,9 +237,60 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
         out.append(inline(line))
     if table:
         out += _table(table, mono)
+    if fenced:                                      # un bloque que aún se está escribiendo
+        if blocks is not None and body:
+            blocks.append((lang, '\n'.join(body)))
+        if shade and ink:
+            out.append(f'<span size="small"> {CODE_END}</span>')
     while out and out[-1] == '':
         out.pop()
     return '\n'.join(out)
+
+
+COMMENT = {'python': '#', 'yaml': '#', 'js': '//', 'sql': '--', 'json': '//'}
+CODE_MARK = '\u2063'         # invisible: la línea de arriba de un bloque de código
+CODE_END = '\u2064'          # invisible: la de abajo
+KEYWORDS = {
+    'python': 'and as assert async await break class continue def del elif else except finally for from global if '
+              'import in is lambda None nonlocal not or pass raise return self True False try while with yield',
+    'js': 'async await break case catch class const continue default delete do else export extends false finally for '
+          'from function if import in instanceof let new null of return static super switch this throw true try '
+          'typeof undefined var void while yield interface type enum implements public private readonly',
+    'sql': 'select from where insert into update delete create table join left right inner on group by order limit '
+           'and or not null as set values',
+}
+LANGS = {'py': 'python', 'python': 'python', 'js': 'js', 'javascript': 'js', 'ts': 'js', 'typescript': 'js',
+         'jsx': 'js', 'tsx': 'js', 'json': 'json', 'yaml': 'yaml', 'yml': 'yaml', 'toml': 'yaml',
+         'sql': 'sql', 'bash': 'shell', 'sh': 'shell', 'shell': 'shell', 'zsh': 'shell', 'console': 'shell', '': 'shell'}
+CODE_TOKEN = re.compile(r'(?P<com>#.*|//.*|--.*)|(?P<str>"(?:[^"\\]|\\.)*"?|\'(?:[^\'\\]|\\.)*\'?|`[^`]*`?)'
+                        r'|(?P<num>\b\d[\d._]*\b)|(?P<word>[A-Za-z_][\w-]*)|(?P<other>.)', re.S)
+
+
+def highlight(lang, line):
+    """Una línea de código como [(texto, papel)]: comentarios, textos, cifras
+    y palabras clave. Sin el lenguaje, o si es shell, se lee como un comando."""
+    kind = LANGS.get((lang or '').split()[0] if lang else '', None)
+    if kind in (None, 'shell'):
+        return _shell(line[2:] if line.startswith('$ ') else line) if kind == 'shell' else [(line, 'cmd')]
+    words = set(KEYWORDS.get(kind, '').split())
+    out = []
+    for m in CODE_TOKEN.finditer(line):
+        tok, role = m.group(), m.lastgroup
+        if role == 'com' and not tok.startswith(COMMENT[kind]):
+            role = 'other'
+        out.append((tok, {'com': 'dim', 'str': 'str', 'num': 'num', 'other': 'arg',
+                          'word': 'flag' if tok in words or tok.lower() in words and kind == 'sql' else 'arg'}[role]))
+    if kind in ('json', 'yaml'):
+        out = [(t, 'cmd' if r == 'arg' and re.fullmatch(r'[\w-]+', t) and kind == 'yaml' else r) for t, r in out]
+    return out
+
+
+def _code_line(line, lang, ink, mono):
+    """Una línea de un bloque de código, resaltada. El fondo del bloque lo
+    pinta la isla detrás de todas sus líneas."""
+    body = ''.join(f'<span foreground="{ink.get(role) or ink['arg']}">{html.escape(text, quote=False)}</span>'
+                   for text, role in highlight(lang, line))
+    return f'{mono} {body} </span>'
 
 
 RULE = re.compile(r'[\s|:-]+')
