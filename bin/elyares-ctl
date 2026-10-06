@@ -15,8 +15,9 @@ Uso: elyares-ctl <orden>
               lanzan sobre un proyecto; otra vez, lo cierra
     move <dónde>
               corre la isla a lo ancho de la pantalla: left y right, al siguiente
-              sitio de ese lado; center, a su sitio de siempre; o un número del
-              0 (izquierda) al 100 (derecha)
+              sitio de ese lado; up y down, la suben y la bajan; center, la centra;
+              reset, a arriba al centro, su sitio de siempre; o un número del
+              0 (izquierda) al 100 (derecha). También se arrastra con Alt
     hide      esconde la isla del todo; otra vez, la vuelve a mostrar
     compact   prende o apaga el modo compacto
     pin       fija la isla abierta con todo a la vista; otra vez, la suelta
@@ -42,7 +43,7 @@ ORDERS = ('open', 'chat', 'projects', 'workflows', 'move', 'hide', 'compact', 'p
 REPLIES = ('allow', 'deny', 'status', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
 AGENTS = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', 'devops', 'researcher')
-PLACES = ('left', 'right', 'center')
+PLACES = ('left', 'right', 'center', 'up', 'down', 'reset')
 STATES = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
 
 

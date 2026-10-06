@@ -11,7 +11,8 @@ import os
 # `chat_model` y `chat_effort`: lo último elegido en el chat ('' deja lo de Claude).
 # `position`: dónde va la isla a lo ancho de la pantalla, de 0 (izquierda) a 100
 # (derecha); 50, su sitio de siempre, es el centro.
-DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'position': 50,
+# `position_y`: cuántos px baja desde el borde de arriba; 0 es su sitio de siempre.
+DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'position': 50, 'position_y': 0,
             'chat_model': '',
             'chat_effort': '', 'devherd': True,
             'flows_collapsed': False,

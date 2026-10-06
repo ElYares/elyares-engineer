@@ -112,10 +112,13 @@ CHAT_PILL = 'chat'    # la pastilla del pie que abre el chat
 # estos sitios, en % del ancho.
 CENTER = 50
 SLOTS = (0, 25, CENTER, 75, 100)
+STEP_Y = 80           # `move up` y `move down`: lo que sube o baja, en px
+DRAG_MASK = Gdk.ModifierType.ALT_MASK    # arrastrar la isla con Alt (SUPER lo usa Hyprland para mover ventanas)
 # `elyares-ctl reload`: la isla se vuelve a arrancar con el código de su carpeta.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAUNCHER = os.path.join(ROOT, 'bin', 'elyares-engineer')
 UNIT = 'elyares-engineer.service'
+MONITORS_SETTLE_MS = 600    # tras conectar o desconectar una pantalla: lo que tarda Hyprland en acomodarlas
 RELOAD_MS = 1200      # lo que espera tras el último turno: que llegue su aviso y su cuenta de contexto
 # `elyares-ctl chat <quién>`: el chat de ese de la familia.
 AGENT_NAMES = {role: ('' if role == 'engineer' else name) for role, name in state.ROLE_AGENTS.items()}
@@ -260,6 +263,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.title, self.detail = '', ''
         self.agent_name, self.role = '', MAIN_ROLE   # de quién es la cabecera
         self.tab = ''                   # la sesión de la pestaña elegida en el tablero
+        self.tab_manual = False         # esa pestaña la elegiste tú: no se mueve sola, salvo por un permiso
         self.focus = None               # (sesión, personaje) del desglose abierto
         self.hits = []                  # (qué, cuál, x, y, ancho, alto) del tablero, del último dibujo
         self.dnd = False
@@ -286,6 +290,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.slow_id = 0
         self.last_frame = None
         self.region = None
+        self.monitors_id = 0            # el reloj que la devuelve a su pantalla tras conectar o desconectar una
+        self.screen_h = 0               # el alto de la pantalla en la que está
         self.screen_w = 0               # el ancho de la pantalla en la que está
         # 'allow'/'deny' del permiso, o 'dismiss' y el índice de cada botón de
         # la ficha de una alerta -> (x, y, w, h), del último dibujo
@@ -335,12 +341,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.NONE)
         win.set_default_size(WIN_W, WIN_H)
         self.win = win
+        win.connect('notify::is-active', self.on_focus_change)
         if self.monitor:
             self._set_monitor(self.monitor['name'])
         if not self.screen_w:
             # Sin Hyprland que diga cuál es: el ancho de la primera pantalla.
             first = Gdk.Display.get_default().get_monitors().get_item(0)
             self.screen_w = first.get_geometry().width if first is not None else 0
+            self.screen_h = first.get_geometry().height if first is not None else 0
         self.place()
 
         da = Gtk.DrawingArea()
@@ -361,6 +369,11 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         middle = Gtk.GestureClick(button=Gdk.BUTTON_MIDDLE)
         middle.connect('pressed', self.on_middle_click)
         da.add_controller(middle)
+        drag = Gtk.GestureDrag()
+        drag.connect('drag-begin', self.on_drag_begin)
+        drag.connect('drag-update', self.on_drag_update)
+        drag.connect('drag-end', self.on_drag_end)
+        da.add_controller(drag)
         # La caja de texto del chat va encima del dibujo.
         overlay = Gtk.Overlay()
         overlay.set_child(da)
@@ -379,6 +392,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         ipc.serve(lambda msg, req: GLib.idle_add(self.on_socket, msg, req),
                   lambda req: GLib.idle_add(self.on_gone, req))
         hypr.listen(lambda name: GLib.idle_add(self.on_focused_monitor, name))
+        Gdk.Display.get_default().get_monitors().connect('items-changed', self.on_monitors_changed)
         # Los vigilantes corren siempre y miran la preferencia en cada vuelta:
         # así una fuente se prende y se apaga sin reiniciar elyares-engineer.
         emit = lambda msg: GLib.idle_add(self.on_message, msg, None)  # noqa: E731
@@ -890,6 +904,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if self.chat_typing and not self.chat_open:
             return                      # escribiéndole a uno en su desglose: no se mueve
         s = v.session
+        if self.tab_manual and (s is None or s.state != 'permission'):
+            return                      # elegiste tú esta pestaña: solo un permiso te la quita
         if s is None or s.state not in ('permission', 'done'):
             sessions = [o for o in ([s] if s else []) + v.others if o.state != 'alert']
             chosen = next((o for o in sessions if o.sid == self.tab), None)
@@ -902,6 +918,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if self.tab != s.sid:
             self.focus = None
         self.tab = s.sid
+        self.tab_manual = False
 
     def busy(self, s):
         """¿Alguno de los cuatro de la sesión hace algo? Es lo que dice su tablero."""
@@ -932,6 +949,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if tabs:
             here = self.tab_session().sid
             self.tab, self.focus = tabs[(tabs.index(here) + 1) % len(tabs)], None
+            self.tab_manual = True
 
     def next_focus(self):
         """Abre el desglose del primero que tenga pasos, luego el del que
@@ -1006,6 +1024,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         # lista, para que no tape algo más urgente.
         self.expanded = self.settings['pinned']
         if not self.expanded:
+            self.tab_manual = False     # al cerrarse, la próxima vez vuelve a seguir lo que pasa
             self.focus = None           # al volver a abrirla, el tablero y no un desglose
         if self.pin:
             self.pin = ''
@@ -1036,6 +1055,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 self.on_focused_monitor(focused['name'])
 
     def toggle_compact(self):
+        if self.chat_open:
+            self.close_chat()           # el chat manda sobre la isla mientras está abierto: sin cerrarlo no se achica
         self.settings['compact'] = not self.settings['compact']
         settings.save(self.settings)
         self.collapse()
@@ -1200,6 +1221,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if mon.get_connector() == name:
                 LayerShell.set_monitor(self.win, mon)
                 self.screen_w = mon.get_geometry().width
+                self.screen_h = mon.get_geometry().height
                 self.place()
                 self.flows_monitor()
                 return True
@@ -1227,8 +1249,18 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return
         moved = self.moved()
         LayerShell.set_anchor(win, LayerShell.Edge.LEFT, moved)
+        LayerShell.set_margin(win, LayerShell.Edge.TOP, self.top())
         LayerShell.set_margin(win, LayerShell.Edge.LEFT, self.offset() if moved else 0)
         self.flows_follow()
+
+    def top(self):
+        """Cuánto baja la isla desde el borde de arriba, en px; 0 es su sitio de siempre."""
+        try:
+            screen_h = getattr(self, 'screen_h', 0)
+            low = max(0, screen_h - WIN_H) if screen_h else 4000
+            return round(clamp(float(self.settings.get('position_y', 0)), 0, low))
+        except (TypeError, ValueError):
+            return 0
 
     def moved(self):
         """¿Está fuera de su sitio de siempre?"""
@@ -1236,9 +1268,20 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
 
     def move(self, where):
         """`elyares-ctl move`: `left` y `right` la llevan al siguiente sitio de
-        ese lado, `center` la devuelve al de siempre, y un número del 0 al 100
-        la pone ahí. Se guarda: al volver a arrancar sigue donde la dejaste."""
+        ese lado, `up` y `down` la suben y la bajan, `center` la centra, `reset`
+        la devuelve a arriba al centro, y un número del 0 al 100 la pone ahí.
+        Se guarda: al volver a arrancar sigue donde la dejaste."""
         now = self.position()
+        if where == 'reset':
+            self.settings['position'], self.settings['position_y'] = CENTER, 0
+        elif where in ('up', 'down'):
+            self.settings['position_y'] = self.top() + (STEP_Y if where == 'down' else -STEP_Y)
+            self.settings['position_y'] = self.top()
+        if where in ('reset', 'up', 'down'):
+            settings.save(self.settings)
+            self.place()
+            self.ensure_tick()
+            return
         if where == 'left':
             pos = max((s for s in SLOTS if s < now), default=SLOTS[0])
         elif where == 'right':
@@ -1254,6 +1297,56 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         settings.save(self.settings)
         self.place()
         self.ensure_tick()
+
+    def on_drag_begin(self, gesture, _x, _y):
+        """Alt + arrastrar: la isla va tras el ratón, como una isla flotante."""
+        self.dragging = bool(gesture.get_current_event_state() & DRAG_MASK)
+        self.drag_last = (0.0, 0.0)
+        if not self.dragging:
+            gesture.set_state(Gtk.EventSequenceState.DENIED)
+        else:
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+    def on_drag_update(self, _gesture, dx, dy):
+        if not getattr(self, 'dragging', False):
+            return
+        # El gesto mide desde la ventana, que se mueve con la isla: lo que cuenta
+        # es lo que falta por mover desde donde ya está.
+        room = max(0, self.screen_w - WIN_W)
+        if room:
+            self.settings['position'] = clamp((self.offset() + dx) * 100 / room, 0, 100)
+        self.settings['position_y'] = self.top() + dy
+        self.settings['position_y'] = self.top()      # dentro de la pantalla: sin esto crecería sin límite
+        self.place()
+        self.ensure_tick()
+
+    def on_drag_end(self, _gesture, _dx, _dy):
+        if getattr(self, 'dragging', False):
+            self.dragging = False
+            settings.save(self.settings)
+
+    def on_monitors_changed(self, *_):
+        """Conectaron o desconectaron una pantalla: se espera a que Hyprland
+        termine de acomodarlas, y la isla vuelve a la suya."""
+        if not getattr(self, 'monitors_id', 0):
+            self.monitors_id = GLib.timeout_add(MONITORS_SETTLE_MS, self.settle_monitor)
+
+    def settle_monitor(self):
+        """Al apagarse y volver a prenderse su pantalla, el compositor deja la
+        isla en otra, con el margen de la que tenía: cae fuera y no se ve. Se
+        vuelve a poner en la suya; si ya no está, se va a la enfocada."""
+        self.monitors_id = 0
+        name = (self.monitor or {}).get('name')
+        if name and self._set_monitor(name):
+            self.monitor = next((m for m in hypr.monitors() if m.get('name') == name), self.monitor)
+            self.region = None
+            self.update_region()
+            return GLib.SOURCE_REMOVE
+        focused = hypr.focused_monitor()
+        if focused:
+            self.monitor = None         # la suya ya no está: no hay de dónde no moverse
+            self.on_focused_monitor(focused['name'])
+        return GLib.SOURCE_REMOVE
 
     def start_monitor(self):
         """El monitor donde arranca la isla: el enfocado o, si quedó fijada,
@@ -2666,6 +2759,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                     self.go(s)
                 return
             self.tab, self.focus = key, None
+            self.tab_manual = True
         elif kind == 'member':
             self.focus = key
         elif kind == 'brief':

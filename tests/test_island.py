@@ -15,7 +15,7 @@ from unittest import mock
 
 try:
     import cairo
-    from elyares import app, commands, paint, settings, sources
+    from elyares import app, chatview, commands, paint, settings, sources
 except (ImportError, ValueError):       # sin gi o sin gtk4-layer-shell
     app = None
 
@@ -52,6 +52,7 @@ class IslandCase(unittest.TestCase):
         isl.off = isl.hover = isl.expanded = False
         isl.pin, isl.pointer, isl.buttons = '', None, {}
         isl.tab, isl.focus, isl.hits, isl.rows = '', None, [], []
+        isl.tab_manual = False
         isl.look, isl.blink_until = [0.0, 0.0], 0.0
         isl.key_since = T
         isl.refresh = lambda: setattr(isl, 'view', isl.model.view(now=T, pin=isl.pin))
@@ -235,6 +236,27 @@ class Fijada(IslandCase):
         self.isl.on_focused_monitor('HDMI-A-1')
         self.assertEqual(self.isl.monitor['name'], 'HDMI-A-1')
         self.assertEqual(self.isl.settings['pinned_monitor'], 'HDMI-A-1')
+
+    def test_si_su_monitor_se_apaga_y_vuelve_la_isla_regresa_a_el(self):
+        self.monitors(focused='HDMI-A-1')
+        self.isl.monitor = {'name': 'HDMI-A-1'}
+        self.isl.settings.update(pinned=True, pinned_monitor='HDMI-A-1')
+        with mock.patch.object(app.GLib, 'timeout_add', return_value=7) as timer:
+            self.isl.on_monitors_changed()
+            self.isl.on_monitors_changed()      # se fue y volvió: un solo reloj
+        timer.assert_called_once_with(app.MONITORS_SETTLE_MS, self.isl.settle_monitor)
+        # El compositor la dejó en otro: se vuelve a poner en el suyo.
+        self.isl.settle_monitor()
+        self.isl._set_monitor.assert_called_once_with('HDMI-A-1')
+        self.assertEqual(self.isl.settings['pinned_monitor'], 'HDMI-A-1')
+        self.assertEqual(self.isl.monitors_id, 0)
+
+    def test_si_su_monitor_ya_no_esta_se_va_al_enfocado(self):
+        self.monitors(focused='DP-1', names=('DP-1',))
+        self.isl.monitor = {'name': 'HDMI-A-1'}
+        self.isl._set_monitor = mock.Mock(side_effect=lambda name: name == 'DP-1')
+        self.isl.settle_monitor()
+        self.assertEqual(self.isl.monitor['name'], 'DP-1')
 
     def test_fijada_arranca_en_el_monitor_donde_se_fijo(self):
         self.monitors(focused='HDMI-A-1')
@@ -695,6 +717,22 @@ class Tablero(Dibujo):
         self.isl.view, self.isl.tab = rest, 'a'
         self.isl.follow(self.isl.model.view(now=T + 20))
         self.assertEqual(self.isl.tab, 'a')
+
+    def test_la_pestana_que_elegiste_se_queda_aunque_otra_trabaje_o_termine(self):
+        self.work('a')
+        self.work('b')
+        self.isl.tab, self.isl.tab_manual = 'a', True
+        self.isl.view = self.isl.model.view(now=T + 1)
+        # `b` termina: la pestaña elegida a mano no se va tras ella.
+        self.isl.model.handle({'event': 'stop', 'session_id': 'b', 'cwd': '/x/b'}, now=T + 3)
+        self.isl.follow(self.isl.model.view(now=T + 3))
+        self.assertEqual(self.isl.tab, 'a')
+        # Un permiso sí: no debe quedarse tapado.
+        self.isl.view = self.isl.model.view(now=T + 3)
+        self.isl.model.handle({'event': 'ask', 'session_id': 'b', 'cwd': '/x/b', 'tool_name': 'Bash',
+                               'tool_input': {'command': 'ls'}}, FakeReq(), now=T + 4)
+        self.isl.follow(self.isl.model.view(now=T + 4))
+        self.assertEqual((self.isl.tab, self.isl.tab_manual), ('b', False))
 
     def test_el_permiso_va_en_la_tarjeta_del_que_lo_pide(self):
         self.isl.expanded = True
@@ -1715,6 +1753,36 @@ class Mover(IslandCase):
                                 (25, True, round(room * .25)), (0, True, 0), (0, True, 0)])
         # Se guarda: al volver a arrancar sigue donde se dejó.
         self.assertEqual(app.settings.save.call_args[0][0]['position'], 0)
+
+    def test_sube_baja_y_vuelve_arriba_al_centro(self):
+        self.isl.screen_h = 1440
+        top = lambda: self.shell.set_margin.call_args_list[-2][0][2]
+        for where, want in (('down', app.STEP_Y), ('down', 2 * app.STEP_Y), ('up', app.STEP_Y), ('up', 0), ('up', 0)):
+            self.isl.on_control('move', {'where': where})
+            self.assertEqual((self.isl.settings['position_y'], top()), (want, want))
+        self.isl.on_control('move', {'where': 'right'})
+        self.isl.on_control('move', {'where': 'down'})
+        self.isl.on_control('move', {'where': 'reset'})
+        self.assertEqual((self.isl.settings['position'], self.isl.settings['position_y'], top()), (50, 0, 0))
+
+    def test_clic_derecho_con_el_chat_abierto_lo_cierra_y_achica_la_isla(self):
+        self.isl.chat_open, self.isl.settings['compact'] = True, False
+        with mock.patch.object(chatview, 'LayerShell'):
+            self.isl.toggle_compact()
+        self.assertEqual((self.isl.chat_open, self.isl.settings['compact']), (False, True))
+
+    def test_el_arrastre_no_guarda_un_sitio_fuera_de_la_pantalla(self):
+        self.isl.screen_h = 1440
+        self.isl.dragging = True
+        for dy in (-90, -90, 5000):
+            self.isl.on_drag_update(None, 0, dy)
+            self.assertTrue(0 <= self.isl.settings['position_y'] <= 1440 - app.WIN_H)
+
+    def test_no_baja_mas_de_lo_que_cabe_en_la_pantalla(self):
+        self.isl.screen_h = app.WIN_H + 100
+        self.isl.settings['position_y'] = 90
+        self.isl.on_control('move', {'where': 'down'})
+        self.assertEqual(self.isl.settings['position_y'], 100)
 
     def test_tambien_a_un_punto_cualquiera(self):
         self.isl.on_control('move', {'where': '10'})

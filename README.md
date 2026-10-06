@@ -366,8 +366,11 @@ ancho de la pantalla: `elyares-ctl move left` y `elyares-ctl move right` la
 llevan al siguiente sitio de ese lado (hay cinco: los dos bordes, el centro y
 los dos puntos medios), `elyares-ctl move center` la devuelve a su sitio y
 `elyares-ctl move 80` la pone en ese punto exacto, de 0 (izquierda) a 100
-(derecha). Sigue pegada arriba: su forma cuelga del borde. El sitio se guarda
-(`position` en `settings.json`) y vale en cualquier monitor: al pasar a otro
+(derecha). También flota: `elyares-ctl move up` y `move down` la suben y la
+bajan (80 px por vez), `move reset` la devuelve arriba al centro, y con **Alt +
+arrastrar** la llevas a donde quieras, a lo ancho y a lo alto (SUPER no sirve:
+Hyprland lo usa para mover ventanas). El sitio se guarda
+(`position` y `position_y` en `settings.json`) y vale en cualquier monitor: al pasar a otro
 queda en el mismo punto de su ancho. Los atajos de mover ventanas de Hyprland
 no sirven aquí, porque la isla es una capa y no una ventana.
 
@@ -859,7 +862,7 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | `elyares-ctl chat [quién] [--dir carpeta]` | abre el chat con Claude, listo para escribir; otra vez lo cierra. Con `architect`, `auditor`, `reviewer` o `engineer`, el de ese agente. Con `--dir`, en el proyecto de esa carpeta |
 | `elyares-ctl projects` | abre el panel de proyectos, para empezar a trabajar en uno; otra vez lo cierra |
 | `elyares-ctl workflows` | abre el panel de workflows: cadenas de agentes que se guardan y se lanzan sobre un proyecto; otra vez lo cierra |
-| `elyares-ctl move <dónde>` | corre la isla a lo ancho de la pantalla: `left` y `right`, al siguiente sitio de ese lado; `center`, a su sitio de siempre; o un número del 0 (izquierda) al 100 (derecha) |
+| `elyares-ctl move <dónde>` | corre la isla a lo ancho de la pantalla: `left` y `right`, al siguiente sitio de ese lado; `center`, a su sitio de siempre; `up` y `down`, la suben y la bajan; `reset`, arriba al centro; o un número del 0 (izquierda) al 100 (derecha) |
 | `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
 | `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |
 | `elyares-ctl pin` | fija la isla abierta con todo a la vista; otra vez, la suelta. Como el clic central |
@@ -888,6 +891,9 @@ bindd = SUPER ALT, O, Engineer: el desglose que sigue, exec, elyares-ctl steps
 bindd = SUPER ALT, H, Engineer: correr a la izquierda, exec, elyares-ctl move left
 bindd = SUPER ALT, L, Engineer: correr a la derecha, exec, elyares-ctl move right
 bindd = SUPER ALT, period, Engineer: volver al centro, exec, elyares-ctl move center
+bindd = SUPER ALT, K, Engineer: subir, exec, elyares-ctl move up
+bindd = SUPER ALT, J, Engineer: bajar, exec, elyares-ctl move down
+bindd = SUPER ALT, comma, Engineer: volver arriba al centro, exec, elyares-ctl move reset
 ```
 
 Fijada, la isla se queda abierta como cuando le pasas el ratón por encima (el
