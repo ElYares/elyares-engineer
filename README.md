@@ -376,9 +376,14 @@ llevan al siguiente sitio de ese lado (hay cinco: los dos bordes, el centro y
 los dos puntos medios), `elyares-ctl move center` la devuelve a su sitio y
 `elyares-ctl move 80` la pone en ese punto exacto, de 0 (izquierda) a 100
 (derecha). También flota: `elyares-ctl move up` y `move down` la suben y la
-bajan (80 px por vez), `move reset` la devuelve arriba al centro, y con **Alt +
-arrastrar** la llevas a donde quieras, a lo ancho y a lo alto (SUPER no sirve:
-Hyprland lo usa para mover ventanas). El sitio se guarda
+bajan (80 px por vez), `move reset` la devuelve arriba al centro, y
+**arrastrando con el botón del medio** la llevas a donde quieras, a lo ancho y a
+lo alto (un clic con él, sin mover, la fija). **Alt + arrastrar** también vale,
+pero Wayland solo le dice a la isla que Alt está pulsado si ella tiene el
+teclado (mientras escribes en el chat), así que no es de fiar. SUPER no sirve:
+Hyprland lo usa para mover ventanas. El arrastre sigue al ratón en la pantalla
+(`hypr.cursor_pos`), no al gesto de la ventana, que va atrasada y se pasaba de
+largo. El sitio se guarda
 (`position` y `position_y` en `settings.json`) y vale en cualquier monitor: al pasar a otro
 queda en el mismo punto de su ancho. Los atajos de mover ventanas de Hyprland
 no sirven aquí, porque la isla es una capa y no una ventana.

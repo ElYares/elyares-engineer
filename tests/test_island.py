@@ -1959,6 +1959,45 @@ class Mover(IslandCase):
             self.isl.on_drag_update(None, 0, dy)
             self.assertTrue(0 <= self.isl.settings['position_y'] <= 1440 - app.WIN_H)
 
+    def drag(self, button, start, *moves, alt=False):
+        """Un arrastre con el ratón en la pantalla: parte de `start` y pasa por `moves`."""
+        gesture = mock.Mock()
+        gesture.get_current_button.return_value = button
+        gesture.get_current_event_state.return_value = app.DRAG_MASK if alt else 0
+        with mock.patch.object(app.hypr, 'cursor_pos', return_value=start):
+            self.isl.on_drag_begin(gesture, 0, 0)
+        for (x, y), (dx, dy) in moves:
+            with mock.patch.object(app.hypr, 'cursor_pos', return_value=(x, y)):
+                self.isl.on_drag_update(gesture, dx, dy)
+        return gesture
+
+    def test_el_arrastre_sigue_al_ratón_en_la_pantalla_aunque_la_ventana_vaya_atrasada(self):
+        self.isl.screen_h, self.isl.screen_w = 1440, 3440
+        self.isl.settings['position'], self.isl.settings['position_y'] = 50, 100
+        first, y0 = self.isl.offset(), self.isl.top()
+        # El compositor aún no movió la ventana: el gesto sigue diciendo lo mismo en cada
+        # evento, y la isla no se pasa de largo.
+        self.drag(app.Gdk.BUTTON_PRIMARY, (1000, 500), ((1100, 530), (100, 30)), ((1100, 530), (100, 30)),
+                  ((1100, 530), (100, 30)), alt=True)
+        self.assertEqual(self.isl.top(), y0 + 30)
+        self.assertEqual(self.isl.offset(), first + 100)
+
+    def test_el_botón_del_medio_arrastra_sin_alt_pero_un_clic_no_mueve_nada(self):
+        self.isl.screen_h, self.isl.screen_w = 1440, 3440
+        before = (self.isl.settings['position'], self.isl.settings['position_y'])
+        gesture = self.drag(app.Gdk.BUTTON_MIDDLE, (1000, 500), ((1002, 501), (2, 1)))
+        self.assertFalse(self.isl.dragging)
+        self.assertEqual((self.isl.settings['position'], self.isl.settings['position_y']), before)
+        gesture.set_state.assert_not_called()
+        self.drag(app.Gdk.BUTTON_MIDDLE, (1000, 500), ((1040, 560), (40, 60)))
+        self.assertTrue(self.isl.dragging)
+        self.assertEqual(self.isl.top(), 60)
+
+    def test_el_botón_izquierdo_sin_alt_no_arrastra(self):
+        gesture = self.drag(app.Gdk.BUTTON_PRIMARY, (1000, 500), ((1040, 560), (40, 60)))
+        self.assertFalse(self.isl.dragging)
+        gesture.set_state.assert_called_once_with(app.Gtk.EventSequenceState.DENIED)
+
     def test_no_baja_mas_de_lo_que_cabe_en_la_pantalla(self):
         self.isl.screen_h = app.WIN_H + 100
         self.isl.settings['position_y'] = 90

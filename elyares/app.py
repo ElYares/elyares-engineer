@@ -114,6 +114,7 @@ CENTER = 50
 SLOTS = (0, 25, CENTER, 75, 100)
 STEP_Y = 80           # `move up` y `move down`: lo que sube o baja, en px
 DRAG_MASK = Gdk.ModifierType.ALT_MASK    # arrastrar la isla con Alt (SUPER lo usa Hyprland para mover ventanas)
+DRAG_SLOP = 6                            # lo que hay que mover el botón del medio para que sea arrastre y no clic
 # `elyares-ctl reload`: la isla se vuelve a arrancar con el código de su carpeta.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAUNCHER = os.path.join(ROOT, 'bin', 'elyares-engineer')
@@ -367,13 +368,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         right.connect('pressed', self.on_right_click)
         da.add_controller(right)
         middle = Gtk.GestureClick(button=Gdk.BUTTON_MIDDLE)
-        middle.connect('pressed', self.on_middle_click)
+        middle.connect('released', self.on_middle_click)       # al soltar: si se arrastró, no es un clic
         da.add_controller(middle)
-        drag = Gtk.GestureDrag()
-        drag.connect('drag-begin', self.on_drag_begin)
-        drag.connect('drag-update', self.on_drag_update)
-        drag.connect('drag-end', self.on_drag_end)
-        da.add_controller(drag)
+        for button in (Gdk.BUTTON_PRIMARY, Gdk.BUTTON_MIDDLE):
+            drag = Gtk.GestureDrag(button=button)
+            drag.connect('drag-begin', self.on_drag_begin)
+            drag.connect('drag-update', self.on_drag_update)
+            drag.connect('drag-end', self.on_drag_end)
+            da.add_controller(drag)
         # La caja de texto del chat va encima del dibujo.
         overlay = Gtk.Overlay()
         overlay.set_child(da)
@@ -1299,23 +1301,45 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.ensure_tick()
 
     def on_drag_begin(self, gesture, _x, _y):
-        """Alt + arrastrar: la isla va tras el ratón, como una isla flotante."""
+        """Mover la isla, como una isla flotante: con Alt + arrastrar o, sin
+        teclado, arrastrando con el botón del medio. Alt solo se ve si la isla
+        tiene el teclado (Wayland no manda los modificadores a quien no lo
+        tiene), así que el botón del medio es el que siempre vale."""
+        self.drag_wait = gesture.get_current_button() == Gdk.BUTTON_MIDDLE
         self.dragging = bool(gesture.get_current_event_state() & DRAG_MASK)
+        # De dónde parte: el ratón en la pantalla (no en la ventana, que se mueve
+        # con él) y el sitio de la isla.
+        self.drag_start = hypr.cursor_pos()
+        self.drag_from = (self.offset(), self.top())
         self.drag_last = (0.0, 0.0)
-        if not self.dragging:
-            gesture.set_state(Gtk.EventSequenceState.DENIED)
-        else:
+        if self.dragging:
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        elif not self.drag_wait:
+            gesture.set_state(Gtk.EventSequenceState.DENIED)
 
-    def on_drag_update(self, _gesture, dx, dy):
+    def on_drag_update(self, gesture, dx, dy):
         if not getattr(self, 'dragging', False):
-            return
-        # El gesto mide desde la ventana, que se mueve con la isla: lo que cuenta
-        # es lo que falta por mover desde donde ya está.
+            # El del medio espera a moverse: sin moverse es un clic (fijar la isla).
+            if not getattr(self, 'drag_wait', False) or math.hypot(dx, dy) < DRAG_SLOP:
+                return
+            self.dragging = True
+            if gesture is not None:
+                gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         room = max(0, self.screen_w - WIN_W)
-        if room:
-            self.settings['position'] = clamp((self.offset() + dx) * 100 / room, 0, 100)
-        self.settings['position_y'] = self.top() + dy
+        pos, start = hypr.cursor_pos(), getattr(self, 'drag_start', None)
+        if pos and start:
+            # Lo que se movió el ratón en la pantalla, sobre el sitio de donde se
+            # partió: no depende de si el compositor ya movió la ventana.
+            mx, my = pos[0] - start[0], pos[1] - start[1]
+            if room:
+                self.settings['position'] = clamp((self.drag_from[0] + mx) * 100 / room, 0, 100)
+            self.settings['position_y'] = self.drag_from[1] + my
+        else:
+            # Sin la posición del ratón en la pantalla, el gesto mide desde la
+            # ventana, que se mueve con la isla: lo que cuenta es lo que falta.
+            if room:
+                self.settings['position'] = clamp((self.offset() + dx) * 100 / room, 0, 100)
+            self.settings['position_y'] = self.top() + dy
         self.settings['position_y'] = self.top()      # dentro de la pantalla: sin esto crecería sin límite
         self.place()
         self.ensure_tick()
