@@ -829,32 +829,34 @@ class ChatView:
                 return e.text
         return ''
 
-    def chat_copy(self, index):
-        """«copiar» en un pie: la respuesta, con su markdown, al portapapeles.
+    def chat_clip(self, text, mark):
+        """Pone `text` en el portapapeles y deja `mark` como lo recién copiado.
         Con wl-copy, que no necesita que la isla tenga el teclado; sin él,
         por GTK."""
-        text = self.chat_reply_at(index)
-        if not text:
-            return
         try:
             subprocess.run(['wl-copy'], input=text.encode(), timeout=2, check=True)
         except (OSError, subprocess.SubprocessError):
             self.da.get_clipboard().set(text)
-        self.chat_copied = (index, time.monotonic())
+        self.chat_copied = (mark, time.monotonic())
         GLib.timeout_add(CHAT_COPIED_SECS * 1000 + 100, lambda: self.ensure_tick() or GLib.SOURCE_REMOVE)
+
+    def chat_copy(self, index):
+        """«copiar» en un pie: la respuesta, con su markdown, al portapapeles."""
+        text = self.chat_reply_at(index)
+        if text:
+            self.chat_clip(text, index)
 
     def chat_copy_code(self, index, n):
         """«copiar» en un bloque de código: solo ese bloque, sin su markdown."""
         blocks = self.chat_code.get(index) or []
-        if n >= len(blocks):
-            return
-        text = blocks[n][1]
-        try:
-            subprocess.run(['wl-copy'], input=text.encode(), timeout=2, check=True)
-        except (OSError, subprocess.SubprocessError):
-            self.da.get_clipboard().set(text)
-        self.chat_copied = ((index, n), time.monotonic())
-        GLib.timeout_add(CHAT_COPIED_SECS * 1000 + 100, lambda: self.ensure_tick() or GLib.SOURCE_REMOVE)
+        if n < len(blocks):
+            self.chat_clip(blocks[n][1], (index, n))
+
+    def chat_copy_url(self, index, n):
+        """«enlace» en un pie: un enlace de la respuesta, solo él."""
+        found = paint.urls(self.chat_reply_at(index))
+        if n < len(found):
+            self.chat_clip(found[n], (index, 'url', n))
 
     def chat_pass(self, index):
         """«al engineer ›» en un pie: la respuesta de un agente, a la caja del
@@ -890,6 +892,8 @@ class ChatView:
             self.chat_choose(key)
         elif key.startswith('copy:'):
             self.chat_copy(int(key[5:]))
+        elif key.startswith('url:'):
+            self.chat_copy_url(*map(int, key[4:].split(':')))
         elif key.startswith('code:'):
             self.chat_copy_code(*map(int, key[5:].split(':')))
         elif key.startswith('pass:'):
@@ -1419,12 +1423,18 @@ class ChatView:
     def draw_chat_foot_links(self, cr, index, right, y, alpha):
         """Los enlaces del pie de un turno, a su derecha: «copiar» y, en el
         chat de uno de la familia, «al engineer ›»."""
-        if not self.chat_reply_at(index):
+        reply = self.chat_reply_at(index)
+        if not reply:
             return
+        if self.chat_copied is not None and time.monotonic() - self.chat_copied[1] > CHAT_COPIED_SECS:
+            self.chat_copied = None
         copied = self.chat_copied is not None and self.chat_copied[0] == index
-        if copied and time.monotonic() - self.chat_copied[1] > CHAT_COPIED_SECS:
-            copied, self.chat_copied = False, None
         links = [(f'copy:{index}', 'copiado ✓' if copied else 'copiar')]
+        found = paint.urls(reply)[:3]
+        for n in reversed(range(len(found))):
+            done = self.chat_copied is not None and self.chat_copied[0] == (index, 'url', n)
+            name = 'enlace' if len(found) == 1 else f'enlace {n + 1}'
+            links.insert(0, (f'url:{index}:{n}', f'{name} copiado ✓' if done else f'copiar {name}'))
         if self.chat.agent:
             links.insert(0, (f'pass:{index}', 'al engineer ›'))
         soft, x = mascot.rgba(self.ink('text', .6))[:3], right
@@ -1433,7 +1443,7 @@ class ChatView:
             lw, lh = layout.get_pixel_size()
             x -= lw
             over = self.over(x - 4, y - 3, lw + 8, lh + 6)
-            lit = key.startswith('copy:') and copied
+            lit = (key.startswith('copy:') and copied) or label.endswith('copiado ✓')
             color = mascot.rgba(self.ink('pass'))[:3] if lit else (1, 1, 1) if over else soft
             self.tip_text(cr, layout, x, y, color, alpha, False)
             self.hits.append(('chat', key, x - 4, y - 3, lw + 8, lh + 6))

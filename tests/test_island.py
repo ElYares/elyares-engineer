@@ -1483,6 +1483,24 @@ class Chat(Dibujo):
         self.draw()
         self.assertNotIn('copy:4', self.hit('chat'))
 
+    def test_un_enlace_de_la_respuesta_se_copia_solo(self):
+        c = self.conversation()
+        E = app.chatview.chat.Entry
+        c.entries[1].text = 'Para verlo: https://claude.ai/code/artifact/abc-1.'
+        c.entries.append(E('foot', 'elyares-designer · Sonnet · 3 s'))
+        self.draw()
+        self.assertIn('copiar enlace', self.shown)
+        with mock.patch.object(app.chatview.subprocess, 'run') as run:
+            self.isl.on_chat_hit('url:2:0')
+        # Solo el enlace, sin la frase ni el punto con el que acaba.
+        self.assertEqual(run.call_args.kwargs['input'].decode(), 'https://claude.ai/code/artifact/abc-1')
+        self.draw()
+        self.assertIn('enlace copiado ✓', self.shown)
+        # Con dos, cada uno con su número.
+        c.entries[1].text = 'a https://a.dev/x y https://b.dev/y'
+        self.draw()
+        self.assertIn('copiar enlace 2', self.shown)
+
     def test_lo_de_un_agente_se_le_pasa_al_engineer(self):
         self.isl.open_chat()
         engineer = self.isl.chat
