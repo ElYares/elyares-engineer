@@ -79,6 +79,7 @@ MAX_FILES = 4000          # archivos del proyecto que se ofrecen al escribir "@"
 MAX_MENTIONS = 40         # lo que cabe en la lista de "@"
 FILES_SECS = 30           # cada cuánto se vuelven a listar los archivos del proyecto
 DENY_MESSAGE = 'El usuario lo denegó desde el chat de elyares-engineer.'
+QUESTION_TOOL = 'AskUserQuestion'     # pide elegir entre opciones, no permiso
 
 
 def _tmux(*args):
@@ -380,6 +381,35 @@ class Chat:
                     else {'behavior': 'deny', 'message': DENY_MESSAGE})
         if not allow:
             self._add('note', f'Denegado: {ask["text"]}')
+        return self._write({'type': 'control_response',
+                            'response': {'subtype': 'success', 'request_id': ask['id'], 'response': decision}})
+
+    def questions(self):
+        """Las preguntas de opciones que Claude hace ahora, como
+        [{question, header, multi, options: [(label, description)]}]; [] si
+        lo pendiente no es una pregunta."""
+        ask = self.asking
+        if not ask or ask['tool'] != QUESTION_TOOL:
+            return []
+        out = []
+        for q in (ask['input'].get('questions') or [])[:4]:
+            if not isinstance(q, dict) or not isinstance(q.get('question'), str):
+                continue
+            options = [(str(o.get('label') or ''), str(o.get('description') or ''))
+                       for o in q.get('options') or [] if isinstance(o, dict) and o.get('label')]
+            if options:
+                out.append({'question': q['question'], 'header': str(q.get('header') or ''),
+                            'multi': bool(q.get('multiSelect')), 'options': options})
+        return out
+
+    def answer_questions(self, answers):
+        """Contesta las preguntas pendientes: `answers` va de cada pregunta a
+        lo que se eligió (varias opciones, separadas por coma)."""
+        ask, self.asking = self.asking, None
+        if ask is None:
+            return False
+        self._add('note', 'Respondiste: ' + ' · '.join(answers.values()))
+        decision = {'behavior': 'allow', 'updatedInput': {**ask['input'], 'answers': answers}}
         return self._write({'type': 'control_response',
                             'response': {'subtype': 'success', 'request_id': ask['id'], 'response': decision}})
 
