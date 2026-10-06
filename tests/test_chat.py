@@ -389,6 +389,14 @@ class Carpeta(unittest.TestCase):
 
 
 class Markdown(unittest.TestCase):
+    def test_los_enlaces_de_una_respuesta_salen_sin_repetir_ni_puntuacion(self):
+        text = ('Mira https://claude.ai/code/artifact/abc-123. Y [esto](https://x.dev/a?b=1), '
+                'otra vez https://claude.ai/code/artifact/abc-123, `https://no.si` no.')
+        self.assertEqual(paint.urls(text), ['https://claude.ai/code/artifact/abc-123', 'https://x.dev/a?b=1',
+                                            'https://no.si'])
+        self.assertEqual(paint.urls(''), [])
+        self.assertEqual(paint.urls(None), [])
+
     def test_el_codigo_sale_resaltado_sobre_su_fondo_y_se_puede_copiar(self):
         ink = {role: '#aabbcc' for role in ('cmd', 'str', 'flag', 'num', 'dim', 'arg')}
         blocks = []

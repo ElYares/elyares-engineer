@@ -150,6 +150,18 @@ ITALIC = re.compile(r'(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])|(?<![\w]
 LINK = re.compile(r'\[([^\]]+)\]\(([^)\s]+)\)')
 CODE = re.compile(r'`([^`]+)`')
 DIVIDER_WIDTH = 28
+URL = re.compile(r'https?://[^\s<>"\'`)\]]+')
+
+
+def urls(text):
+    """Los enlaces de un texto, sin repetir y en orden, sin la puntuación que
+    les pega una frase («...abc.», «...abc,»)."""
+    out = []
+    for m in URL.finditer(text or ''):
+        url = m.group().rstrip('.,;:!?*')
+        if url not in out:
+            out.append(url)
+    return out
 
 
 def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=None,
