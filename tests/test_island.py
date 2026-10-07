@@ -50,7 +50,7 @@ class IslandCase(unittest.TestCase):
         isl.colors = paint.colors()
         isl.markups = {}
         isl.off = isl.hover = isl.expanded = False
-        isl.pin, isl.pointer, isl.buttons = '', None, {}
+        isl.pin, isl.reply_pick, isl.pointer, isl.buttons = '', '', None, {}
         isl.tab, isl.focus, isl.hits, isl.rows = '', None, [], []
         isl.tab_manual = False
         isl.look, isl.blink_until = [0.0, 0.0], 0.0
@@ -513,6 +513,66 @@ class Tablero(Dibujo):
         self.isl.hover, self.isl.expanded = False, True
         self.assertEqual(self.isl.target(), 'board')
         self.assertEqual(self.isl.goal()[0], app.BOARD_W)
+
+    def reply(self, agent, tint, proj, at=0):
+        self.isl.model.handle({'event': 'alert', 'session_id': f'chat:{agent}', 'name': proj, 'tone': 'ok',
+                               'message': f'{agent} terminó', 'where': agent, 'note': 'Sonnet 5.5', 'tint': tint,
+                               'ttl': app.chatview.CHAT_REPLY_SECS, 'lines': [f'Respuesta de {tint}:', '- uno'],
+                               'actions': [{'label': 'Ver respuesta', 'chat': f'chat:{agent}', 'after': 'clear'}]},
+                              now=T + at)
+        self.isl.refresh()
+
+    def test_las_respuestas_de_los_agentes_se_ven_siempre_en_el_tablero(self):
+        self.work('a')
+        self.isl.expanded = True
+        self.reply('elyares-reviewer', 'reviewer', 'api')
+        self.assertEqual(self.isl.target(), 'board')
+        self.isl.hover = self.isl.expanded = False
+        self.isl.hover = True                       # basta con tener el tablero a la vista
+        self.draw()
+        self.assertIn('Respuesta de reviewer:', self.shown)
+        self.assertIn('Ver respuesta', self.shown)
+        self.assertNotIn('rp:0', self.isl.buttons)                  # con una sola, sin fila de nombres
+        height = app.PREVIEW_HEAD + 2 * app.CODE_LINE_H + 2 * app.PREVIEW_PAD + app.CARD_BUTTONS
+        self.assertEqual(self.isl.card_h('board'), height)
+
+    def test_con_varias_respuestas_hay_una_fila_para_pasar_de_una_a_otra(self):
+        self.work('a')
+        self.isl.hover = True
+        self.reply('elyares-reviewer', 'reviewer', 'api', at=1)
+        self.reply('elyares-auditor', 'auditor', 'web', at=2)
+        self.reply('elyares-designer', 'designer', 'app', at=3)
+        self.draw()
+        self.assertEqual([k for k in self.isl.buttons if str(k).startswith('rp:')], ['rp:0', 'rp:1', 'rp:2'])
+        self.assertIn('Respuesta de designer:', self.shown)            # la última, al frente
+        self.assertEqual(self.isl.rows_for('board'), [])               # no se repiten como filas
+        self.assertIn('designer · app', self.shown)
+        self.assertIn('reviewer · api', self.shown)
+        self.assertEqual(self.isl.card_h('board'),
+                         app.PREVIEW_HEAD + 2 * app.CODE_LINE_H + 2 * app.PREVIEW_PAD + app.CARD_BUTTONS
+                         + app.REPLY_CHIPS_H)
+        x, y, w, h = self.isl.buttons['rp:2']                          # la más vieja: el reviewer
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.draw()
+        self.assertIn('Respuesta de reviewer:', self.shown)
+        # Descartar quita la que se ve; las demás se quedan.
+        x, y, w, h = self.isl.buttons['dismiss']
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.assertEqual([s.tint for s in self.isl.replies()], ['designer', 'auditor'])
+
+    def test_la_mas_alta_de_las_respuestas_con_su_fila_cabe_en_el_tablero(self):
+        room = app.BOARD_MAX - (app.TABS_H + app.BOARD_H + app.BOARD_PAD)
+        tallest = (app.PREVIEW_HEAD + app.REPLY_LINES * app.CODE_LINE_H + 2 * app.PREVIEW_PAD + app.CARD_BUTTONS
+                   + app.REPLY_CHIPS_H)
+        self.assertLessEqual(tallest, room - app.ALERT_ROWS * app.ROW_H - app.LIST_PAD)
+
+    def test_descartar_una_respuesta_no_silencia_la_siguiente_de_esa_conversacion(self):
+        self.reply('elyares-reviewer', 'reviewer', 'api')
+        s = self.isl.model.sessions['chat:elyares-reviewer']
+        self.isl.act(s, 'dismiss')
+        self.assertEqual(self.isl.model.sessions, {})
+        self.reply('elyares-reviewer', 'reviewer', 'api', at=5)
+        self.assertIn('chat:elyares-reviewer', self.isl.model.sessions)    # sigue saliendo
 
     def test_los_que_trabajan_al_frente_y_los_libres_a_la_banca(self):
         self.isl.expanded = True

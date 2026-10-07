@@ -193,6 +193,12 @@ respuesta**, que abre el chat para leerla entera.
   pestaña ya elegida de una sesión del chat, «hablarle ›» en su desglose y
   «Ver respuesta» en su aviso. Los encargos a los demás de la familia
   desde una pestaña van a las conversaciones de ese proyecto y de ningún otro.
+- **Las respuestas esperan a que las atiendas:** cuando un agente termina con
+  el chat cerrado, su aviso («terminó · ver respuesta») se queda hasta 6 horas o
+  hasta que lo atiendas (**Ver respuesta** o **Descartar**). En el tablero la
+  ficha de la respuesta se ve siempre, con el color del agente, sin pasar el
+  ratón; con varias, una fila de pastillas (`agente · proyecto`) deja pasar de
+  una a otra. Descartar una no silencia la siguiente de esa conversación.
 - **El proyecto de una pestaña** es aquel en el que se empezó su conversación,
   y así se llama, aunque Claude acabe trabajando en otra carpeta.
 - **Sin tablero, sigue a tmux:** si no hay ninguna sesión a la vista, el chat
