@@ -551,6 +551,13 @@ class ChatView:
             if key in self.chats and item[-1] in self.model.sessions:
                 self.chat_hosts[key] = item[-1]
         self.chat_open = self.chat is not None and data.get('open') is True
+        c = self.chat
+        if c is not None and c.session and c.session not in self.model.sessions:
+            # La de la conversación a la vista no se queda sin su pestaña en el tablero
+            # solo porque su proceso no esté: lo siguiente que haga la actualiza.
+            s = state.Session(c.session)
+            s.cwd, s.used = c.cwd, True
+            self.model.sessions[c.session] = s
         self.chat_saved = self.chat_dump()
 
     def chat_saved_key(self, saved):

@@ -495,8 +495,9 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.workflows_tick()
         if self.seconds % REAP_SECS == 0:
             # Las sesiones sin pane (las de segundo plano) no tienen otra
-            # forma de irse si se cierran sin avisar.
-            self.model.reap(actions.proc_alive)
+            # forma de irse si se cierran sin avisar. Las de un chat se quedan:
+            # su proceso duerme o se cierra con la isla, pero la conversación sigue.
+            self.model.reap(actions.proc_alive, keep={c.session for c in self.all_chats() if c.session})
         if self.model.sessions:
             self.refresh()
         return GLib.SOURCE_CONTINUE

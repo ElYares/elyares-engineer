@@ -1081,6 +1081,20 @@ class Chat(Dibujo):
         self.assertEqual(self.isl.chat_family(), [first, self.isl.chat])
         self.assertEqual(self.isl.chat.entries, [])
 
+    def test_al_volver_la_conversacion_a_la_vista_tiene_su_pestana_en_el_tablero(self):
+        c = self.reviewer('')
+        c.session = 's-chat'
+        data = self.isl.chat_dump()
+        self.isl.chats.clear()
+        self.isl.chat_extra.clear()
+        self.isl.chat = None
+        self.isl.model.sessions.clear()
+        self.isl.chat_restore(data)
+        s = self.isl.model.sessions['s-chat']
+        self.assertEqual((s.cwd, s.state, s.used), ('/x/proj', 'idle', True))
+        self.isl.refresh()
+        self.assertEqual([t.sid for t in self.isl.tabs()], ['s-chat'])
+
     def test_las_conversaciones_de_la_fila_sobreviven_a_un_reinicio(self):
         first = self.reviewer()
         self.isl.chat_split()

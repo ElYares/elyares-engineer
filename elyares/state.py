@@ -784,13 +784,15 @@ class Model:
             self.sessions.pop(sid).release()
         return bool(dead)
 
-    def reap(self, alive):
+    def reap(self, alive, keep=()):
         """Olvida las sesiones cuyo proceso de Claude ya no existe: las que se
         cerraron sin avisar y no tienen un pane por el que preguntar (las de
-        segundo plano). `alive(proc)` dice si el proceso sigue ahí. True si
-        quitó alguna."""
+        segundo plano). `alive(proc)` dice si el proceso sigue ahí. `keep` son
+        las que no se olvidan aunque su proceso no esté: las de una conversación
+        del chat, que se duerme o se cierra con la isla y se retoma al escribirle.
+        True si quitó alguna."""
         dead = [sid for sid, s in self.sessions.items()
-                if s.proc and s.state != 'alert' and not alive(s.proc)]
+                if s.proc and s.state != 'alert' and sid not in keep and not alive(s.proc)]
         for sid in dead:
             self.sessions.pop(sid).release()
         return bool(dead)
