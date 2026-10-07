@@ -924,6 +924,93 @@ class Chat(Dibujo):
         self.isl.on_click(None, 1, x + w / 2, y + h / 2)
         self.draw()
 
+    def reviewer(self, agent='elyares-reviewer'):
+        """La conversación de uno de la familia, ya registrada y a la vista."""
+        E = app.chatview.chat.Entry
+        c = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock(), agent=agent)
+        c.entries = [E('you', 'revisa el PR 12 por favor'), E('claude', 'Va')]
+        self.isl.chats[self.isl.chat_key(agent, '/x/proj')] = c
+        self.isl.chat, self.isl.chat_open = c, True
+        return c
+
+    def test_un_agente_de_solo_lectura_abre_otra_conversacion_sin_esperar(self):
+        first = self.reviewer()
+        first.busy = True
+        self.draw()
+        self.assertIn('Otra', self.shown)
+        self.assertNotIn('1 · revisa el PR 12', ' '.join(self.shown))     # con una sola no hay fila
+        self.assertIn('split', self.hit('chat'))
+        self.isl.on_chat_hit('split')
+        second = self.isl.chat
+        self.assertIsNot(second, first)
+        self.assertTrue(first.busy)                         # la que trabajaba sigue como estaba
+        self.assertEqual((second.agent, second.cwd, second.entries), ('elyares-reviewer', '/x/proj', []))
+        self.assertEqual(self.isl.chat_family(), [first, second])
+        self.assertTrue(self.isl.chat_busy())
+        self.draw()
+        self.assertIn('● 1 · revisa el PR 12…', self.shown)  # la que trabaja lleva su punto
+        self.assertIn('2 · nueva', self.shown)
+        self.assertEqual({'conv:0', 'conv:1', 'drop:1'} - set(self.hit('chat')), set())
+        self.assertNotIn('drop:0', self.hit('chat'))        # la de siempre no se cierra
+        self.isl.on_chat_hit('conv:0')
+        self.assertIs(self.isl.chat, first)
+
+    def test_los_que_modifican_el_repo_tienen_una_sola(self):
+        for agent in ('', 'elyares-mobile', 'elyares-devops'):
+            c = self.reviewer(agent)
+            self.draw()
+            self.assertNotIn('Otra', self.shown)
+            self.isl.chat_split()
+            self.assertIs(self.isl.chat, c)
+            self.assertEqual(self.isl.chat_family(), [c])
+
+    def test_hay_un_tope_de_conversaciones_por_agente(self):
+        self.reviewer()
+        for _ in range(10):
+            self.isl.chat_split()
+        self.assertEqual(len(self.isl.chat_family()), app.chatview.chat.MAX_CHATS)
+        self.draw()
+        self.assertNotIn('Otra', self.shown)
+
+    def test_una_de_las_otras_se_cierra_con_su_x_salvo_si_trabaja(self):
+        first = self.reviewer()
+        self.isl.chat_split()
+        second = self.isl.chat
+        second.busy = True
+        self.isl.chat_drop(1)
+        self.assertEqual(self.isl.chat_family(), [first, second])
+        second.busy = False
+        self.isl.chat_drop(0)                               # la de siempre se queda
+        self.assertEqual(self.isl.chat_family(), [first, second])
+        self.isl.chat_drop(1)
+        self.assertEqual(self.isl.chat_family(), [first])
+        self.assertIs(self.isl.chat, first)                 # a la vista queda la anterior
+
+    def test_nuevo_en_una_de_las_otras_la_empieza_de_cero_en_su_lugar(self):
+        first = self.reviewer()
+        self.isl.chat_split()
+        second = self.isl.chat
+        second.entries.append(app.chatview.chat.Entry('you', 'otro tema'))
+        self.isl.new_chat()
+        self.assertIsNot(self.isl.chat, second)
+        self.assertEqual(self.isl.chat_family(), [first, self.isl.chat])
+        self.assertEqual(self.isl.chat.entries, [])
+
+    def test_las_conversaciones_de_la_fila_sobreviven_a_un_reinicio(self):
+        first = self.reviewer()
+        self.isl.chat_split()
+        second = self.isl.chat
+        second.entries.append(app.chatview.chat.Entry('you', 'otro tema'))
+        data = self.isl.chat_dump()
+        self.assertEqual([bool(c.get('extra')) for c in data['chats']], [False, True])
+        self.isl.chats.clear()
+        self.isl.chat_extra.clear()
+        self.isl.chat = None
+        self.isl.chat_restore(data)
+        family = self.isl.chat_family(self.isl.chat)
+        self.assertEqual([c.entries[0].text for c in family], ['revisa el PR 12 por favor', 'otro tema'])
+        self.assertIs(self.isl.chat, family[1])             # la que se veía
+
     def test_una_pregunta_de_opciones_se_contesta_con_un_clic(self):
         one = {'question': '¿Qué base?', 'header': 'Base', 'multiSelect': False,
                'options': [{'label': 'Postgres', 'description': 'relacional'}, {'label': 'SQLite'}]}

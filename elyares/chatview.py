@@ -23,7 +23,8 @@ Con el chat abierto, el permiso sale también en una tarjeta encima de la
 caja.
 
 Hay una conversación por proyecto y agente (`chats`, con la clave de
-`chat_key`). Cada pestaña del tablero es un proyecto y manda sobre su chat:
+`chat_key`); los que no modifican el repo pueden tener otras a su lado (`chat_extra`,
+«Otra»), con su fila bajo la cabecera, y `all_chats` las junta todas. Cada pestaña del tablero es un proyecto y manda sobre su chat:
 con el tablero a la vista, el chat que se abre es el de la pestaña elegida
 (`chat_of`), y los encargos a los tres van a las conversaciones de ese
 proyecto. El proyecto de una pestaña es aquel en el que se empezó su
@@ -104,6 +105,8 @@ CHAT_SUGGEST = 6              # lo que se ve a la vez en la lista de "/" o de "@
 CHAT_SUGGEST_H = 24           # alto de cada uno, y de cada opción de un menú
 CHAT_ASK_H = 74               # la tarjeta del permiso
 CHAT_OPT_H = 38               # cada opción de una pregunta de Claude
+CHAT_TABS_H = 26              # la fila de conversaciones de un agente, cuando hay más de una
+CHAT_TAB_LABEL = 16           # letras del título de cada una
 CHAT_CHIP_H = 22              # las etiquetas de las imágenes pegadas
 CHAT_MAX_IMAGES = 5
 CHAT_SHOW_AT = 40             # la caja de texto sale cuando a la isla le falta esto para abrirse
@@ -184,6 +187,7 @@ class ChatView:
         self.chat_code = {}           # de cada respuesta, sus bloques de código: [(lenguaje, texto)]
         self.chat_copied = None       # la respuesta recién copiada: (su sitio en la conversación, cuándo)
         self.chat_quiz = None         # la pregunta de opciones en curso: {id, n, answers, marked}
+        self.chat_extra = {}          # las otras conversaciones de un agente de solo lectura: clave -> [Chat]
         self.entry = self.entry_box = None
 
     def chat_widgets(self, overlay):
@@ -294,12 +298,66 @@ class ChatView:
         key = self.chat_key(agent, cwd)
         c = self.chats.get(key)
         if c is None:
-            pick = {} if agent else {'model': self.settings.get('chat_model', ''),
-                                     'effort': self.settings.get('chat_effort', '')}
-            c = chat.Chat(cwd, None, agent=agent, **pick)
-            c.emit = lambda ev, c=c: GLib.idle_add(self.on_chat, ev, c)
-            self.chats[key] = c
+            c = self.chats[key] = self.chat_make(agent, cwd)
         return c
+
+    def chat_make(self, agent, cwd):
+        """Una conversación nueva, sin guardarla en ningún sitio."""
+        pick = {} if agent else {'model': self.settings.get('chat_model', ''),
+                                 'effort': self.settings.get('chat_effort', '')}
+        c = chat.Chat(cwd, None, agent=agent, **pick)
+        c.emit = lambda ev, c=c: GLib.idle_add(self.on_chat, ev, c)
+        return c
+
+    def all_chats(self):
+        """Todas las conversaciones: la de cada agente en cada proyecto y las
+        otras que se abrieron a su lado."""
+        return [*self.chats.values(), *(c for more in self.chat_extra.values() for c in more)]
+
+    def chat_family(self, c=None):
+        """Las conversaciones del agente de `c` en su proyecto, la de siempre
+        primero y luego las otras, en el orden en que se abrieron."""
+        c = c or self.chat
+        if c is None:
+            return []
+        key = self.chat_key(c.agent, c.cwd)
+        return [x for x in (self.chats.get(key), *self.chat_extra.get(key, [])) if x is not None]
+
+    def chat_can_split(self, c=None):
+        """¿Puede tener otra conversación a su lado? Solo los que no modifican
+        el repo, y hasta MAX_CHATS."""
+        c = c or self.chat
+        return c is not None and c.agent not in chat.SINGLE_AGENTS and len(self.chat_family(c)) < chat.MAX_CHATS
+
+    def chat_split(self):
+        """«Otra»: una conversación nueva con el mismo agente, en el mismo
+        proyecto, sin tocar las que ya hay: sirve para pedirle algo mientras
+        otra suya sigue trabajando."""
+        old = self.chat
+        if not self.chat_can_split(old):
+            return
+        self.chat_for(old.agent, old.cwd)       # la de siempre existe antes que las otras
+        c = self.chat_make(old.agent, old.cwd)
+        self.chat_extra.setdefault(self.chat_key(old.agent, old.cwd), []).append(c)
+        self.show_chat(c, typing=True)
+
+    def chat_switch(self, i):
+        """Un clic en una conversación de la fila: se pasa a ella."""
+        family = self.chat_family()
+        if 0 <= i < len(family) and family[i] is not self.chat:
+            self.show_chat(family[i], typing=True)
+
+    def chat_drop(self, i):
+        """La × de una conversación: se cierra y sale de la fila. La de
+        siempre y las que trabajan se quedan."""
+        family = self.chat_family()
+        if not 0 < i < len(family) or family[i].busy:
+            return
+        gone = family[i]
+        gone.close()
+        self.chat_extra[self.chat_key(gone.agent, gone.cwd)].remove(gone)
+        if gone is self.chat:
+            self.show_chat(family[i - 1], typing=True)
 
     def open_chat(self, typing=False, agent=None, cwd=None):
         """Abre el chat. Sin `cwd`, con el tablero a la vista, el de la
@@ -334,14 +392,14 @@ class ChatView:
         conversación, si la sesión es de un chat, o la de la sesión. Claude
         puede acabar trabajando en otra carpeta; la pestaña sigue siendo del
         proyecto en el que se abrió."""
-        c = next((c for c in self.chats.values() if c.session and c.session == s.sid), None)
+        c = next((c for c in self.all_chats() if c.session and c.session == s.sid), None)
         return c.cwd if c is not None else s.cwd
 
     def chat_of(self, s, agent=''):
         """La conversación que hay detrás de una sesión del tablero: la suya,
         si es de un chat, o la del encargo que se le hizo a ese agente desde
         su pestaña. None si esa sesión no es de ningún chat."""
-        mine = next((c for c in self.chats.values() if c.session and c.session == s.sid), None)
+        mine = next((c for c in self.all_chats() if c.session and c.session == s.sid), None)
         if mine is not None and mine.agent == agent:
             return mine
         return next((c for key, c in self.chats.items()
@@ -387,6 +445,14 @@ class ChatView:
             self.open_chat(typing=True)
             return
         old.close()
+        more = self.chat_extra.get(self.chat_key(old.agent, old.cwd), [])
+        if old in more:
+            # Una de las otras: se vuelve a empezar en su mismo lugar de la fila.
+            fresh = self.chat_make(old.agent, old.cwd)
+            more[more.index(old)] = fresh
+            self.chat = None
+            self.show_chat(fresh, typing=True)
+            return
         self.chats.pop(self.chat_key(old.agent, old.cwd), None)
         self.chat = None
         self.show_chat(self.chat_for(old.agent, old.cwd), typing=True)
@@ -412,7 +478,7 @@ class ChatView:
                 self.chat_type(False)
             else:
                 self.brief_drop()
-        for c in self.chats.values():
+        for c in self.all_chats():
             # Con un chat por proyecto, un Claude vivo por cada uno sería
             # mucho: el que no se usa se cierra y lo siguiente lo retoma.
             watched = self.chat_open and c is self.chat
@@ -425,9 +491,13 @@ class ChatView:
     def chat_dump(self):
         """Las conversaciones, para guardarlas: las que ya tienen algo, cuál
         se tenía a la vista, si el panel estaba abierto y los encargos."""
-        chats = [c.dump() for c in self.chats.values() if c.session or c.entries]
+        extra = {id(c) for more in self.chat_extra.values() for c in more}
+        chats = [{**c.dump(), 'extra': True} if id(c) in extra else c.dump()
+                 for c in self.all_chats() if c.session or c.entries]
         current = list(self.chat_key(self.chat.agent, self.chat.cwd)) if self.chat is not None else None
-        return {'chats': chats, 'current': current, 'open': self.chat_open,
+        saved = [c for c in self.chat_family() if c.session or c.entries]
+        return {'chats': chats, 'current': current, 'current_n': saved.index(self.chat) if self.chat in saved else 0,
+                'open': self.chat_open,
                 'hosts': [[*key, sid] for key, sid in self.chat_hosts.items()]}
 
     def chat_save(self):
@@ -443,10 +513,16 @@ class ChatView:
             if c is None:
                 continue
             c.emit = lambda ev, c=c: GLib.idle_add(self.on_chat, ev, c)
-            self.chats[self.chat_key(c.agent, c.cwd)] = c
+            if saved.get('extra') is True:
+                self.chat_extra.setdefault(self.chat_key(c.agent, c.cwd), []).append(c)
+            else:
+                self.chats[self.chat_key(c.agent, c.cwd)] = c
             if c.session:
                 self.chat_sessions.add(c.session)
-        self.chat = self.chats.get(self.chat_saved_key(data.get('current')))
+        key = self.chat_saved_key(data.get('current'))
+        family = [c for c in (self.chats.get(key), *self.chat_extra.get(key, [])) if c is not None]
+        n = data.get('current_n')
+        self.chat = family[n if isinstance(n, int) and 0 <= n < len(family) else 0] if family else None
         hosts = data.get('hosts')
         if isinstance(hosts, dict):         # como se guardaba antes: {agente: sesión}
             hosts = [[agent, sid] for agent, sid in hosts.items()]
@@ -470,14 +546,14 @@ class ChatView:
 
     def chat_busy(self):
         """¿Hay algún turno en curso, en el chat que sea?"""
-        return any(c.busy for c in self.chats.values())
+        return any(c.busy for c in self.all_chats())
 
     def chat_shutdown(self):
         """Cierra los procesos de Claude de todos los chats, y espera a que
         acaben: las conversaciones quedan guardadas."""
         self.chat_save()
-        procs = [c.proc for c in self.chats.values() if c.proc is not None]
-        for c in self.chats.values():
+        procs = [c.proc for c in self.all_chats() if c.proc is not None]
+        for c in self.all_chats():
             c.close()
         for proc in procs:
             try:
@@ -643,7 +719,7 @@ class ChatView:
     def chat_show(self, which):
         """El botón de un aviso del chat: abre la conversación de esa sesión;
         si ya no está (o el aviso no dice cuál), el chat sin más."""
-        c = next((c for c in self.chats.values() if c.session and c.session == which), self.chat)
+        c = next((c for c in self.all_chats() if c.session and c.session == which), self.chat)
         if c is not None:
             self.show_chat(c, typing=True)
         else:
@@ -900,6 +976,12 @@ class ChatView:
             self.new_chat()
         elif key == 'close':
             self.close_chat()
+        elif key == 'split':
+            self.chat_split()
+        elif key.startswith('conv:'):
+            self.chat_switch(int(key[5:]))
+        elif key.startswith('drop:'):
+            self.chat_drop(int(key[5:]))
         elif key in ('agent', 'model', 'effort'):
             self.chat_menu = None if menu == key else key
         elif key == 'plan' and self.chat is not None:
@@ -1051,6 +1133,9 @@ class ChatView:
             bottom -= ask_h + 8
             self.draw_chat_ask(cr, left, bottom + 4, width, alpha, ask_h)
         top = CHAT_HEAD + 6
+        if len(self.chat_family()) > 1:
+            self.draw_chat_tabs(cr, left, top, width, alpha)
+            top += CHAT_TABS_H
         self.draw_chat_log(cr, left, top, width, bottom - 8, alpha)
         self.draw_chat_input(cr, left, box_y, width, ih, alpha)
         self.chat_box = (int(left + CHAT_INPUT_INSET), int(box_y + CHAT_INPUT_PAD), int(text_w),
@@ -1265,6 +1350,8 @@ class ChatView:
                   now, now - getattr(self, 'pet_since', now))
         # Los enlaces, a la derecha: lo demás cabe en lo que queda.
         links = [('close', 'Cerrar'), ('new', 'Nuevo')]
+        if self.chat_can_split():
+            links.append(('split', 'Otra'))
         if self.chat is not None and self.chat.busy:
             links.append(('stop', 'Detener'))
         pick_x = left + width - self.chat_links_w(cr, links) - 18
@@ -1299,6 +1386,43 @@ class ChatView:
         cr.set_source_rgba(1, 1, 1, .07 * alpha)
         cr.rectangle(left, CHAT_HEAD + 2, width, 1)
         cr.fill()
+
+    def chat_title(self, c, i):
+        """El nombre de una conversación de la fila: lo primero que se le pidió."""
+        first = next((e.text.strip().splitlines()[0] for e in c.entries if e.kind == 'you' and e.text.strip()), '')
+        if len(first) > CHAT_TAB_LABEL:
+            first = first[:CHAT_TAB_LABEL - 1].rstrip() + '…'
+        return f'{i + 1} · {first or "nueva"}'
+
+    def draw_chat_tabs(self, cr, left, y, width, alpha):
+        """La fila de conversaciones del agente en este proyecto: la a la vista
+        resaltada, un punto en las que trabajan o esperan respuesta, y una × en
+        las que se pueden cerrar."""
+        family = self.chat_family()
+        color = self.chat_color()
+        room = (width - 6 * (len(family) - 1)) / len(family)
+        x = left
+        for i, c in enumerate(family):
+            now = c is self.chat
+            closable = i > 0 and not c.busy
+            mark = '! ' if c.asking else '● ' if c.busy else ''
+            layout = self._layout(cr, mark + self.chat_title(c, i), FONT_STEP, room - 16 - (14 if closable else 0))
+            lw, lh = layout.get_pixel_size()
+            w = min(room, lw + 16 + (14 if closable else 0))
+            over = self.over(x, y, w, CHAT_TABS_H - 4)
+            mascot.rrect(cr, x, y, w, CHAT_TABS_H - 4, 8)
+            cr.set_source_rgba(*(color if now else (1, 1, 1)), (.28 if now else .12 if over else .05) * alpha)
+            cr.fill()
+            tone = (mascot.rgba(self.ink('bad'))[:3] if c.asking else mascot.rgba(self.ink('cmd'))[:3] if c.busy
+                    else (1, 1, 1) if now or over else mascot.rgba(self.ink('text', .7))[:3])
+            self.tip_text(cr, layout, x + 8, y + (CHAT_TABS_H - 4 - lh) / 2, tone, alpha, False)
+            if closable:
+                gone = self.over(x + w - 20, y, 20, CHAT_TABS_H - 4)
+                self.put(cr, '×', FONT_LINK, x + w - 16, y + 3, (1, 1, 1) if gone else mascot.rgba(self.ink('text', .55))[:3],
+                         alpha)
+                self.hits.append(('chat', f'drop:{i}', x + w - 20, y, 20, CHAT_TABS_H - 4))
+            self.hits.append(('chat', f'conv:{i}', x, y, w - (20 if closable else 0), CHAT_TABS_H - 4))
+            x += w + 6
 
     def chat_links_w(self, cr, links):
         return sum(self._layout(cr, label, FONT_LINK).get_pixel_size()[0] + CHAT_LINK_GAP for _, label in links)

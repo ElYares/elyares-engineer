@@ -80,6 +80,10 @@ MAX_MENTIONS = 40         # lo que cabe en la lista de "@"
 FILES_SECS = 30           # cada cuánto se vuelven a listar los archivos del proyecto
 DENY_MESSAGE = 'El usuario lo denegó desde el chat de elyares-engineer.'
 QUESTION_TOOL = 'AskUserQuestion'     # pide elegir entre opciones, no permiso
+# Los que modifican el repo: dos conversaciones suyas sobre la misma carpeta se
+# pisarían, así que tienen una sola por proyecto. Los demás solo leen y reportan.
+SINGLE_AGENTS = ('', 'elyares-mobile', 'elyares-devops')
+MAX_CHATS = 5                         # conversaciones de un agente en un proyecto
 
 
 def _tmux(*args):
