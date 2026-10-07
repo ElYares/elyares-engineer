@@ -110,6 +110,7 @@ CHAT_OPT_H = 38               # cada opción de una pregunta de Claude
 CHAT_TABS_H = 26              # la fila de conversaciones de un agente, cuando hay más de una
 CHAT_TAB_LABEL = 16           # letras del título de cada una
 CHAT_WARN_H = 26              # el aviso de que otra conversación trabaja en la misma carpeta
+CHAT_FOOT_ROW = 18            # la fila de enlaces bajo el pie, cuando a su lado no caben
 CHAT_CHIP_H = 22              # las etiquetas de las imágenes pegadas
 CHAT_MAX_IMAGES = 5
 CHAT_SHOW_AT = 40             # la caja de texto sale cuando a la isla le falta esto para abrirse
@@ -1515,7 +1516,8 @@ class ChatView:
             markup = (f'<span foreground="{color}">▣</span>  '
                       f'<span foreground="{self.ink("text", .6)}">{html.escape(entry.text, quote=False)}</span>')
             layout = self._layout(cr, '▣  ' + entry.text, FONT_STEP, inner, 1, markup=markup)
-            hit = (layout, layout.get_pixel_size()[1] + 4, None)
+            row = CHAT_FOOT_ROW if self.chat_foot_wraps(cr, index, layout.get_pixel_size()[0], inner) else 0
+            hit = (layout, layout.get_pixel_size()[1] + 4 + row, None)
         else:
             layout = self._layout(cr, entry.text, FONT_LINK, inner, 2)
             hit = (layout, layout.get_pixel_size()[1], 'bad' if entry.kind == 'error' else 'text')
@@ -1582,7 +1584,8 @@ class ChatView:
             elif role is None:
                 self.tip_text(cr, layout, x, y + 2, None, alpha, False)
                 if top <= y and y + hh <= bottom:
-                    self.draw_chat_foot_links(cr, index, left + width, y + 2, alpha)
+                    below = layout.get_pixel_size()[1] + 4 if hh > layout.get_pixel_size()[1] + 4 + 1 else 0
+                    self.draw_chat_foot_links(cr, index, left + width, y + 2 + below, alpha, width - CHAT_INDENT)
             else:
                 light = .62 if entry.kind == 'note' else None
                 tone = mascot.rgba(self.ink(role, light) if light else self.ink(role))[:3]
@@ -1664,30 +1667,51 @@ class ChatView:
             self.tip_text(cr, link, x, line_y, color, alpha, False)
             self.hits.append(('chat', f'code:{index}:{n}', x - 4, line_y - 2, lw + 8, lh + 4))
 
-    def draw_chat_foot_links(self, cr, index, right, y, alpha):
-        """Los enlaces del pie de un turno, a su derecha: «copiar» y, en el
-        chat de uno de la familia, «al engineer ›»."""
+    def chat_foot_links(self, index, copied=None, short=False):
+        """Los enlaces del pie de un turno, de izquierda a derecha, como
+        [(clave, texto)]: «copiar», los enlaces de la respuesta y, en el chat de
+        uno de la familia, «al engineer ›». Con `short` cada enlace va sin «copiar»."""
         reply = self.chat_reply_at(index)
         if not reply:
-            return
-        if self.chat_copied is not None and time.monotonic() - self.chat_copied[1] > CHAT_COPIED_SECS:
-            self.chat_copied = None
-        copied = self.chat_copied is not None and self.chat_copied[0] == index
-        links = [(f'copy:{index}', 'copiado ✓' if copied else 'copiar')]
+            return []
+        links = [(f'copy:{index}', 'copiado ✓' if copied == index else 'copiar')]
         found = paint.urls(reply)[:3]
         for n in reversed(range(len(found))):
-            done = self.chat_copied is not None and self.chat_copied[0] == (index, 'url', n)
             name = 'enlace' if len(found) == 1 else f'enlace {n + 1}'
-            links.insert(0, (f'url:{index}:{n}', f'{name} copiado ✓' if done else f'copiar {name}'))
+            if copied == (index, 'url', n):
+                label = f'{name} copiado ✓'
+            else:
+                label = name if short else f'copiar {name}'
+            links.insert(0, (f'url:{index}:{n}', label))
         if self.chat.agent:
             links.insert(0, (f'pass:{index}', 'al engineer ›'))
+        return links
+
+    def chat_foot_w(self, cr, links):
+        return sum(self._layout(cr, label, FONT_STEP).get_pixel_size()[0] + CHAT_LINK_GAP for _, label in links)
+
+    def chat_foot_wraps(self, cr, index, text_w, inner):
+        """¿No caben los enlaces del pie a la derecha de su texto? Entonces van
+        en una fila debajo."""
+        links = self.chat_foot_links(index)
+        return bool(links) and text_w + self.chat_foot_w(cr, links) + CHAT_LINK_GAP > inner
+
+    def draw_chat_foot_links(self, cr, index, right, y, alpha, room=None):
+        """Los enlaces del pie de un turno, a su derecha. Si con sus nombres
+        enteros no caben en `room`, sin el «copiar» de cada enlace."""
+        if self.chat_copied is not None and time.monotonic() - self.chat_copied[1] > CHAT_COPIED_SECS:
+            self.chat_copied = None
+        copied = self.chat_copied[0] if self.chat_copied is not None else None
+        links = self.chat_foot_links(index, copied)
+        if room is not None and self.chat_foot_w(cr, links) > room:
+            links = self.chat_foot_links(index, copied, short=True)
         soft, x = mascot.rgba(self.ink('text', .6))[:3], right
         for key, label in reversed(links):
             layout = self._layout(cr, label, FONT_STEP)
             lw, lh = layout.get_pixel_size()
             x -= lw
             over = self.over(x - 4, y - 3, lw + 8, lh + 6)
-            lit = (key.startswith('copy:') and copied) or label.endswith('copiado ✓')
+            lit = label.endswith('copiado ✓')
             color = mascot.rgba(self.ink('pass'))[:3] if lit else (1, 1, 1) if over else soft
             self.tip_text(cr, layout, x, y, color, alpha, False)
             self.hits.append(('chat', key, x - 4, y - 3, lw + 8, lh + 6))
