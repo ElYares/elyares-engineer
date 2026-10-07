@@ -80,6 +80,7 @@ import html
 import math
 import os
 import subprocess
+import sys
 import time
 
 import cairo
@@ -679,7 +680,11 @@ class ChatView:
         chained = self.workflow_event(c, event, cut)
         if event.get('type') == 'result' and not cut:
             self.chat_watch = False
-            if not chained and not (self.chat_open and c is self.chat) and c.reply():
+            # Siempre deja su aviso (aunque el panel esté abierto): al cerrarlo, la respuesta
+            # sigue a la vista en el tablero hasta que se atienda. Lo dice en el journal.
+            why = 'es el paso de un workflow' if chained else '' if c.reply() else 'no dijo nada'
+            self.log(f'chat {c.name} · {c.project}: {"aviso de respuesta" if not why else "sin aviso, " + why}')
+            if not why:
                 self.chat_notice(c)
         if event.get('type') != 'stream_event':
             self.chat_save()
@@ -732,6 +737,11 @@ class ChatView:
             s.ask.done = True
             s.ask = None
             s.set('working', s.last_tool or 'Trabajando…')
+
+    @staticmethod
+    def log(text):
+        """Una línea al journal del servicio (`journalctl --user -u elyares-engineer`)."""
+        print(text, file=sys.stderr, flush=True)
 
     def chat_notice(self, c):
         """Terminó con su chat cerrado: un aviso con el principio de la

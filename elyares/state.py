@@ -93,7 +93,7 @@ RUN_RANK = 1.5            # unas pruebas corriendo: sobre una sesión trabajando
 
 # Lo que se guarda de cada sesión entre reinicios del daemon.
 SAVED_TEXT = ('cwd', 'pane', 'tmux', 'state', 'detail', 'last_tool', 'name', 'url', 'tone',
-              'label', 'kind', 'proc', 'main_agent')
+              'label', 'kind', 'proc', 'main_agent', 'where', 'note', 'tint')
 SAVED_NUM = ('ttl', 'context')
 SAVED_TIMES = ('started', 'changed', 'updated')
 
@@ -450,8 +450,11 @@ class Model:
 
     def dump(self):
         """Las sesiones como datos planos, para guardarlas entre reinicios."""
+        # La respuesta de un agente lleva también su texto y su botón de «ver
+        # respuesta»: si la isla se recarga justo al terminar, no se pierde.
         return [{'sid': s.sid, 'used': s.used, 'delegating': s.delegating,
-                 **{k: getattr(s, k) for k in SAVED_TEXT + SAVED_NUM + SAVED_TIMES}}
+                 **{k: getattr(s, k) for k in SAVED_TEXT + SAVED_NUM + SAVED_TIMES},
+                 **({'lines': s.lines, 'actions': [a for a in s.actions if a.get('chat')]} if s.reply else {})}
                 for s in self.sessions.values()]
 
     def restore(self, items, now=None):
@@ -474,6 +477,12 @@ class Model:
             s.delegating = bool(it.get('delegating'))
             if s.state not in PRIORITY:
                 s.state = 'idle'
+            if s.state == 'alert' and s.tint in TEAM:
+                # Solo el botón que abre el chat vuelve: ningún comando sale del archivo.
+                s.lines = card_lines(it.get('lines'))
+                s.actions = [a for a in card_actions(it.get('actions')) if a.get('chat')]
+            else:
+                s.tint = ''
             if s.state == 'alert' and s.tone == 'run':
                 # Unas pruebas a medias: quien las seguía se fue con el daemon anterior.
                 continue

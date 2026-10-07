@@ -1,5 +1,6 @@
 """El modelo: qué hace cada evento con las sesiones y qué muestra la isla."""
 
+import json
 import os
 import time
 import unittest
@@ -405,6 +406,25 @@ class SegundoPlano(ModelCase):
         self.send('start', sid='muerta', proc='12:1')
         self.assertTrue(self.m.reap(lambda proc: False, keep={'chat'}))
         self.assertEqual(sorted(self.m.sessions), ['chat'])
+
+    def test_la_respuesta_de_un_agente_sobrevive_al_reinicio_con_su_texto_y_su_boton(self):
+        self.alert(sid='chat:s1', name='api', tone='ok', where='elyares-reviewer', note='Sonnet 5.5',
+                   tint='reviewer', lines=['Revisé el PR', '- falta un test'],
+                   actions=[{'label': 'Ver respuesta', 'chat': 's1', 'after': 'clear'},
+                            {'label': 'Peligro', 'cmd': ['rm', '-rf', '/']}])
+        saved = json.loads(json.dumps(self.m.dump()))
+        m = Model()
+        m.restore(saved, now=T + 5)
+        s = m.sessions['chat:s1']
+        self.assertTrue(s.reply and s.card)
+        self.assertEqual((s.where, s.note, s.tint), ('elyares-reviewer', 'Sonnet 5.5', 'reviewer'))
+        self.assertEqual(s.lines, ['Revisé el PR', '- falta un test'])
+        self.assertEqual([a['label'] for a in s.actions], ['Ver respuesta'])    # un comando no vuelve del archivo
+        # Una alerta cualquiera sigue sin guardar su detalle.
+        self.alert(sid='x:2', lines=['algo'])
+        other = Model()
+        other.restore(json.loads(json.dumps(self.m.dump())), now=T + 5)
+        self.assertEqual(other.sessions['x:2'].lines, [])
 
     def test_el_proceso_y_el_nombre_sobreviven_al_reinicio(self):
         self.send('start', kind='bg', label='Mejoras', proc='10:1')
