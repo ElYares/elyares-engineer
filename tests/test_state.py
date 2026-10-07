@@ -400,6 +400,12 @@ class SegundoPlano(ModelCase):
         self.assertEqual(sorted(self.m.sessions), ['sin-proceso', 'viva', 'x:1'])
         self.assertFalse(self.m.reap(lambda proc: proc == '10:1'))
 
+    def test_la_sesion_de_una_conversacion_del_chat_no_se_olvida_aunque_su_proceso_duerma(self):
+        self.send('start', sid='chat', proc='11:1')
+        self.send('start', sid='muerta', proc='12:1')
+        self.assertTrue(self.m.reap(lambda proc: False, keep={'chat'}))
+        self.assertEqual(sorted(self.m.sessions), ['chat'])
+
     def test_el_proceso_y_el_nombre_sobreviven_al_reinicio(self):
         self.send('start', kind='bg', label='Mejoras', proc='10:1')
         self.send('status', sid='repuesto', context_pct=0)
