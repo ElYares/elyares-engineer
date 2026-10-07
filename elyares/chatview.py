@@ -1530,10 +1530,13 @@ class ChatView:
         """Lo que escribe Claude, con la jerarquía de la isla: los títulos en su
         color, las negritas más claras que el texto, el código en el acento
         del tema y las viñetas y los números en el color de quien habla."""
-        shade = paint.mix(paint.ISLAND, self.colors['arg'], .16)
+        agent = mascot.accent(self.chat_role())
+        tone = self.vivid(agent)
+        shade = paint.mix(paint.ISLAND, agent, .16)
         ink = {role: self.ink(role) for role in ('cmd', 'str', 'flag', 'num', 'dim', 'arg', 'path', 'var')}
-        return paint.markdown(text, self.ink('cmd'), self.ink('head'), bold='#ffffff',
-                              dim=self.colors['text'], accent=mascot.accent(self.chat_role()),
+        ink['cmd'] = tone          # el comando de un bloque y el código en línea, del color del agente
+        return paint.markdown(text, tone, self.ink('head'), bold='#ffffff',
+                              dim=self.colors['text'], accent=agent,
                               ink=ink, shade=shade, blocks=blocks)
 
     def chat_wrap(self, cr, text, font, width, markup=None):

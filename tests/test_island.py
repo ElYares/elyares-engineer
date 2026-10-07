@@ -994,6 +994,17 @@ class Chat(Dibujo):
         self.isl.chat, self.isl.chat_open = c, True
         return c
 
+    def test_el_codigo_del_chat_lleva_el_color_del_agente(self):
+        src = 'usa `main`\n```bash\ngit log\n```'
+        tones = {role: self.isl.vivid(app.mascot.accent(role)) for role in ('reviewer', 'architect')}
+        for agent, role, other in (('elyares-reviewer', 'reviewer', 'architect'),
+                                   ('elyares-architect', 'architect', 'reviewer')):
+            self.reviewer(agent)
+            out = self.isl.chat_markdown(src)
+            self.assertIn(f'foreground="{tones[role]}" background=', out)   # el código en línea
+            self.assertIn(f'foreground="{tones[role]}">git</span>', out)    # el comando del bloque
+            self.assertNotIn(tones[other], out)
+
     def test_un_agente_de_solo_lectura_abre_otra_conversacion_sin_esperar(self):
         first = self.reviewer()
         first.busy = True
