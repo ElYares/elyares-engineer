@@ -51,6 +51,7 @@ class IslandCase(unittest.TestCase):
         isl.markups = {}
         isl.off = isl.hover = isl.expanded = False
         isl.pin, isl.reply_pick, isl.pointer, isl.buttons = '', '', None, {}
+        isl.log = mock.Mock()
         isl.tab, isl.focus, isl.hits, isl.rows = '', None, [], []
         isl.tab_manual = False
         isl.look, isl.blink_until = [0.0, 0.0], 0.0
@@ -1203,6 +1204,14 @@ class Chat(Dibujo):
         self.assertIsNone(self.isl.model.sessions['s-chat'].ask if 's-chat' in self.isl.model.sessions else None)
         self.draw()
         self.assertIn('¿Cuál?', self.shown)
+
+    def test_al_terminar_deja_su_aviso_aunque_el_chat_estuviera_abierto(self):
+        c = self.conversation()
+        c.session, c.busy = 's-chat', True
+        self.assertTrue(self.isl.chat_open)
+        self.isl.on_chat({'type': 'result', 'subtype': 'success', 'duration_ms': 1000})
+        self.assertIn('chat:s-chat', self.isl.model.sessions)
+        self.isl.log.assert_called_with('chat elyares-engineer · proj: aviso de respuesta')
 
     def test_al_terminar_avisa_con_el_principio_de_la_respuesta(self):
         c = self.conversation()
