@@ -1754,6 +1754,30 @@ class Chat(Dibujo):
         self.draw()
         self.assertNotIn('copy:4', self.hit('chat'))
 
+    def test_con_varios_enlaces_el_pie_los_pone_en_su_fila_y_no_se_encima_con_su_texto(self):
+        c = self.conversation()
+        c.agent = 'elyares-mobile'
+        E = app.chatview.chat.Entry
+        c.entries[1].text = 'a https://a.dev/x b https://b.dev/y c https://c.dev/z'
+        c.entries.append(E('foot', 'elyares-mobile · Sonnet 5.5 · 34.7 s'))
+        self.draw()
+        foot_y = {key: y for kind, key, x, y, w, h in self.isl.hits if kind == 'chat'}
+        links = [(key, x, y, w, h) for kind, key, x, y, w, h in self.isl.hits
+                 if kind == 'chat' and key.split(':')[0] in ('pass', 'url', 'copy')]
+        self.assertEqual({k.split(':')[0] for k, *_ in links}, {'pass', 'url', 'copy'})
+        # Todos en la misma fila, y esa fila por debajo del texto del pie.
+        self.assertEqual(len({y for _, _, y, _, _ in links}), 1)
+        text_h = app.chatview.CHAT_FOOT_ROW
+        self.assertIn('copiar enlace 3', self.shown)        # en su fila caben con su nombre entero
+        # Ninguno se sale de la caja por la izquierda.
+        self.assertTrue(all(x >= 0 for _, x, _, _, _ in links))
+        # Con uno solo caben al lado del texto y no hace falta la fila.
+        c.entries[1].text = 'a https://a.dev/x'
+        self.draw()
+        one = [y for kind, key, x, y, w, h in self.isl.hits if kind == 'chat' and key.startswith('copy:')]
+        self.assertTrue(one)
+        self.assertLess(min(one), min(y for _, _, y, _, _ in links) + 1)
+
     def test_un_enlace_de_la_respuesta_se_copia_solo(self):
         c = self.conversation()
         E = app.chatview.chat.Entry
