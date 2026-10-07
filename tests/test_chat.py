@@ -455,6 +455,29 @@ class Markdown(unittest.TestCase):
         self.assertTrue(lines[3].endswith('>a  b</span>'))   # una sola fila no es cabecera
         self.assertEqual(lines[4], 'fin &amp; listo')
 
+    def test_una_negrita_puede_envolver_codigo(self):
+        out = paint.markdown('**F. Poner al día la carpeta de `main`**\n- **uno `a**b` dos** y `x`',
+                             code='#111111', head='#ffffff')
+        first, second = out.split('\n')
+        self.assertNotIn('**', first)
+        self.assertEqual(first, '<b>F. Poner al día la carpeta de '
+                                '<span font_family="monospace" foreground="#111111">main</span></b>')
+        self.assertNotIn('**uno', second)
+        self.assertIn('a**b</span>', second)   # lo de dentro del código se queda como está
+
+    def test_una_linea_toda_en_negrita_es_el_titulo_de_un_paso(self):
+        out = paint.markdown('Intro\n**A. Paso `x`**\n- qué haces\n**B. Otro**\nuna **negrita** y **otra**',
+                             head='#abcdef', bold='#ffffff', dim='#999999', accent='#00ffff')
+        lines = out.split('\n')
+        self.assertEqual(lines[1], '')                                  # un respiro antes del paso
+        self.assertTrue(lines[2].startswith('<span foreground="#abcdef" weight="bold">A. Paso '))
+        self.assertNotIn('**', out)
+        self.assertTrue(lines[5].startswith('<span foreground="#abcdef" weight="bold">B. Otro'))
+        self.assertIn('foreground="#ffffff"', lines[-1])                # una negrita en medio sigue igual
+        self.assertNotIn('#abcdef', lines[-1])
+        # Sin colores (el detalle de las alertas) no cambia nada.
+        self.assertEqual(paint.markdown('**A. Paso**'), '<b>A. Paso</b>')
+
     def test_con_colores_tiene_jerarquia(self):
         src = ('## Hecho\n\nSe hizo **todo** con *cuidado* y `a_b_c **x**`, ver [el PR](https://x.mx/1).\n\n\n\n'
                '1. uno\n2) dos\n- punto\n  - hijo\n> una nota\n---\nfin\n')
