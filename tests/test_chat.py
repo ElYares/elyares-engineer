@@ -105,6 +105,30 @@ class Conversacion(ChatCase):
         self.assertEqual([e.kind for e in self.c.entries], ['you'])
         self.assertEqual(self.c.tokens, 0)
 
+    def test_una_pregunta_de_opciones_se_contesta_con_lo_elegido(self):
+        self.c.send('pregunta')
+        self.c.feed({'type': 'control_request', 'request_id': 'r-2', 'request': {
+            'subtype': 'can_use_tool', 'tool_name': 'AskUserQuestion',
+            'input': {'questions': [
+                {'question': '¿Qué base?', 'header': 'Base', 'multiSelect': False,
+                 'options': [{'label': 'Postgres', 'description': 'relacional'}, {'label': 'SQLite'}, {}]},
+                {'question': 'sin opciones', 'options': []}, 'basura']}}})
+        self.assertEqual(self.c.questions(), [{'question': '¿Qué base?', 'header': 'Base', 'multi': False,
+                                               'options': [('Postgres', 'relacional'), ('SQLite', '')]}])
+        self.assertTrue(self.c.answer_questions({'¿Qué base?': 'Postgres'}))
+        self.assertIsNone(self.c.asking)
+        self.assertEqual(self.c.questions(), [])
+        sent = self.procs[0].sent()[-1]['response']
+        self.assertEqual(sent['request_id'], 'r-2')
+        self.assertEqual(sent['response']['behavior'], 'allow')
+        self.assertEqual(sent['response']['updatedInput']['answers'], {'¿Qué base?': 'Postgres'})
+        self.assertIn('questions', sent['response']['updatedInput'])
+        self.assertEqual(self.c.entries[-1].text, 'Respondiste: Postgres')
+
+    def test_un_permiso_no_es_una_pregunta(self):
+        self.c.asking = {'id': 'r-1', 'tool': 'Bash', 'input': {'command': 'ls'}, 'text': 'Ejecutando ls'}
+        self.assertEqual(self.c.questions(), [])
+
     def test_el_init_da_la_sesion_y_los_comandos(self):
         self.c.commands = {'commit': 'Convierte el working tree…'}
         self.c.feed({'type': 'system', 'subtype': 'init', 'session_id': 's-1',
@@ -389,6 +413,37 @@ class Carpeta(unittest.TestCase):
 
 
 class Markdown(unittest.TestCase):
+    def test_los_enlaces_de_una_respuesta_salen_sin_repetir_ni_puntuacion(self):
+        text = ('Mira https://claude.ai/code/artifact/abc-123. Y [esto](https://x.dev/a?b=1), '
+                'otra vez https://claude.ai/code/artifact/abc-123, `https://no.si` no.')
+        self.assertEqual(paint.urls(text), ['https://claude.ai/code/artifact/abc-123', 'https://x.dev/a?b=1',
+                                            'https://no.si'])
+        self.assertEqual(paint.urls(''), [])
+        self.assertEqual(paint.urls(None), [])
+
+    def test_el_codigo_sale_resaltado_sobre_su_fondo_y_se_puede_copiar(self):
+        ink = {role: '#aabbcc' for role in ('cmd', 'str', 'flag', 'num', 'dim', 'arg')}
+        blocks = []
+        out = paint.markdown('hola `x`\n```python\nimport os  # c\nx = 3\n```\n```\n$ ls -la\n```',
+                             ink=ink, shade='#101010', blocks=blocks)
+        self.assertEqual(blocks, [('python', 'import os  # c\nx = 3'), ('', '$ ls -la')])
+        self.assertEqual((out.count(paint.CODE_MARK), out.count(paint.CODE_END)), (2, 2))   # arriba y abajo de cada bloque
+        self.assertEqual(out.count('background="#101010"'), 1)  # solo el inline: el fondo del bloque lo pinta la isla
+        self.assertIn('<span foreground="#aabbcc">import</span>', out)
+
+    def test_un_papel_que_el_tema_no_trae_no_rompe_el_dibujo(self):
+        ink = {'cmd': '#111111', 'arg': '#222222'}
+        out = paint.markdown('```bash\ncd ~/x --f $HOME 3\n```', ink=ink, shade='#000000')
+        self.assertIn('foreground="#222222"', out)
+
+    def test_un_bloque_sin_cerrar_tambien_se_copia(self):
+        blocks = []
+        paint.markdown('```sh\nls', ink={'cmd': '#111111', 'arg': '#111111', 'flag': '#111111', 'str': '#111111',
+                                         'num': '#111111', 'dim': '#111111'}, shade='#000000', blocks=blocks)
+        self.assertEqual(blocks, [('sh', 'ls')])
+        out = paint.markdown('```sh\nls', ink={'cmd': '#1', 'arg': '#1'}, shade='#000000')
+        self.assertEqual((out.count(paint.CODE_MARK), out.count(paint.CODE_END)), (1, 1))
+
     def test_lo_justo_para_leerlo(self):
         out = paint.markdown('## Hecho **ya**\n- uno `a<b`\n```\nx <y>\n```\n| a | b |\nfin & listo',
                              code='#111111', head='#ffffff')
@@ -399,6 +454,33 @@ class Markdown(unittest.TestCase):
         self.assertEqual(lines[2], '<span font_family="monospace" foreground="#111111">x &lt;y&gt;</span>')
         self.assertTrue(lines[3].endswith('>a  b</span>'))   # una sola fila no es cabecera
         self.assertEqual(lines[4], 'fin &amp; listo')
+
+    def test_con_colores_tiene_jerarquia(self):
+        src = ('## Hecho\n\nSe hizo **todo** con *cuidado* y `a_b_c **x**`, ver [el PR](https://x.mx/1).\n\n\n\n'
+               '1. uno\n2) dos\n- punto\n  - hijo\n> una nota\n---\nfin\n')
+        out = paint.markdown(src, code='#111111', head='#222222', bold='#ffffff', dim='#999999', accent='#00ff00')
+        lines = out.split('\n')
+        self.assertTrue(lines[0].startswith('<span foreground="#222222" weight="bold" size="large">Hecho'))
+        self.assertEqual(lines[1], '')                                   # una sola línea en blanco
+        self.assertIn('<span weight="bold" foreground="#ffffff">todo</span>', lines[2])
+        self.assertIn('<i>cuidado</i>', lines[2])
+        self.assertIn('<u>el PR</u>', lines[2])
+        self.assertNotIn('https://x.mx', lines[2])
+        # Lo que va entre acentos graves queda tal cual: ni cursivas ni negritas.
+        self.assertIn('foreground="#111111">a_b_c **x**</span>', lines[2])
+        self.assertEqual(lines[3], '')
+        self.assertEqual(lines[4], '<span foreground="#00ff00" weight="bold">1.</span> uno')
+        self.assertEqual(lines[5], '<span foreground="#00ff00" weight="bold">2.</span> dos')
+        self.assertEqual(lines[6], '<span foreground="#00ff00">•</span> punto')
+        self.assertEqual(lines[7], '  <span foreground="#00ff00">◦</span> hijo')
+        self.assertTrue(lines[8].startswith('<span foreground="#00ff00">▎</span>'))
+        self.assertIn('─' * 10, lines[9])
+        self.assertEqual(lines[10], 'fin')
+        self.assertEqual(len(lines), 11)                                 # sin línea en blanco al final
+        # Un título tras un párrafo lleva su respiro; y un guion_bajo suelto no es cursiva.
+        out = paint.markdown('texto\n## Título\nuna_variable_larga y snake_case', bold='#fff', dim='#999')
+        self.assertEqual(out.split('\n')[1], '')
+        self.assertIn('una_variable_larga y snake_case', out)
 
     def test_una_tabla_va_alineada_por_columnas(self):
         out = paint.markdown('| Rama | Estado |\n|---|:---:|\n| sprint-021026 | al día |\n| main | atrás |')

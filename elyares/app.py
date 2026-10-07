@@ -101,6 +101,8 @@ PREVIEW_MAX = PREVIEW_HEAD + (preview.MAX_LINES + 1) * CODE_LINE_H + 2 * PREVIEW
 ASK_TALL = 24         # con vista previa, los botones bajan debajo de ella
 PREVIEW_OPEN_SECS = 20    # abierta con el teclado y con código que leer
 CARD_BUTTONS = 40     # la fila de botones de la ficha de una alerta
+REPLY_CHIPS_H = 24    # la fila con las respuestas de los agentes, cuando hay más de una
+REPLY_LINES = 8       # líneas de una respuesta que caben en su ficha
 TIP_W, TIP_PAD, TIP_GAP = 400, 14, 14  # la burbuja de una fuente, debajo de la isla; en el hueco va su flecha
 TIP_ROOM = 440        # el alto que se le reserva en la ventana
 TIP_COL_GAP = 16      # entre un comando y lo que hace
@@ -112,10 +114,14 @@ CHAT_PILL = 'chat'    # la pastilla del pie que abre el chat
 # estos sitios, en % del ancho.
 CENTER = 50
 SLOTS = (0, 25, CENTER, 75, 100)
+STEP_Y = 80           # `move up` y `move down`: lo que sube o baja, en px
+DRAG_MASK = Gdk.ModifierType.ALT_MASK    # arrastrar la isla con Alt (SUPER lo usa Hyprland para mover ventanas)
+DRAG_SLOP = 6                            # lo que hay que mover el botón del medio para que sea arrastre y no clic
 # `elyares-ctl reload`: la isla se vuelve a arrancar con el código de su carpeta.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAUNCHER = os.path.join(ROOT, 'bin', 'elyares-engineer')
 UNIT = 'elyares-engineer.service'
+MONITORS_SETTLE_MS = 600    # tras conectar o desconectar una pantalla: lo que tarda Hyprland en acomodarlas
 RELOAD_MS = 1200      # lo que espera tras el último turno: que llegue su aviso y su cuenta de contexto
 # `elyares-ctl chat <quién>`: el chat de ese de la familia.
 AGENT_NAMES = {role: ('' if role == 'engineer' else name) for role, name in state.ROLE_AGENTS.items()}
@@ -260,6 +266,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.title, self.detail = '', ''
         self.agent_name, self.role = '', MAIN_ROLE   # de quién es la cabecera
         self.tab = ''                   # la sesión de la pestaña elegida en el tablero
+        self.tab_manual = False         # esa pestaña la elegiste tú: no se mueve sola, salvo por un permiso
         self.focus = None               # (sesión, personaje) del desglose abierto
         self.hits = []                  # (qué, cuál, x, y, ancho, alto) del tablero, del último dibujo
         self.dnd = False
@@ -286,12 +293,15 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.slow_id = 0
         self.last_frame = None
         self.region = None
+        self.monitors_id = 0            # el reloj que la devuelve a su pantalla tras conectar o desconectar una
+        self.screen_h = 0               # el alto de la pantalla en la que está
         self.screen_w = 0               # el ancho de la pantalla en la que está
         # 'allow'/'deny' del permiso, o 'dismiss' y el índice de cada botón de
         # la ficha de una alerta -> (x, y, w, h), del último dibujo
         self.buttons = {}
         self.card_span = None           # (arriba, abajo) de la ficha, del último dibujo
         self.pin = ''                   # la alerta que se eligió en la lista para leerla
+        self.reply_pick = ''            # la respuesta de un agente que se está leyendo en el tablero
         self.rows = []                  # (sesión, y, alto) de la lista, del último dibujo
         self.list_layout = False        # la cabecera se queda arriba mientras hay lista
         self.wrap = (None, 0)           # (detalle, alto de más que pide entero)
@@ -335,12 +345,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.NONE)
         win.set_default_size(WIN_W, WIN_H)
         self.win = win
+        win.connect('notify::is-active', self.on_focus_change)
         if self.monitor:
             self._set_monitor(self.monitor['name'])
         if not self.screen_w:
             # Sin Hyprland que diga cuál es: el ancho de la primera pantalla.
             first = Gdk.Display.get_default().get_monitors().get_item(0)
             self.screen_w = first.get_geometry().width if first is not None else 0
+            self.screen_h = first.get_geometry().height if first is not None else 0
         self.place()
 
         da = Gtk.DrawingArea()
@@ -359,8 +371,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         right.connect('pressed', self.on_right_click)
         da.add_controller(right)
         middle = Gtk.GestureClick(button=Gdk.BUTTON_MIDDLE)
-        middle.connect('pressed', self.on_middle_click)
+        middle.connect('released', self.on_middle_click)       # al soltar: si se arrastró, no es un clic
         da.add_controller(middle)
+        for button in (Gdk.BUTTON_PRIMARY, Gdk.BUTTON_MIDDLE):
+            drag = Gtk.GestureDrag(button=button)
+            drag.connect('drag-begin', self.on_drag_begin)
+            drag.connect('drag-update', self.on_drag_update)
+            drag.connect('drag-end', self.on_drag_end)
+            da.add_controller(drag)
         # La caja de texto del chat va encima del dibujo.
         overlay = Gtk.Overlay()
         overlay.set_child(da)
@@ -379,6 +397,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         ipc.serve(lambda msg, req: GLib.idle_add(self.on_socket, msg, req),
                   lambda req: GLib.idle_add(self.on_gone, req))
         hypr.listen(lambda name: GLib.idle_add(self.on_focused_monitor, name))
+        Gdk.Display.get_default().get_monitors().connect('items-changed', self.on_monitors_changed)
         # Los vigilantes corren siempre y miran la preferencia en cada vuelta:
         # así una fuente se prende y se apaga sin reiniciar elyares-engineer.
         emit = lambda msg: GLib.idle_add(self.on_message, msg, None)  # noqa: E731
@@ -476,8 +495,9 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.workflows_tick()
         if self.seconds % REAP_SECS == 0:
             # Las sesiones sin pane (las de segundo plano) no tienen otra
-            # forma de irse si se cierran sin avisar.
-            self.model.reap(actions.proc_alive)
+            # forma de irse si se cierran sin avisar. Las de un chat se quedan:
+            # su proceso duerme o se cierra con la isla, pero la conversación sigue.
+            self.model.reap(actions.proc_alive, keep={c.session for c in self.all_chats() if c.session})
         if self.model.sessions:
             self.refresh()
         return GLib.SOURCE_CONTINUE
@@ -890,6 +910,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if self.chat_typing and not self.chat_open:
             return                      # escribiéndole a uno en su desglose: no se mueve
         s = v.session
+        if self.tab_manual and (s is None or s.state != 'permission'):
+            return                      # elegiste tú esta pestaña: solo un permiso te la quita
         if s is None or s.state not in ('permission', 'done'):
             sessions = [o for o in ([s] if s else []) + v.others if o.state != 'alert']
             chosen = next((o for o in sessions if o.sid == self.tab), None)
@@ -902,6 +924,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if self.tab != s.sid:
             self.focus = None
         self.tab = s.sid
+        self.tab_manual = False
 
     def busy(self, s):
         """¿Alguno de los cuatro de la sesión hace algo? Es lo que dice su tablero."""
@@ -932,6 +955,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if tabs:
             here = self.tab_session().sid
             self.tab, self.focus = tabs[(tabs.index(here) + 1) % len(tabs)], None
+            self.tab_manual = True
 
     def next_focus(self):
         """Abre el desglose del primero que tenga pasos, luego el del que
@@ -969,7 +993,32 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def rows_for(self, mode):
         """Las alertas que van en filas: en el tablero, todas; con la cabecera
         de siempre, las que no están en ella."""
-        return self.alerts() if mode == 'board' else self.view.others
+        if mode != 'board':
+            return self.view.others
+        shown = self.board_card()
+        # Las respuestas de los agentes van en su ficha, con su fila de nombres: no se repiten aquí.
+        return [s for s in self.alerts() if not (shown is not None and shown.reply and s.reply)]
+
+    def replies(self):
+        """Las respuestas de los agentes que esperan, la última primero."""
+        return sorted((s for s in self.alerts() if s.reply), key=lambda s: -s.changed)
+
+    def board_card(self):
+        """La alerta cuya ficha va en el tablero: la que se eligió en una fila
+        o, si no hay, la respuesta de un agente que se está leyendo (la última,
+        si no se eligió otra). None si no hay ninguna de las dos."""
+        pinned = self.model.sessions.get(self.pin)
+        if pinned is not None and pinned.card and not pinned.reply:
+            return pinned
+        replies = self.replies()
+        if not replies or self.focused():
+            return None
+        return next((s for s in replies if s.sid == self.reply_pick), replies[0])
+
+    def reply_chips(self, mode):
+        """Alto de la fila de respuestas: solo con más de una, y en el tablero."""
+        shown = self.board_card() if mode == 'board' else None
+        return REPLY_CHIPS_H if shown is not None and shown.reply and len(self.replies()) > 1 else 0
 
     def expand(self, secs=None):
         """Abre la isla a mano. Con secs se cierra sola si el ratón no está encima."""
@@ -1006,6 +1055,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         # lista, para que no tape algo más urgente.
         self.expanded = self.settings['pinned']
         if not self.expanded:
+            self.tab_manual = False     # al cerrarse, la próxima vez vuelve a seguir lo que pasa
             self.focus = None           # al volver a abrirla, el tablero y no un desglose
         if self.pin:
             self.pin = ''
@@ -1036,6 +1086,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 self.on_focused_monitor(focused['name'])
 
     def toggle_compact(self):
+        if self.chat_open:
+            self.close_chat()           # el chat manda sobre la isla mientras está abierto: sin cerrarlo no se achica
         self.settings['compact'] = not self.settings['compact']
         settings.save(self.settings)
         self.collapse()
@@ -1114,16 +1166,21 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         """Alto de la ficha de una alerta (su detalle y sus botones): cuando
         alguien la está leyendo, con el ratón encima o abierta a mano."""
         s = self.view.session
+        if mode == 'board':
+            s = self.board_card() or s
         if not s or not s.card or mode not in ('open', 'list', 'board'):
             return 0
         if mode == 'board' and self.focused():
             return 0
         # La de unas pruebas se ve sin pedirla mientras la isla está abierta
-        # por ellas: para eso se abrió.
-        if not (self.hover or self.expanded or (s.tests and self.view.mode == 'open')):
+        # por ellas: para eso se abrió. La respuesta de un agente se ve siempre
+        # que el tablero esté a la vista, hasta que se atienda.
+        if not (self.hover or self.expanded or (s.tests and self.view.mode == 'open')
+                or (mode == 'board' and s.reply)):
             return 0
-        body = (PREVIEW_HEAD if s.where or s.note else 0) + len(s.lines) * CODE_LINE_H
-        return (body + 2 * PREVIEW_PAD if body else 0) + CARD_BUTTONS
+        lines = len(s.lines) if not s.reply else min(len(s.lines), REPLY_LINES)
+        body = (PREVIEW_HEAD if s.where or s.note else 0) + lines * CODE_LINE_H
+        return (body + 2 * PREVIEW_PAD if body else 0) + CARD_BUTTONS + self.reply_chips(mode)
 
     def pills_h(self, mode):
         """Alto de la franja de fuentes: solo cuando alguien abrió la isla a mano."""
@@ -1200,6 +1257,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if mon.get_connector() == name:
                 LayerShell.set_monitor(self.win, mon)
                 self.screen_w = mon.get_geometry().width
+                self.screen_h = mon.get_geometry().height
                 self.place()
                 self.flows_monitor()
                 return True
@@ -1227,8 +1285,18 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return
         moved = self.moved()
         LayerShell.set_anchor(win, LayerShell.Edge.LEFT, moved)
+        LayerShell.set_margin(win, LayerShell.Edge.TOP, self.top())
         LayerShell.set_margin(win, LayerShell.Edge.LEFT, self.offset() if moved else 0)
         self.flows_follow()
+
+    def top(self):
+        """Cuánto baja la isla desde el borde de arriba, en px; 0 es su sitio de siempre."""
+        try:
+            screen_h = getattr(self, 'screen_h', 0)
+            low = max(0, screen_h - WIN_H) if screen_h else 4000
+            return round(clamp(float(self.settings.get('position_y', 0)), 0, low))
+        except (TypeError, ValueError):
+            return 0
 
     def moved(self):
         """¿Está fuera de su sitio de siempre?"""
@@ -1236,9 +1304,20 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
 
     def move(self, where):
         """`elyares-ctl move`: `left` y `right` la llevan al siguiente sitio de
-        ese lado, `center` la devuelve al de siempre, y un número del 0 al 100
-        la pone ahí. Se guarda: al volver a arrancar sigue donde la dejaste."""
+        ese lado, `up` y `down` la suben y la bajan, `center` la centra, `reset`
+        la devuelve a arriba al centro, y un número del 0 al 100 la pone ahí.
+        Se guarda: al volver a arrancar sigue donde la dejaste."""
         now = self.position()
+        if where == 'reset':
+            self.settings['position'], self.settings['position_y'] = CENTER, 0
+        elif where in ('up', 'down'):
+            self.settings['position_y'] = self.top() + (STEP_Y if where == 'down' else -STEP_Y)
+            self.settings['position_y'] = self.top()
+        if where in ('reset', 'up', 'down'):
+            settings.save(self.settings)
+            self.place()
+            self.ensure_tick()
+            return
         if where == 'left':
             pos = max((s for s in SLOTS if s < now), default=SLOTS[0])
         elif where == 'right':
@@ -1254,6 +1333,78 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         settings.save(self.settings)
         self.place()
         self.ensure_tick()
+
+    def on_drag_begin(self, gesture, _x, _y):
+        """Mover la isla, como una isla flotante: con Alt + arrastrar o, sin
+        teclado, arrastrando con el botón del medio. Alt solo se ve si la isla
+        tiene el teclado (Wayland no manda los modificadores a quien no lo
+        tiene), así que el botón del medio es el que siempre vale."""
+        self.drag_wait = gesture.get_current_button() == Gdk.BUTTON_MIDDLE
+        self.dragging = bool(gesture.get_current_event_state() & DRAG_MASK)
+        # De dónde parte: el ratón en la pantalla (no en la ventana, que se mueve
+        # con él) y el sitio de la isla.
+        self.drag_start = hypr.cursor_pos()
+        self.drag_from = (self.offset(), self.top())
+        self.drag_last = (0.0, 0.0)
+        if self.dragging:
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        elif not self.drag_wait:
+            gesture.set_state(Gtk.EventSequenceState.DENIED)
+
+    def on_drag_update(self, gesture, dx, dy):
+        if not getattr(self, 'dragging', False):
+            # El del medio espera a moverse: sin moverse es un clic (fijar la isla).
+            if not getattr(self, 'drag_wait', False) or math.hypot(dx, dy) < DRAG_SLOP:
+                return
+            self.dragging = True
+            if gesture is not None:
+                gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        room = max(0, self.screen_w - WIN_W)
+        pos, start = hypr.cursor_pos(), getattr(self, 'drag_start', None)
+        if pos and start:
+            # Lo que se movió el ratón en la pantalla, sobre el sitio de donde se
+            # partió: no depende de si el compositor ya movió la ventana.
+            mx, my = pos[0] - start[0], pos[1] - start[1]
+            if room:
+                self.settings['position'] = clamp((self.drag_from[0] + mx) * 100 / room, 0, 100)
+            self.settings['position_y'] = self.drag_from[1] + my
+        else:
+            # Sin la posición del ratón en la pantalla, el gesto mide desde la
+            # ventana, que se mueve con la isla: lo que cuenta es lo que falta.
+            if room:
+                self.settings['position'] = clamp((self.offset() + dx) * 100 / room, 0, 100)
+            self.settings['position_y'] = self.top() + dy
+        self.settings['position_y'] = self.top()      # dentro de la pantalla: sin esto crecería sin límite
+        self.place()
+        self.ensure_tick()
+
+    def on_drag_end(self, _gesture, _dx, _dy):
+        if getattr(self, 'dragging', False):
+            self.dragging = False
+            settings.save(self.settings)
+
+    def on_monitors_changed(self, *_):
+        """Conectaron o desconectaron una pantalla: se espera a que Hyprland
+        termine de acomodarlas, y la isla vuelve a la suya."""
+        if not getattr(self, 'monitors_id', 0):
+            self.monitors_id = GLib.timeout_add(MONITORS_SETTLE_MS, self.settle_monitor)
+
+    def settle_monitor(self):
+        """Al apagarse y volver a prenderse su pantalla, el compositor deja la
+        isla en otra, con el margen de la que tenía: cae fuera y no se ve. Se
+        vuelve a poner en la suya; si ya no está, se va a la enfocada."""
+        self.monitors_id = 0
+        name = (self.monitor or {}).get('name')
+        if name and self._set_monitor(name):
+            self.monitor = next((m for m in hypr.monitors() if m.get('name') == name), self.monitor)
+            self.region = None
+            self.update_region()
+            return GLib.SOURCE_REMOVE
+        focused = hypr.focused_monitor()
+        if focused:
+            self.monitor = None         # la suya ya no está: no hay de dónde no moverse
+            self.on_focused_monitor(focused['name'])
+        return GLib.SOURCE_REMOVE
 
     def start_monitor(self):
         """El monitor donde arranca la isla: el enfocado o, si quedó fijada,
@@ -1444,7 +1595,11 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if prev and full_h > head:
             self.draw_preview(cr, x0, w, head, prev, below)
         if card and full_h > head:
-            self.draw_card(cr, x0, w, head, card, below)
+            chips = self.reply_chips(mode)
+            if chips:
+                self.draw_reply_chips(cr, x0, w, head, below)
+            self.draw_card(cr, x0, w, head + chips, card - chips, below,
+                           self.board_card() if mode == 'board' else None)
         head += prev + card             # la lista va debajo de la vista previa o de la ficha
         rows = self.rows_for(mode)
         if listed and rows and full_h > head:
@@ -2075,16 +2230,49 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             PangoCairo.show_layout(cr, code)
             y += CODE_LINE_H
 
-    def draw_card(self, cr, x0, w, top, height, alpha):
+    def draw_reply_chips(self, cr, x0, w, top, alpha):
+        """Una pastilla por respuesta de un agente que espera, con su color: un
+        clic pasa a leer esa."""
+        replies = self.replies()
+        shown = self.board_card()
+        x, right = x0 + 14, x0 + w - 14
+        room = (right - x - 6 * (len(replies) - 1)) / len(replies)
+        for i, s in enumerate(replies):
+            color = mascot.rgba(mascot.accent(s.tint))[:3]
+            label = f'{s.where.replace("elyares-", "")} · {s.proj}'
+            layout = self._layout(cr, label, FONT_CODE, room - 26)
+            lw, lh = layout.get_pixel_size()
+            cw = min(room, lw + 26)
+            key = f'rp:{i}'
+            self.buttons[key] = (x, top, cw, REPLY_CHIPS_H - 4)
+            now = s is shown
+            over = self.over(x, top, cw, REPLY_CHIPS_H - 4)
+            mascot.rrect(cr, x, top, cw, REPLY_CHIPS_H - 4, 8)
+            cr.set_source_rgba(*(color if now else (1, 1, 1)), (.28 if now else .12 if over else .05) * alpha)
+            cr.fill()
+            cr.arc(x + 11, top + (REPLY_CHIPS_H - 4) / 2, 3.5, 0, 2 * math.pi)
+            cr.set_source_rgba(*color, alpha)
+            cr.fill()
+            cr.move_to(x + 20, top + (REPLY_CHIPS_H - 4 - lh) / 2)
+            cr.set_source_rgba(*((1, 1, 1) if now or over else rgb(self.colors['dim'])), alpha)
+            PangoCairo.show_layout(cr, layout)
+            x += cw + 6
+
+    def draw_card(self, cr, x0, w, top, height, alpha, s=None):
         """La ficha de una alerta: su detalle y, debajo, sus botones."""
-        s = self.view.session
+        s = s or self.view.session
         self.card_span = (top, top + height)
         left, right = x0 + 14, x0 + w - 14
         body = height - CARD_BUTTONS
         if body:
-            mascot.rrect(cr, left, top + 2, right - left, body - 6, 10)
-            cr.set_source_rgba(1, 1, 1, .05 * alpha)
-            cr.fill()
+            if s.tint:
+                # La respuesta de un agente: con su color, como sus bloques de código.
+                self.draw_tinted(cr, left, top + 2, right - left, body - 6, mascot.rgba(mascot.accent(s.tint))[:3],
+                                 alpha, 10)
+            else:
+                mascot.rrect(cr, left, top + 2, right - left, body - 6, 10)
+                cr.set_source_rgba(1, 1, 1, .05 * alpha)
+                cr.fill()
             tx, y = left + 12, top + PREVIEW_PAD
             if s.where or s.note:
                 # Arriba: de dónde sale a la izquierda, la nota a la derecha.
@@ -2098,10 +2286,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                     end -= 12
                 where = self._layout(cr, s.where, FONT_CODE, end - tx)
                 cr.move_to(tx, y + 2)
-                cr.set_source_rgba(*rgb(self.colors['path']), alpha)
+                cr.set_source_rgba(*(mascot.rgba(mascot.accent(s.tint))[:3] if s.tint else rgb(self.colors['path'])), alpha)
                 PangoCairo.show_layout(cr, where)
                 y += PREVIEW_HEAD
-            for text in s.lines:
+            for text in (s.lines[:REPLY_LINES] if s.reply else s.lines):
                 mark, role, lx = MARK_COLORS.get(text[:1]) if text[1:2] == ' ' else None, 'text', tx
                 if mark:
                     # La marca de una prueba, en su color; el nombre, a su lado.
@@ -2596,6 +2784,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if isinstance(key, str) and key.startswith('chat-'):
                 self.on_chat_button(key)
                 return
+            if isinstance(key, str) and key.startswith('rp:'):
+                # Otra de las respuestas de los agentes, para leerla en la ficha.
+                replies = self.replies()
+                if int(key[3:]) < len(replies):
+                    self.reply_pick, self.pin = replies[int(key[3:])].sid, ''
+                    self.refresh()
+                    self.ensure_tick()
+                return
             if key in ('allow', 'deny'):
                 asking = self.asking()
                 if asking is None:
@@ -2603,7 +2799,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 self.model.decide(asking, key == 'allow')
                 self.refresh()
             else:
-                self.act(self.view.session, key)
+                shown = self.board_card() if self.target() == 'board' else None
+                self.act(shown or self.view.session, key)
             return
         if self.card_span and self.card_span[0] <= y < self.card_span[1]:
             # En la ficha solo cuentan sus botones: un clic que falla uno no
@@ -2666,6 +2863,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                     self.go(s)
                 return
             self.tab, self.focus = key, None
+            self.tab_manual = True
         elif kind == 'member':
             self.focus = key
         elif kind == 'brief':

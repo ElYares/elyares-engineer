@@ -47,7 +47,7 @@ ROLES = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', '
 # researcher van en los dos huecos más anchos que quedaban, entre el amarillo
 # y el verde y entre el rojo y el amarillo.
 ACCENTS = {'architect': '#22c7dd', 'auditor': '#9a6bff', 'reviewer': '#ff6fb5',
-           'designer': '#e052f0', 'mobile': '#d2a679', 'devops': '#a6e84a',
+           'designer': '#e052f0', 'mobile': '#55b8ab', 'devops': '#a6e84a',
            'researcher': '#ff8a4c'}
 
 

@@ -193,6 +193,12 @@ respuesta**, que abre el chat para leerla entera.
   pestaña ya elegida de una sesión del chat, «hablarle ›» en su desglose y
   «Ver respuesta» en su aviso. Los encargos a los demás de la familia
   desde una pestaña van a las conversaciones de ese proyecto y de ningún otro.
+- **Las respuestas esperan a que las atiendas:** cuando un agente termina con
+  el chat cerrado, su aviso («terminó · ver respuesta») se queda hasta 6 horas o
+  hasta que lo atiendas (**Ver respuesta** o **Descartar**). En el tablero la
+  ficha de la respuesta se ve siempre, con el color del agente, sin pasar el
+  ratón; con varias, una fila de pastillas (`agente · proyecto`) deja pasar de
+  una a otra. Descartar una no silencia la siguiente de esa conversación.
 - **El proyecto de una pestaña** es aquel en el que se empezó su conversación,
   y así se llama, aunque Claude acabe trabajando en otra carpeta.
 - **Sin tablero, sigue a tmux:** si no hay ninguna sesión a la vista, el chat
@@ -222,8 +228,12 @@ respuesta**, que abre el chat para leerla entera.
   que está el cursor, con texto antes o después («sube los cambios con /co»).
   Lo elegido entra en su sitio y lo demás se queda como estaba.
 - **La conversación**, al estilo de OpenCode: lo tuyo en un bloque con una
-  barra del color del agente; lo de Claude con su markdown (negritas,
-  `código`, títulos, bloques de código y tablas alineadas), y al acabar cada
+  barra del color del agente; lo de Claude con su markdown y su jerarquía:
+  títulos en su color, **negritas** más claras que el texto, *cursivas*,
+  enlaces subrayados, `código` en el acento del tema, viñetas y números en el
+  color de quien habla (sangradas por nivel), citas con su barra, la raya
+  `---` como una línea suave, un respiro antes de cada título, y bloques de
+  código y tablas alineadas, y al acabar cada
   turno su pie: `▣ agente · modelo · tiempo`. La rueda del ratón la sube.
   **Solo la respuesta:** lo que hace por el camino (sus herramientas y lo que
   va diciendo antes de seguir) no sale en el chat; para eso está el tablero.
@@ -272,6 +282,18 @@ respuesta**, que abre el chat para leerla entera.
 - **Detener / Nuevo / Cerrar**, arriba a la derecha: cortar el turno (también
   Ctrl+C sin nada seleccionado), empezar otra conversación con el mismo
   agente en este proyecto (las de los demás no se tocan), y cerrar el panel.
+- **Otra:** con el mismo agente y en el mismo proyecto, abre una conversación
+  nueva sin tocar la que ya trabaja: sirve para pedirle algo más sin esperar a
+  que acabe. Con más de una, debajo de la cabecera sale la fila de las del
+  agente (`● ` si trabaja, `! ` si espera respuesta; un clic pasa a ella y la ×
+  cierra las que no trabajan; **Nuevo** en una la empieza de cero en su lugar).
+  Hasta 5, con cualquiera de la familia menos el mobile (`chat.SINGLE_AGENTS`).
+  Los que modifican el repo (engineer, mobile, devops; `chat.WRITER_AGENTS`)
+  pueden pisarse si dos trabajan a la vez sobre la misma carpeta: cuando otra
+  conversación suya, o de otro de ellos, está trabajando en el proyecto, el chat
+  saca arriba un aviso ámbar («⚠ otra conversación suya trabaja en esta carpeta:
+  pueden pisarse»). No lo impide; para trabajar de verdad en paralelo, cada una
+  en su `git worktree`. Los workflows siguen usando la de siempre.
 - **El teclado:** mientras escribes, el chat lo toma entero. Esc lo suelta sin
   cerrar el chat y un clic en la caja lo vuelve a tomar; si pasan 90 s sin
   teclear, lo suelta solo.
@@ -362,8 +384,16 @@ ancho de la pantalla: `elyares-ctl move left` y `elyares-ctl move right` la
 llevan al siguiente sitio de ese lado (hay cinco: los dos bordes, el centro y
 los dos puntos medios), `elyares-ctl move center` la devuelve a su sitio y
 `elyares-ctl move 80` la pone en ese punto exacto, de 0 (izquierda) a 100
-(derecha). Sigue pegada arriba: su forma cuelga del borde. El sitio se guarda
-(`position` en `settings.json`) y vale en cualquier monitor: al pasar a otro
+(derecha). También flota: `elyares-ctl move up` y `move down` la suben y la
+bajan (80 px por vez), `move reset` la devuelve arriba al centro, y
+**arrastrando con el botón del medio** la llevas a donde quieras, a lo ancho y a
+lo alto (un clic con él, sin mover, la fija). **Alt + arrastrar** también vale,
+pero Wayland solo le dice a la isla que Alt está pulsado si ella tiene el
+teclado (mientras escribes en el chat), así que no es de fiar. SUPER no sirve:
+Hyprland lo usa para mover ventanas. El arrastre sigue al ratón en la pantalla
+(`hypr.cursor_pos`), no al gesto de la ventana, que va atrasada y se pasaba de
+largo. El sitio se guarda
+(`position` y `position_y` en `settings.json`) y vale en cualquier monitor: al pasar a otro
 queda en el mismo punto de su ancho. Los atajos de mover ventanas de Hyprland
 no sirven aquí, porque la isla es una capa y no una ventana.
 
@@ -855,7 +885,7 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | `elyares-ctl chat [quién] [--dir carpeta]` | abre el chat con Claude, listo para escribir; otra vez lo cierra. Con `architect`, `auditor`, `reviewer` o `engineer`, el de ese agente. Con `--dir`, en el proyecto de esa carpeta |
 | `elyares-ctl projects` | abre el panel de proyectos, para empezar a trabajar en uno; otra vez lo cierra |
 | `elyares-ctl workflows` | abre el panel de workflows: cadenas de agentes que se guardan y se lanzan sobre un proyecto; otra vez lo cierra |
-| `elyares-ctl move <dónde>` | corre la isla a lo ancho de la pantalla: `left` y `right`, al siguiente sitio de ese lado; `center`, a su sitio de siempre; o un número del 0 (izquierda) al 100 (derecha) |
+| `elyares-ctl move <dónde>` | corre la isla a lo ancho de la pantalla: `left` y `right`, al siguiente sitio de ese lado; `center`, a su sitio de siempre; `up` y `down`, la suben y la bajan; `reset`, arriba al centro; o un número del 0 (izquierda) al 100 (derecha) |
 | `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
 | `elyares-ctl compact` | prende o apaga el modo compacto, como el clic derecho |
 | `elyares-ctl pin` | fija la isla abierta con todo a la vista; otra vez, la suelta. Como el clic central |
@@ -884,6 +914,9 @@ bindd = SUPER ALT, O, Engineer: el desglose que sigue, exec, elyares-ctl steps
 bindd = SUPER ALT, H, Engineer: correr a la izquierda, exec, elyares-ctl move left
 bindd = SUPER ALT, L, Engineer: correr a la derecha, exec, elyares-ctl move right
 bindd = SUPER ALT, period, Engineer: volver al centro, exec, elyares-ctl move center
+bindd = SUPER ALT, K, Engineer: subir, exec, elyares-ctl move up
+bindd = SUPER ALT, J, Engineer: bajar, exec, elyares-ctl move down
+bindd = SUPER ALT, comma, Engineer: volver arriba al centro, exec, elyares-ctl move reset
 ```
 
 Fijada, la isla se queda abierta como cuando le pasas el ratón por encima (el
@@ -929,6 +962,10 @@ puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
   decidir si el proceso de Claude no tiene terminal.
 - `AskUserQuestion` y `ExitPlanMode` no llevan botones: piden una respuesta, no
   un permiso.
+  En el chat de la isla, `AskUserQuestion` sí se contesta: el chat se abre en la
+  pregunta con una fila por opción (un clic la elige; si admite varias, se marcan
+  y **Listo** las manda; con varias preguntas van una a una). Lo que escribas en
+  la caja y Enter es «otra respuesta», y **Omitir** la deniega.
 
 ## Notas
 

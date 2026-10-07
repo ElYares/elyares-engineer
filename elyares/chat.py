@@ -79,6 +79,13 @@ MAX_FILES = 4000          # archivos del proyecto que se ofrecen al escribir "@"
 MAX_MENTIONS = 40         # lo que cabe en la lista de "@"
 FILES_SECS = 30           # cada cuánto se vuelven a listar los archivos del proyecto
 DENY_MESSAGE = 'El usuario lo denegó desde el chat de elyares-engineer.'
+QUESTION_TOOL = 'AskUserQuestion'     # pide elegir entre opciones, no permiso
+# Los que modifican el repo: dos conversaciones suyas sobre la misma carpeta
+# pueden pisarse, y la isla avisa cuando pasa. Los demás solo leen y reportan.
+WRITER_AGENTS = ('', 'elyares-mobile', 'elyares-devops')
+# Los que siguen con una sola conversación por proyecto (el mobile, de momento).
+SINGLE_AGENTS = ('elyares-mobile',)
+MAX_CHATS = 5                         # conversaciones de un agente en un proyecto
 
 
 def _tmux(*args):
@@ -182,7 +189,7 @@ def default_effort(model_id, path=None):
 @dataclass
 class Entry:
     """Una cosa de la conversación, como la dibuja la isla."""
-    kind: str                 # you | claude | note | error | foot (el pie de un turno)
+    kind: str                 # you | flow (lo que manda un workflow) | claude | note | error | foot (el pie de un turno)
     text: str
     images: int = 0           # solo en lo tuyo: cuántas imágenes llevaba
 
@@ -308,10 +315,12 @@ class Chat:
         paths = sorted((p for p in self.files if word in p.lower()), key=rank)
         return (found + [(path, '') for path in paths])[:MAX_MENTIONS]
 
-    def send(self, text, images=()):
+    def send(self, text, images=(), shown=None, kind='you'):
         """Le manda a Claude lo que escribiste, con las imágenes pegadas (PNG
         en bytes). Con un turno en curso, Claude lo deja en cola y lo atiende
-        al terminar. False si no había nada."""
+        al terminar. False si no había nada. En la conversación queda `shown`
+        si se da (lo que se ve de un mensaje largo o con instrucciones para
+        Claude) y no `text`; `kind` es 'flow' para lo que manda un workflow."""
         text = text.strip()
         if not text and not images:
             return False
@@ -326,7 +335,7 @@ class Chat:
         if not self._write({'type': 'user', 'message': {'role': 'user', 'content': content}}):
             self._add('error', 'No se pudo hablar con Claude')
             return False
-        self._add('you', text, len(images))
+        self._add(kind, text if shown is None else shown, len(images))
         self.busy, self.cut = True, False
         return True
 
@@ -378,6 +387,35 @@ class Chat:
                     else {'behavior': 'deny', 'message': DENY_MESSAGE})
         if not allow:
             self._add('note', f'Denegado: {ask["text"]}')
+        return self._write({'type': 'control_response',
+                            'response': {'subtype': 'success', 'request_id': ask['id'], 'response': decision}})
+
+    def questions(self):
+        """Las preguntas de opciones que Claude hace ahora, como
+        [{question, header, multi, options: [(label, description)]}]; [] si
+        lo pendiente no es una pregunta."""
+        ask = self.asking
+        if not ask or ask['tool'] != QUESTION_TOOL:
+            return []
+        out = []
+        for q in (ask['input'].get('questions') or [])[:4]:
+            if not isinstance(q, dict) or not isinstance(q.get('question'), str):
+                continue
+            options = [(str(o.get('label') or ''), str(o.get('description') or ''))
+                       for o in q.get('options') or [] if isinstance(o, dict) and o.get('label')]
+            if options:
+                out.append({'question': q['question'], 'header': str(q.get('header') or ''),
+                            'multi': bool(q.get('multiSelect')), 'options': options})
+        return out
+
+    def answer_questions(self, answers):
+        """Contesta las preguntas pendientes: `answers` va de cada pregunta a
+        lo que se eligió (varias opciones, separadas por coma)."""
+        ask, self.asking = self.asking, None
+        if ask is None:
+            return False
+        self._add('note', 'Respondiste: ' + ' · '.join(answers.values()))
+        decision = {'behavior': 'allow', 'updatedInput': {**ask['input'], 'answers': answers}}
         return self._write({'type': 'control_response',
                             'response': {'subtype': 'success', 'request_id': ask['id'], 'response': decision}})
 

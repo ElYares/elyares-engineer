@@ -15,7 +15,7 @@ from unittest import mock
 
 try:
     import cairo
-    from elyares import app, commands, paint, settings, sources
+    from elyares import app, chatview, commands, paint, settings, sources
 except (ImportError, ValueError):       # sin gi o sin gtk4-layer-shell
     app = None
 
@@ -50,8 +50,9 @@ class IslandCase(unittest.TestCase):
         isl.colors = paint.colors()
         isl.markups = {}
         isl.off = isl.hover = isl.expanded = False
-        isl.pin, isl.pointer, isl.buttons = '', None, {}
+        isl.pin, isl.reply_pick, isl.pointer, isl.buttons = '', '', None, {}
         isl.tab, isl.focus, isl.hits, isl.rows = '', None, [], []
+        isl.tab_manual = False
         isl.look, isl.blink_until = [0.0, 0.0], 0.0
         isl.key_since = T
         isl.refresh = lambda: setattr(isl, 'view', isl.model.view(now=T, pin=isl.pin))
@@ -235,6 +236,27 @@ class Fijada(IslandCase):
         self.isl.on_focused_monitor('HDMI-A-1')
         self.assertEqual(self.isl.monitor['name'], 'HDMI-A-1')
         self.assertEqual(self.isl.settings['pinned_monitor'], 'HDMI-A-1')
+
+    def test_si_su_monitor_se_apaga_y_vuelve_la_isla_regresa_a_el(self):
+        self.monitors(focused='HDMI-A-1')
+        self.isl.monitor = {'name': 'HDMI-A-1'}
+        self.isl.settings.update(pinned=True, pinned_monitor='HDMI-A-1')
+        with mock.patch.object(app.GLib, 'timeout_add', return_value=7) as timer:
+            self.isl.on_monitors_changed()
+            self.isl.on_monitors_changed()      # se fue y volvió: un solo reloj
+        timer.assert_called_once_with(app.MONITORS_SETTLE_MS, self.isl.settle_monitor)
+        # El compositor la dejó en otro: se vuelve a poner en el suyo.
+        self.isl.settle_monitor()
+        self.isl._set_monitor.assert_called_once_with('HDMI-A-1')
+        self.assertEqual(self.isl.settings['pinned_monitor'], 'HDMI-A-1')
+        self.assertEqual(self.isl.monitors_id, 0)
+
+    def test_si_su_monitor_ya_no_esta_se_va_al_enfocado(self):
+        self.monitors(focused='DP-1', names=('DP-1',))
+        self.isl.monitor = {'name': 'HDMI-A-1'}
+        self.isl._set_monitor = mock.Mock(side_effect=lambda name: name == 'DP-1')
+        self.isl.settle_monitor()
+        self.assertEqual(self.isl.monitor['name'], 'DP-1')
 
     def test_fijada_arranca_en_el_monitor_donde_se_fijo(self):
         self.monitors(focused='HDMI-A-1')
@@ -492,6 +514,66 @@ class Tablero(Dibujo):
         self.assertEqual(self.isl.target(), 'board')
         self.assertEqual(self.isl.goal()[0], app.BOARD_W)
 
+    def reply(self, agent, tint, proj, at=0):
+        self.isl.model.handle({'event': 'alert', 'session_id': f'chat:{agent}', 'name': proj, 'tone': 'ok',
+                               'message': f'{agent} terminó', 'where': agent, 'note': 'Sonnet 5.5', 'tint': tint,
+                               'ttl': app.chatview.CHAT_REPLY_SECS, 'lines': [f'Respuesta de {tint}:', '- uno'],
+                               'actions': [{'label': 'Ver respuesta', 'chat': f'chat:{agent}', 'after': 'clear'}]},
+                              now=T + at)
+        self.isl.refresh()
+
+    def test_las_respuestas_de_los_agentes_se_ven_siempre_en_el_tablero(self):
+        self.work('a')
+        self.isl.expanded = True
+        self.reply('elyares-reviewer', 'reviewer', 'api')
+        self.assertEqual(self.isl.target(), 'board')
+        self.isl.hover = self.isl.expanded = False
+        self.isl.hover = True                       # basta con tener el tablero a la vista
+        self.draw()
+        self.assertIn('Respuesta de reviewer:', self.shown)
+        self.assertIn('Ver respuesta', self.shown)
+        self.assertNotIn('rp:0', self.isl.buttons)                  # con una sola, sin fila de nombres
+        height = app.PREVIEW_HEAD + 2 * app.CODE_LINE_H + 2 * app.PREVIEW_PAD + app.CARD_BUTTONS
+        self.assertEqual(self.isl.card_h('board'), height)
+
+    def test_con_varias_respuestas_hay_una_fila_para_pasar_de_una_a_otra(self):
+        self.work('a')
+        self.isl.hover = True
+        self.reply('elyares-reviewer', 'reviewer', 'api', at=1)
+        self.reply('elyares-auditor', 'auditor', 'web', at=2)
+        self.reply('elyares-designer', 'designer', 'app', at=3)
+        self.draw()
+        self.assertEqual([k for k in self.isl.buttons if str(k).startswith('rp:')], ['rp:0', 'rp:1', 'rp:2'])
+        self.assertIn('Respuesta de designer:', self.shown)            # la última, al frente
+        self.assertEqual(self.isl.rows_for('board'), [])               # no se repiten como filas
+        self.assertIn('designer · app', self.shown)
+        self.assertIn('reviewer · api', self.shown)
+        self.assertEqual(self.isl.card_h('board'),
+                         app.PREVIEW_HEAD + 2 * app.CODE_LINE_H + 2 * app.PREVIEW_PAD + app.CARD_BUTTONS
+                         + app.REPLY_CHIPS_H)
+        x, y, w, h = self.isl.buttons['rp:2']                          # la más vieja: el reviewer
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.draw()
+        self.assertIn('Respuesta de reviewer:', self.shown)
+        # Descartar quita la que se ve; las demás se quedan.
+        x, y, w, h = self.isl.buttons['dismiss']
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.assertEqual([s.tint for s in self.isl.replies()], ['designer', 'auditor'])
+
+    def test_la_mas_alta_de_las_respuestas_con_su_fila_cabe_en_el_tablero(self):
+        room = app.BOARD_MAX - (app.TABS_H + app.BOARD_H + app.BOARD_PAD)
+        tallest = (app.PREVIEW_HEAD + app.REPLY_LINES * app.CODE_LINE_H + 2 * app.PREVIEW_PAD + app.CARD_BUTTONS
+                   + app.REPLY_CHIPS_H)
+        self.assertLessEqual(tallest, room - app.ALERT_ROWS * app.ROW_H - app.LIST_PAD)
+
+    def test_descartar_una_respuesta_no_silencia_la_siguiente_de_esa_conversacion(self):
+        self.reply('elyares-reviewer', 'reviewer', 'api')
+        s = self.isl.model.sessions['chat:elyares-reviewer']
+        self.isl.act(s, 'dismiss')
+        self.assertEqual(self.isl.model.sessions, {})
+        self.reply('elyares-reviewer', 'reviewer', 'api', at=5)
+        self.assertIn('chat:elyares-reviewer', self.isl.model.sessions)    # sigue saliendo
+
     def test_los_que_trabajan_al_frente_y_los_libres_a_la_banca(self):
         self.isl.expanded = True
         self.send('start')
@@ -696,6 +778,22 @@ class Tablero(Dibujo):
         self.isl.follow(self.isl.model.view(now=T + 20))
         self.assertEqual(self.isl.tab, 'a')
 
+    def test_la_pestana_que_elegiste_se_queda_aunque_otra_trabaje_o_termine(self):
+        self.work('a')
+        self.work('b')
+        self.isl.tab, self.isl.tab_manual = 'a', True
+        self.isl.view = self.isl.model.view(now=T + 1)
+        # `b` termina: la pestaña elegida a mano no se va tras ella.
+        self.isl.model.handle({'event': 'stop', 'session_id': 'b', 'cwd': '/x/b'}, now=T + 3)
+        self.isl.follow(self.isl.model.view(now=T + 3))
+        self.assertEqual(self.isl.tab, 'a')
+        # Un permiso sí: no debe quedarse tapado.
+        self.isl.view = self.isl.model.view(now=T + 3)
+        self.isl.model.handle({'event': 'ask', 'session_id': 'b', 'cwd': '/x/b', 'tool_name': 'Bash',
+                               'tool_input': {'command': 'ls'}}, FakeReq(), now=T + 4)
+        self.isl.follow(self.isl.model.view(now=T + 4))
+        self.assertEqual((self.isl.tab, self.isl.tab_manual), ('b', False))
+
     def test_el_permiso_va_en_la_tarjeta_del_que_lo_pide(self):
         self.isl.expanded = True
         self.work('b')
@@ -871,6 +969,196 @@ class Chat(Dibujo):
         self.isl.on_click(None, 1, x + w / 2, y + h / 2)
         c.answer.assert_called_once_with(True)
 
+    def ask_questions(self, *questions):
+        c = self.conversation()
+        c.busy = True
+        c.asking = {'id': 'r-9', 'tool': 'AskUserQuestion', 'text': 'Pregunta',
+                    'input': {'questions': list(questions)}}
+        c.answer_questions = mock.Mock()
+        c.answer = mock.Mock()
+        self.draw()
+        return c
+
+    def click(self, key):
+        x, y, w, h = self.isl.buttons[key]
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.draw()
+
+    def reviewer(self, agent='elyares-reviewer'):
+        """La conversación de uno de la familia, ya registrada y a la vista."""
+        E = app.chatview.chat.Entry
+        c = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock(), agent=agent)
+        c.entries = [E('you', 'revisa el PR 12 por favor'), E('claude', 'Va')]
+        self.isl.chats[self.isl.chat_key(agent, '/x/proj')] = c
+        self.isl.chat, self.isl.chat_open = c, True
+        return c
+
+    def test_un_agente_de_solo_lectura_abre_otra_conversacion_sin_esperar(self):
+        first = self.reviewer()
+        first.busy = True
+        self.draw()
+        self.assertIn('Otra', self.shown)
+        self.assertNotIn('1 · revisa el PR 12', ' '.join(self.shown))     # con una sola no hay fila
+        self.assertIn('split', self.hit('chat'))
+        self.isl.on_chat_hit('split')
+        second = self.isl.chat
+        self.assertIsNot(second, first)
+        self.assertTrue(first.busy)                         # la que trabajaba sigue como estaba
+        self.assertEqual((second.agent, second.cwd, second.entries), ('elyares-reviewer', '/x/proj', []))
+        self.assertEqual(self.isl.chat_family(), [first, second])
+        self.assertTrue(self.isl.chat_busy())
+        self.draw()
+        self.assertIn('● 1 · revisa el PR 12…', self.shown)  # la que trabaja lleva su punto
+        self.assertIn('2 · nueva', self.shown)
+        self.assertEqual({'conv:0', 'conv:1', 'drop:1'} - set(self.hit('chat')), set())
+        self.assertNotIn('drop:0', self.hit('chat'))        # la de siempre no se cierra
+        self.isl.on_chat_hit('conv:0')
+        self.assertIs(self.isl.chat, first)
+
+    def test_el_mobile_sigue_con_una_sola_y_el_engineer_y_el_devops_ya_pueden_tener_otra(self):
+        c = self.reviewer('elyares-mobile')
+        self.draw()
+        self.assertNotIn('Otra', self.shown)
+        self.isl.chat_split()
+        self.assertEqual(self.isl.chat_family(), [c])
+        for agent in ('', 'elyares-devops'):
+            c = self.reviewer(agent)
+            self.draw()
+            self.assertIn('Otra', self.shown)
+            self.isl.chat_split()
+            self.assertEqual(len(self.isl.chat_family()), 2)
+
+    def test_avisa_si_otro_que_modifica_el_repo_trabaja_en_la_misma_carpeta(self):
+        first = self.reviewer('')
+        self.isl.chat_split()
+        second = self.isl.chat
+        self.assertEqual(self.isl.chat_clash(), [])
+        first.busy = True
+        self.assertEqual(self.isl.chat_clash(), ['otra conversación suya'])
+        self.assertEqual(self.isl.chat_clash(first), [])           # ella misma no cuenta
+        self.draw()
+        self.assertIn('⚠ otra conversación suya trabaja en esta carpeta: pueden pisarse', self.shown)
+        # Otro agente que también modifica el repo, en la misma carpeta.
+        devops = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock(), agent='elyares-devops')
+        devops.busy = True
+        self.isl.chats[self.isl.chat_key('elyares-devops', '/x/proj')] = devops
+        self.assertEqual(self.isl.chat_clash(second), ['otra conversación suya', 'elyares-devops'])
+        # Otro proyecto no cuenta, y uno de solo lectura no avisa ni se le avisa.
+        devops.cwd = '/y/otro'
+        self.assertEqual(self.isl.chat_clash(second), ['otra conversación suya'])
+        second.agent = 'elyares-reviewer'
+        self.assertEqual(self.isl.chat_clash(second), [])
+
+    def test_hay_un_tope_de_conversaciones_por_agente(self):
+        self.reviewer()
+        for _ in range(10):
+            self.isl.chat_split()
+        self.assertEqual(len(self.isl.chat_family()), app.chatview.chat.MAX_CHATS)
+        self.draw()
+        self.assertNotIn('Otra', self.shown)
+
+    def test_una_de_las_otras_se_cierra_con_su_x_salvo_si_trabaja(self):
+        first = self.reviewer()
+        self.isl.chat_split()
+        second = self.isl.chat
+        second.busy = True
+        self.isl.chat_drop(1)
+        self.assertEqual(self.isl.chat_family(), [first, second])
+        second.busy = False
+        self.isl.chat_drop(0)                               # la de siempre se queda
+        self.assertEqual(self.isl.chat_family(), [first, second])
+        self.isl.chat_drop(1)
+        self.assertEqual(self.isl.chat_family(), [first])
+        self.assertIs(self.isl.chat, first)                 # a la vista queda la anterior
+
+    def test_nuevo_en_una_de_las_otras_la_empieza_de_cero_en_su_lugar(self):
+        first = self.reviewer()
+        self.isl.chat_split()
+        second = self.isl.chat
+        second.entries.append(app.chatview.chat.Entry('you', 'otro tema'))
+        self.isl.new_chat()
+        self.assertIsNot(self.isl.chat, second)
+        self.assertEqual(self.isl.chat_family(), [first, self.isl.chat])
+        self.assertEqual(self.isl.chat.entries, [])
+
+    def test_al_volver_la_conversacion_a_la_vista_tiene_su_pestana_en_el_tablero(self):
+        c = self.reviewer('')
+        c.session = 's-chat'
+        data = self.isl.chat_dump()
+        self.isl.chats.clear()
+        self.isl.chat_extra.clear()
+        self.isl.chat = None
+        self.isl.model.sessions.clear()
+        self.isl.chat_restore(data)
+        s = self.isl.model.sessions['s-chat']
+        self.assertEqual((s.cwd, s.state, s.used), ('/x/proj', 'idle', True))
+        self.isl.refresh()
+        self.assertEqual([t.sid for t in self.isl.tabs()], ['s-chat'])
+
+    def test_las_conversaciones_de_la_fila_sobreviven_a_un_reinicio(self):
+        first = self.reviewer()
+        self.isl.chat_split()
+        second = self.isl.chat
+        second.entries.append(app.chatview.chat.Entry('you', 'otro tema'))
+        data = self.isl.chat_dump()
+        self.assertEqual([bool(c.get('extra')) for c in data['chats']], [False, True])
+        self.isl.chats.clear()
+        self.isl.chat_extra.clear()
+        self.isl.chat = None
+        self.isl.chat_restore(data)
+        family = self.isl.chat_family(self.isl.chat)
+        self.assertEqual([c.entries[0].text for c in family], ['revisa el PR 12 por favor', 'otro tema'])
+        self.assertIs(self.isl.chat, family[1])             # la que se veía
+
+    def test_una_pregunta_de_opciones_se_contesta_con_un_clic(self):
+        one = {'question': '¿Qué base?', 'header': 'Base', 'multiSelect': False,
+               'options': [{'label': 'Postgres', 'description': 'relacional'}, {'label': 'SQLite'}]}
+        c = self.ask_questions(one)
+        for text in ('Te pregunta', 'Base', '¿Qué base?', 'Postgres', 'relacional', 'SQLite', 'Omitir'):
+            self.assertIn(text, self.shown)
+        self.assertNotIn('Permitir', self.shown)
+        self.click('chat-opt:1')
+        c.answer_questions.assert_called_once_with({'¿Qué base?': 'SQLite'})
+        c.answer.assert_not_called()
+
+    def test_en_una_pregunta_de_varias_opciones_se_marca_y_listo_las_manda(self):
+        many = {'question': '¿Qué incluir?', 'header': 'Incluir', 'multiSelect': True,
+                'options': [{'label': 'Tests'}, {'label': 'Docs'}, {'label': 'CI'}]}
+        c = self.ask_questions(many)
+        self.assertNotIn('Listo', self.shown)
+        self.click('chat-opt:0')
+        self.click('chat-opt:2')
+        self.assertIn('Listo', self.shown)
+        c.answer_questions.assert_not_called()
+        self.click('chat-opt:0')                    # se desmarca
+        self.click('chat-next')
+        c.answer_questions.assert_called_once_with({'¿Qué incluir?': 'CI'})
+
+    def test_varias_preguntas_van_una_a_una_y_se_mandan_juntas(self):
+        a = {'question': 'Uno', 'options': [{'label': 'a1'}, {'label': 'a2'}]}
+        b = {'question': 'Dos', 'options': [{'label': 'b1'}, {'label': 'b2'}]}
+        c = self.ask_questions(a, b)
+        self.assertIn('Te pregunta · 1 de 2', self.shown)
+        self.click('chat-opt:1')
+        c.answer_questions.assert_not_called()
+        self.assertIn('Te pregunta · 2 de 2', self.shown)
+        self.click('chat-opt:0')
+        c.answer_questions.assert_called_once_with({'Uno': 'a2', 'Dos': 'b1'})
+
+    def test_lo_escrito_con_una_pregunta_delante_es_otra_respuesta(self):
+        c = self.ask_questions({'question': '¿Qué base?', 'options': [{'label': 'Postgres'}, {'label': 'SQLite'}]})
+        self.isl.chat_text = lambda: ' Mongo '
+        self.isl.chat_set_text = mock.Mock()
+        self.isl.on_chat_enter()
+        c.answer_questions.assert_called_once_with({'¿Qué base?': 'Mongo'})
+        self.isl.chat_set_text.assert_called_once_with('')
+
+    def test_omitir_una_pregunta_la_deniega(self):
+        c = self.ask_questions({'question': '¿Qué base?', 'options': [{'label': 'Postgres'}, {'label': 'SQLite'}]})
+        self.click('chat-deny')
+        c.answer.assert_called_once_with(False)
+        c.answer_questions.assert_not_called()
+
     def test_al_mandar_se_cierra_y_se_ve_trabajar_en_el_tablero(self):
         c = self.conversation()
         c.send = mock.Mock(return_value=True)
@@ -904,6 +1192,18 @@ class Chat(Dibujo):
         self.isl.on_click(None, 1, x + w / 2, y + h / 2)
         c.answer.assert_called_once_with(True)
 
+    def test_una_pregunta_del_chat_abre_el_chat_y_no_va_al_tablero(self):
+        c = self.conversation()
+        self.isl.chat_open = False
+        c.session = 's-chat'
+        self.isl.on_chat({'type': 'control_request', 'request_id': 'r', 'request': {
+            'subtype': 'can_use_tool', 'tool_name': 'AskUserQuestion',
+            'input': {'questions': [{'question': '¿Cuál?', 'options': [{'label': 'A'}, {'label': 'B'}]}]}}})
+        self.assertTrue(self.isl.chat_open)         # Permitir no es una respuesta: se contesta en el chat
+        self.assertIsNone(self.isl.model.sessions['s-chat'].ask if 's-chat' in self.isl.model.sessions else None)
+        self.draw()
+        self.assertIn('¿Cuál?', self.shown)
+
     def test_al_terminar_avisa_con_el_principio_de_la_respuesta(self):
         c = self.conversation()
         self.isl.chat_open = False
@@ -925,6 +1225,18 @@ class Chat(Dibujo):
         self.isl.on_click(None, 1, x + w / 2, y + h / 2)
         self.assertTrue(self.isl.chat_open)
         self.assertIs(self.isl.chat, c)
+        self.assertNotIn('chat:s-chat', self.isl.model.sessions)
+
+    def test_el_aviso_de_terminado_se_va_cuando_empieza_otro_turno(self):
+        c = self.conversation()
+        self.isl.chat_open = False
+        c.session, c.busy = 's-chat', True
+        c.entries.append(app.chatview.chat.Entry('claude', 'Listo.'))
+        self.isl.on_chat({'type': 'result', 'subtype': 'success', 'duration_ms': 1000})
+        self.assertIn('chat:s-chat', self.isl.model.sessions)
+        # Se le manda otra cosa: el «terminó» de antes ya no es verdad.
+        c.busy = True
+        self.isl.on_chat({'type': 'system', 'subtype': 'init', 'session_id': 's-chat'})
         self.assertNotIn('chat:s-chat', self.isl.model.sessions)
 
     def test_cada_agente_tiene_su_conversacion(self):
@@ -1433,6 +1745,24 @@ class Chat(Dibujo):
         self.draw()
         self.assertNotIn('copy:4', self.hit('chat'))
 
+    def test_un_enlace_de_la_respuesta_se_copia_solo(self):
+        c = self.conversation()
+        E = app.chatview.chat.Entry
+        c.entries[1].text = 'Para verlo: https://claude.ai/code/artifact/abc-1.'
+        c.entries.append(E('foot', 'elyares-designer · Sonnet · 3 s'))
+        self.draw()
+        self.assertIn('copiar enlace', self.shown)
+        with mock.patch.object(app.chatview.subprocess, 'run') as run:
+            self.isl.on_chat_hit('url:2:0')
+        # Solo el enlace, sin la frase ni el punto con el que acaba.
+        self.assertEqual(run.call_args.kwargs['input'].decode(), 'https://claude.ai/code/artifact/abc-1')
+        self.draw()
+        self.assertIn('enlace copiado ✓', self.shown)
+        # Con dos, cada uno con su número.
+        c.entries[1].text = 'a https://a.dev/x y https://b.dev/y'
+        self.draw()
+        self.assertIn('copiar enlace 2', self.shown)
+
     def test_lo_de_un_agente_se_le_pasa_al_engineer(self):
         self.isl.open_chat()
         engineer = self.isl.chat
@@ -1704,6 +2034,75 @@ class Mover(IslandCase):
         # Se guarda: al volver a arrancar sigue donde se dejó.
         self.assertEqual(app.settings.save.call_args[0][0]['position'], 0)
 
+    def test_sube_baja_y_vuelve_arriba_al_centro(self):
+        self.isl.screen_h = 1440
+        top = lambda: self.shell.set_margin.call_args_list[-2][0][2]
+        for where, want in (('down', app.STEP_Y), ('down', 2 * app.STEP_Y), ('up', app.STEP_Y), ('up', 0), ('up', 0)):
+            self.isl.on_control('move', {'where': where})
+            self.assertEqual((self.isl.settings['position_y'], top()), (want, want))
+        self.isl.on_control('move', {'where': 'right'})
+        self.isl.on_control('move', {'where': 'down'})
+        self.isl.on_control('move', {'where': 'reset'})
+        self.assertEqual((self.isl.settings['position'], self.isl.settings['position_y'], top()), (50, 0, 0))
+
+    def test_clic_derecho_con_el_chat_abierto_lo_cierra_y_achica_la_isla(self):
+        self.isl.chat_open, self.isl.settings['compact'] = True, False
+        with mock.patch.object(chatview, 'LayerShell'):
+            self.isl.toggle_compact()
+        self.assertEqual((self.isl.chat_open, self.isl.settings['compact']), (False, True))
+
+    def test_el_arrastre_no_guarda_un_sitio_fuera_de_la_pantalla(self):
+        self.isl.screen_h = 1440
+        self.isl.dragging = True
+        for dy in (-90, -90, 5000):
+            self.isl.on_drag_update(None, 0, dy)
+            self.assertTrue(0 <= self.isl.settings['position_y'] <= 1440 - app.WIN_H)
+
+    def drag(self, button, start, *moves, alt=False):
+        """Un arrastre con el ratón en la pantalla: parte de `start` y pasa por `moves`."""
+        gesture = mock.Mock()
+        gesture.get_current_button.return_value = button
+        gesture.get_current_event_state.return_value = app.DRAG_MASK if alt else 0
+        with mock.patch.object(app.hypr, 'cursor_pos', return_value=start):
+            self.isl.on_drag_begin(gesture, 0, 0)
+        for (x, y), (dx, dy) in moves:
+            with mock.patch.object(app.hypr, 'cursor_pos', return_value=(x, y)):
+                self.isl.on_drag_update(gesture, dx, dy)
+        return gesture
+
+    def test_el_arrastre_sigue_al_ratón_en_la_pantalla_aunque_la_ventana_vaya_atrasada(self):
+        self.isl.screen_h, self.isl.screen_w = 1440, 3440
+        self.isl.settings['position'], self.isl.settings['position_y'] = 50, 100
+        first, y0 = self.isl.offset(), self.isl.top()
+        # El compositor aún no movió la ventana: el gesto sigue diciendo lo mismo en cada
+        # evento, y la isla no se pasa de largo.
+        self.drag(app.Gdk.BUTTON_PRIMARY, (1000, 500), ((1100, 530), (100, 30)), ((1100, 530), (100, 30)),
+                  ((1100, 530), (100, 30)), alt=True)
+        self.assertEqual(self.isl.top(), y0 + 30)
+        self.assertEqual(self.isl.offset(), first + 100)
+
+    def test_el_botón_del_medio_arrastra_sin_alt_pero_un_clic_no_mueve_nada(self):
+        self.isl.screen_h, self.isl.screen_w = 1440, 3440
+        before = (self.isl.settings['position'], self.isl.settings['position_y'])
+        gesture = self.drag(app.Gdk.BUTTON_MIDDLE, (1000, 500), ((1002, 501), (2, 1)))
+        self.assertFalse(self.isl.dragging)
+        self.assertEqual((self.isl.settings['position'], self.isl.settings['position_y']), before)
+        gesture.set_state.assert_not_called()
+        self.drag(app.Gdk.BUTTON_MIDDLE, (1000, 500), ((1040, 560), (40, 60)))
+        self.assertTrue(self.isl.dragging)
+        self.assertEqual(self.isl.top(), 60)
+
+    def test_el_botón_izquierdo_sin_alt_no_arrastra(self):
+        gesture = self.drag(app.Gdk.BUTTON_PRIMARY, (1000, 500), ((1040, 560), (40, 60)))
+        self.assertFalse(self.isl.dragging)
+        gesture.set_state.assert_called_once_with(app.Gtk.EventSequenceState.DENIED)
+
+    def test_no_baja_mas_de_lo_que_cabe_en_la_pantalla(self):
+        self.isl.screen_h = app.WIN_H + 100
+        self.isl.settings['position_y'] = 90
+        self.isl.on_control('move', {'where': 'down'})
+        self.assertEqual(self.isl.settings['position_y'], 100)
+
     def test_tambien_a_un_punto_cualquiera(self):
         self.isl.on_control('move', {'where': '10'})
         self.assertEqual((self.isl.settings['position'], self.placed()), (10, (True, round((3440 - app.WIN_W) * .1))))
@@ -1888,6 +2287,32 @@ class Ficha(IslandCase):
         self.isl.draw_card(cairo.Context(surface), 20, app.PREVIEW_W, app.OPEN_H, height, 1)
         self.assertEqual(set(self.isl.buttons), {'dismiss', 0})
 
+    def reply_card(self, tint):
+        self.isl.model.handle({'event': 'alert', 'session_id': 'chat:s1', 'name': 'proj', 'tone': 'ok',
+                               'message': 'terminó', 'where': 'elyares-reviewer', 'note': 'Sonnet 5.5',
+                               'tint': tint, 'lines': ['Revisé el PR 12:', '- falta un test', '- el nombre engaña'],
+                               'actions': [{'label': 'Ver respuesta', 'chat': 's1'}]}, now=T)
+        self.isl.refresh()
+        return self.isl.model.sessions['chat:s1']
+
+    def test_la_respuesta_de_un_agente_tiñe_su_ficha_con_su_color(self):
+        self.assertEqual(self.reply_card('reviewer').tint, 'reviewer')
+        self.assertEqual(self.reply_card('no-existe').tint, '')       # un personaje que no hay: sin tinte
+        s = self.reply_card('reviewer')
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, app.WIN_W, app.WIN_H)
+        cr = cairo.Context(surface)
+        height = app.PREVIEW_HEAD + 3 * app.CODE_LINE_H + 2 * app.PREVIEW_PAD + app.CARD_BUTTONS
+        self.isl.draw_card(cr, 20, app.PREVIEW_W, app.OPEN_H, height, 1)
+        # La barra del agente, en el borde derecho de la ficha, con el color del reviewer.
+        r, g, b, _ = app.mascot.rgba(app.mascot.accent('reviewer'))
+        x, y = int(20 + app.PREVIEW_W - 14 - 1), int(app.OPEN_H + 20)
+        data = surface.get_data()
+        px = surface.get_stride() * y + 4 * x
+        blue, green, red = data[px], data[px + 1], data[px + 2]
+        self.assertAlmostEqual(red / 255, r, delta=.05)
+        self.assertAlmostEqual(green / 255, g, delta=.05)
+        self.assertAlmostEqual(blue / 255, b, delta=.05)
+
     def test_la_ficha_mas_alta_cabe_en_la_ventana(self):
         tallest = (app.PREVIEW_HEAD + state.CARD_LINES * app.CODE_LINE_H + 2 * app.PREVIEW_PAD
                    + app.CARD_BUTTONS)
@@ -1963,7 +2388,8 @@ class Flujos(IslandCase):
         self.isl.workflow_launch(self.flow)
         run = self.isl.wf_run
         designer = self.chats['elyares-designer']
-        designer.send.assert_called_once_with('propón' + app.workflowview.workflows.RULE)
+        designer.send.assert_called_once_with('propón' + app.workflowview.workflows.RULE,
+                                              shown='propón\n\n**Paso 1 de 2** · workflow «revisar»', kind='flow')
         self.assertEqual((run.index, self.isl.wf_screen), (0, 'run'))
         self.assertNotIn('', self.chats)                # el engineer aún no sabe nada
         # Lo que llega de otro chat no mueve el workflow.
@@ -1973,8 +2399,12 @@ class Flujos(IslandCase):
             self.done('elyares-designer')
         notice.assert_not_called()                      # un paso intermedio no avisa: sigue el siguiente
         sent = self.chats[''].send.call_args.args[0]
+        shown = self.chats[''].send.call_args.kwargs['shown']
         self.assertTrue(sent.startswith('hazlo'))
         self.assertIn('lo de elyares-designer', sent)
+        # En el chat se ve la instrucción y de qué paso es, no las reglas para el agente.
+        self.assertIn('Recibe lo que dejó el paso 1 (**elyares-designer**)', shown)
+        self.assertNotIn('PASO FALLIDO', shown)
         self.assertEqual(run.index, 1)
         self.done('')
         self.assertTrue(run.done)
@@ -2022,7 +2452,8 @@ class Flujos(IslandCase):
         self.isl.workflow_launch(self.flow)
         run = self.isl.wf_run
         self.assertEqual((run.failed, run.index), (0, 1))
-        self.chats[''].send.assert_called_once_with('hazlo' + app.workflowview.workflows.RULE)
+        self.chats[''].send.assert_called_once_with('hazlo' + app.workflowview.workflows.RULE,
+                                                    shown='hazlo\n\n**Paso 2 de 2** · workflow «revisar»', kind='flow')
 
     def test_detener_corta_el_turno_y_no_sigue(self):
         self.isl.workflow_launch(self.flow)
@@ -2292,6 +2723,28 @@ class FlujosDibujo(IslandCase):
         isl.open_workflows('run')
         self.assertFalse(isl.wf_collapsed)
         self.assertEqual(isl.wf_screen, 'run')
+
+    def test_lo_que_manda_un_workflow_se_ve_en_markdown(self):
+        isl = self.isl
+        c = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock())
+        E = app.chatview.chat.Entry
+        c.entries = [E('flow', 'ejecuta /pr\n\n**Paso 2 de 4** · workflow «close-work»\n\n'
+                               'Recibe lo que dejó el paso 1 (**elyares-devops**):\n\n- un `commit` nuevo'),
+                     E('foot', 'x')]
+        isl.chat, isl.chat_open = c, True
+        isl.chat_cache = {}
+        layout, _, _ = isl.chat_layout(self.cr, 0, c.entries[0], 560)
+        markup = layout.get_attributes()
+        self.assertIsNotNone(markup)                    # tiene negritas y código: no es texto plano
+        self.assertIn('•', layout.get_text())            # la viñeta, no el guion
+        self.assertNotIn('**', layout.get_text())
+        self.assertNotIn('`', layout.get_text())
+        # Lo que escribes tú sigue siendo texto tal cual.
+        plain, _, _ = isl.chat_layout(self.cr, 1, E('you', 'haz **esto**'), 560)
+        self.assertIn('**', plain.get_text())
+        # «copiar» de la respuesta de un agente no se lleva lo que mandó el workflow.
+        c.entries = [E('flow', 'x'), E('claude', 'hecho'), E('foot', 'y')]
+        self.assertEqual(isl.chat_reply_at(2), 'hecho')
 
     def test_la_lista_el_editor_y_sus_menus(self):
         isl = self.isl

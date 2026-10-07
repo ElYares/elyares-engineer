@@ -312,6 +312,7 @@ class Session:
     ttl: float = 0            # solo en alertas: segundos que dura sin novedades (0 = ALERT_SECS)
     where: str = ''           # solo en alertas: de dónde sale el detalle (archivo:línea, contenedor)
     note: str = ''            # solo en alertas: lo que va a la derecha de `where`
+    tint: str = ''            # solo en alertas: el personaje cuyo color tiñe su ficha (la respuesta de un agente)
     lines: list = field(default_factory=list)     # solo en alertas: el detalle; no se guarda
     actions: list = field(default_factory=list)   # solo en alertas: sus botones; no se guardan
     context: float = 0        # % de la ventana de contexto que lleva usada la sesión
@@ -338,6 +339,11 @@ class Session:
     def card(self):
         """¿Es una alerta con ficha (detalle o botones) que mostrar?"""
         return self.state == 'alert' and bool(self.lines or self.actions)
+
+    @property
+    def reply(self):
+        """¿Es la respuesta de un agente (un aviso de «terminó»)?"""
+        return self.state == 'alert' and bool(self.tint)
 
     @property
     def lead(self):
@@ -553,6 +559,7 @@ class Model:
             s.ttl = ttl
             s.where, s.note = short(msg.get('where'), 120), short(msg.get('note'), 60)
             s.lines, s.actions = card_lines(msg.get('lines')), card_actions(msg.get('actions'))
+            s.tint = msg.get('tint') if msg.get('tint') in TEAM else ''
             s.tests = bool(msg.get('tests'))
             s.set('alert', short(msg.get('message'), 300), now)
             return
@@ -729,7 +736,8 @@ class Model:
     def dismiss(self, s, now=None, cooldown=True):
         """Quita una alerta porque ya se atendió con un clic. Sin cooldown puede
         volver enseguida: es lo que toca tras intentar arreglar el problema."""
-        if self.sessions.pop(s.sid, None) is not None and cooldown:
+        # Una respuesta descartada no silencia a la siguiente de esa conversación: es otra noticia.
+        if self.sessions.pop(s.sid, None) is not None and cooldown and not s.tint:
             self.dismissed[s.sid] = now or time.monotonic()
 
     def gone(self, req, now=None):
@@ -776,13 +784,15 @@ class Model:
             self.sessions.pop(sid).release()
         return bool(dead)
 
-    def reap(self, alive):
+    def reap(self, alive, keep=()):
         """Olvida las sesiones cuyo proceso de Claude ya no existe: las que se
         cerraron sin avisar y no tienen un pane por el que preguntar (las de
-        segundo plano). `alive(proc)` dice si el proceso sigue ahí. True si
-        quitó alguna."""
+        segundo plano). `alive(proc)` dice si el proceso sigue ahí. `keep` son
+        las que no se olvidan aunque su proceso no esté: las de una conversación
+        del chat, que se duerme o se cierra con la isla y se retoma al escribirle.
+        True si quitó alguna."""
         dead = [sid for sid, s in self.sessions.items()
-                if s.proc and s.state != 'alert' and not alive(s.proc)]
+                if s.proc and s.state != 'alert' and sid not in keep and not alive(s.proc)]
         for sid in dead:
             self.sessions.pop(sid).release()
         return bool(dead)

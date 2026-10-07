@@ -175,7 +175,7 @@ class WorkflowView:
                 c = self.chat_for(workflows.chat_agent(step.agent), run.w.project)
                 if c.busy:
                     why = 'está ocupado con otro turno'
-                elif not c.send(run.prompt(i)):
+                elif not c.send(run.prompt(i), shown=run.shown(i), kind='flow'):
                     why = 'no se pudo hablar con Claude'
             if not why:
                 run.begin(i)
@@ -343,7 +343,7 @@ class WorkflowView:
         self.wf_keyed = time.monotonic()
         if self.flows_win is not None:
             LayerShell.set_keyboard_mode(
-                self.flows_win, LayerShell.KeyboardMode.EXCLUSIVE if self.wf_typing else LayerShell.KeyboardMode.NONE)
+                self.flows_win, LayerShell.KeyboardMode.ON_DEMAND if self.wf_typing else LayerShell.KeyboardMode.NONE)
             if self.wf_typing and self.wf_entry_box is not None and self.wf_entry_box.get_visible():
                 self.wf_entry.grab_focus()         # si no, lo hace `wf_place_entry` al ponerla en su sitio
         self.wf_redraw()
@@ -506,6 +506,8 @@ class WorkflowView:
 
     def flows_follow(self):
         """La isla de siempre se movió o cambió de tamaño: la de los flujos la sigue."""
+        if self.flows_win is not None:
+            LayerShell.set_margin(self.flows_win, LayerShell.Edge.TOP, self.top())
         if self.flows_da is not None and self.wf_open:
             self.flows_da.queue_draw()
             self.flows_region()
