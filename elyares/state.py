@@ -341,6 +341,11 @@ class Session:
         return self.state == 'alert' and bool(self.lines or self.actions)
 
     @property
+    def reply(self):
+        """¿Es la respuesta de un agente (un aviso de «terminó»)?"""
+        return self.state == 'alert' and bool(self.tint)
+
+    @property
     def lead(self):
         """El subagente de la familia que arrancó al último y sigue trabajando, o None."""
         family = [a for a in self.agents.values() if a.kind in AGENT_ROLES]
@@ -731,7 +736,8 @@ class Model:
     def dismiss(self, s, now=None, cooldown=True):
         """Quita una alerta porque ya se atendió con un clic. Sin cooldown puede
         volver enseguida: es lo que toca tras intentar arreglar el problema."""
-        if self.sessions.pop(s.sid, None) is not None and cooldown:
+        # Una respuesta descartada no silencia a la siguiente de esa conversación: es otra noticia.
+        if self.sessions.pop(s.sid, None) is not None and cooldown and not s.tint:
             self.dismissed[s.sid] = now or time.monotonic()
 
     def gone(self, req, now=None):

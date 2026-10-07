@@ -101,6 +101,8 @@ PREVIEW_MAX = PREVIEW_HEAD + (preview.MAX_LINES + 1) * CODE_LINE_H + 2 * PREVIEW
 ASK_TALL = 24         # con vista previa, los botones bajan debajo de ella
 PREVIEW_OPEN_SECS = 20    # abierta con el teclado y con código que leer
 CARD_BUTTONS = 40     # la fila de botones de la ficha de una alerta
+REPLY_CHIPS_H = 24    # la fila con las respuestas de los agentes, cuando hay más de una
+REPLY_LINES = 8       # líneas de una respuesta que caben en su ficha
 TIP_W, TIP_PAD, TIP_GAP = 400, 14, 14  # la burbuja de una fuente, debajo de la isla; en el hueco va su flecha
 TIP_ROOM = 440        # el alto que se le reserva en la ventana
 TIP_COL_GAP = 16      # entre un comando y lo que hace
@@ -299,6 +301,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.buttons = {}
         self.card_span = None           # (arriba, abajo) de la ficha, del último dibujo
         self.pin = ''                   # la alerta que se eligió en la lista para leerla
+        self.reply_pick = ''            # la respuesta de un agente que se está leyendo en el tablero
         self.rows = []                  # (sesión, y, alto) de la lista, del último dibujo
         self.list_layout = False        # la cabecera se queda arriba mientras hay lista
         self.wrap = (None, 0)           # (detalle, alto de más que pide entero)
@@ -989,7 +992,32 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def rows_for(self, mode):
         """Las alertas que van en filas: en el tablero, todas; con la cabecera
         de siempre, las que no están en ella."""
-        return self.alerts() if mode == 'board' else self.view.others
+        if mode != 'board':
+            return self.view.others
+        shown = self.board_card()
+        # Las respuestas de los agentes van en su ficha, con su fila de nombres: no se repiten aquí.
+        return [s for s in self.alerts() if not (shown is not None and shown.reply and s.reply)]
+
+    def replies(self):
+        """Las respuestas de los agentes que esperan, la última primero."""
+        return sorted((s for s in self.alerts() if s.reply), key=lambda s: -s.changed)
+
+    def board_card(self):
+        """La alerta cuya ficha va en el tablero: la que se eligió en una fila
+        o, si no hay, la respuesta de un agente que se está leyendo (la última,
+        si no se eligió otra). None si no hay ninguna de las dos."""
+        pinned = self.model.sessions.get(self.pin)
+        if pinned is not None and pinned.card and not pinned.reply:
+            return pinned
+        replies = self.replies()
+        if not replies or self.focused():
+            return None
+        return next((s for s in replies if s.sid == self.reply_pick), replies[0])
+
+    def reply_chips(self, mode):
+        """Alto de la fila de respuestas: solo con más de una, y en el tablero."""
+        shown = self.board_card() if mode == 'board' else None
+        return REPLY_CHIPS_H if shown is not None and shown.reply and len(self.replies()) > 1 else 0
 
     def expand(self, secs=None):
         """Abre la isla a mano. Con secs se cierra sola si el ratón no está encima."""
@@ -1137,16 +1165,21 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         """Alto de la ficha de una alerta (su detalle y sus botones): cuando
         alguien la está leyendo, con el ratón encima o abierta a mano."""
         s = self.view.session
+        if mode == 'board':
+            s = self.board_card() or s
         if not s or not s.card or mode not in ('open', 'list', 'board'):
             return 0
         if mode == 'board' and self.focused():
             return 0
         # La de unas pruebas se ve sin pedirla mientras la isla está abierta
-        # por ellas: para eso se abrió.
-        if not (self.hover or self.expanded or (s.tests and self.view.mode == 'open')):
+        # por ellas: para eso se abrió. La respuesta de un agente se ve siempre
+        # que el tablero esté a la vista, hasta que se atienda.
+        if not (self.hover or self.expanded or (s.tests and self.view.mode == 'open')
+                or (mode == 'board' and s.reply)):
             return 0
-        body = (PREVIEW_HEAD if s.where or s.note else 0) + len(s.lines) * CODE_LINE_H
-        return (body + 2 * PREVIEW_PAD if body else 0) + CARD_BUTTONS
+        lines = len(s.lines) if not s.reply else min(len(s.lines), REPLY_LINES)
+        body = (PREVIEW_HEAD if s.where or s.note else 0) + lines * CODE_LINE_H
+        return (body + 2 * PREVIEW_PAD if body else 0) + CARD_BUTTONS + self.reply_chips(mode)
 
     def pills_h(self, mode):
         """Alto de la franja de fuentes: solo cuando alguien abrió la isla a mano."""
@@ -1561,7 +1594,11 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if prev and full_h > head:
             self.draw_preview(cr, x0, w, head, prev, below)
         if card and full_h > head:
-            self.draw_card(cr, x0, w, head, card, below)
+            chips = self.reply_chips(mode)
+            if chips:
+                self.draw_reply_chips(cr, x0, w, head, below)
+            self.draw_card(cr, x0, w, head + chips, card - chips, below,
+                           self.board_card() if mode == 'board' else None)
         head += prev + card             # la lista va debajo de la vista previa o de la ficha
         rows = self.rows_for(mode)
         if listed and rows and full_h > head:
@@ -2192,9 +2229,37 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             PangoCairo.show_layout(cr, code)
             y += CODE_LINE_H
 
-    def draw_card(self, cr, x0, w, top, height, alpha):
+    def draw_reply_chips(self, cr, x0, w, top, alpha):
+        """Una pastilla por respuesta de un agente que espera, con su color: un
+        clic pasa a leer esa."""
+        replies = self.replies()
+        shown = self.board_card()
+        x, right = x0 + 14, x0 + w - 14
+        room = (right - x - 6 * (len(replies) - 1)) / len(replies)
+        for i, s in enumerate(replies):
+            color = mascot.rgba(mascot.accent(s.tint))[:3]
+            label = f'{s.where.replace("elyares-", "")} · {s.proj}'
+            layout = self._layout(cr, label, FONT_CODE, room - 26)
+            lw, lh = layout.get_pixel_size()
+            cw = min(room, lw + 26)
+            key = f'rp:{i}'
+            self.buttons[key] = (x, top, cw, REPLY_CHIPS_H - 4)
+            now = s is shown
+            over = self.over(x, top, cw, REPLY_CHIPS_H - 4)
+            mascot.rrect(cr, x, top, cw, REPLY_CHIPS_H - 4, 8)
+            cr.set_source_rgba(*(color if now else (1, 1, 1)), (.28 if now else .12 if over else .05) * alpha)
+            cr.fill()
+            cr.arc(x + 11, top + (REPLY_CHIPS_H - 4) / 2, 3.5, 0, 2 * math.pi)
+            cr.set_source_rgba(*color, alpha)
+            cr.fill()
+            cr.move_to(x + 20, top + (REPLY_CHIPS_H - 4 - lh) / 2)
+            cr.set_source_rgba(*((1, 1, 1) if now or over else rgb(self.colors['dim'])), alpha)
+            PangoCairo.show_layout(cr, layout)
+            x += cw + 6
+
+    def draw_card(self, cr, x0, w, top, height, alpha, s=None):
         """La ficha de una alerta: su detalle y, debajo, sus botones."""
-        s = self.view.session
+        s = s or self.view.session
         self.card_span = (top, top + height)
         left, right = x0 + 14, x0 + w - 14
         body = height - CARD_BUTTONS
@@ -2223,7 +2288,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 cr.set_source_rgba(*(mascot.rgba(mascot.accent(s.tint))[:3] if s.tint else rgb(self.colors['path'])), alpha)
                 PangoCairo.show_layout(cr, where)
                 y += PREVIEW_HEAD
-            for text in s.lines:
+            for text in (s.lines[:REPLY_LINES] if s.reply else s.lines):
                 mark, role, lx = MARK_COLORS.get(text[:1]) if text[1:2] == ' ' else None, 'text', tx
                 if mark:
                     # La marca de una prueba, en su color; el nombre, a su lado.
@@ -2718,6 +2783,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if isinstance(key, str) and key.startswith('chat-'):
                 self.on_chat_button(key)
                 return
+            if isinstance(key, str) and key.startswith('rp:'):
+                # Otra de las respuestas de los agentes, para leerla en la ficha.
+                replies = self.replies()
+                if int(key[3:]) < len(replies):
+                    self.reply_pick, self.pin = replies[int(key[3:])].sid, ''
+                    self.refresh()
+                    self.ensure_tick()
+                return
             if key in ('allow', 'deny'):
                 asking = self.asking()
                 if asking is None:
@@ -2725,7 +2798,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 self.model.decide(asking, key == 'allow')
                 self.refresh()
             else:
-                self.act(self.view.session, key)
+                shown = self.board_card() if self.target() == 'board' else None
+                self.act(shown or self.view.session, key)
             return
         if self.card_span and self.card_span[0] <= y < self.card_span[1]:
             # En la ficha solo cuentan sus botones: un clic que falla uno no
