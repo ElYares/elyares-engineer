@@ -312,6 +312,7 @@ class Session:
     ttl: float = 0            # solo en alertas: segundos que dura sin novedades (0 = ALERT_SECS)
     where: str = ''           # solo en alertas: de dónde sale el detalle (archivo:línea, contenedor)
     note: str = ''            # solo en alertas: lo que va a la derecha de `where`
+    tint: str = ''            # solo en alertas: el personaje cuyo color tiñe su ficha (la respuesta de un agente)
     lines: list = field(default_factory=list)     # solo en alertas: el detalle; no se guarda
     actions: list = field(default_factory=list)   # solo en alertas: sus botones; no se guardan
     context: float = 0        # % de la ventana de contexto que lleva usada la sesión
@@ -553,6 +554,7 @@ class Model:
             s.ttl = ttl
             s.where, s.note = short(msg.get('where'), 120), short(msg.get('note'), 60)
             s.lines, s.actions = card_lines(msg.get('lines')), card_actions(msg.get('actions'))
+            s.tint = msg.get('tint') if msg.get('tint') in TEAM else ''
             s.tests = bool(msg.get('tests'))
             s.set('alert', short(msg.get('message'), 300), now)
             return
