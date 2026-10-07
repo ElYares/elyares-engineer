@@ -955,14 +955,39 @@ class Chat(Dibujo):
         self.isl.on_chat_hit('conv:0')
         self.assertIs(self.isl.chat, first)
 
-    def test_los_que_modifican_el_repo_tienen_una_sola(self):
-        for agent in ('', 'elyares-mobile', 'elyares-devops'):
+    def test_el_mobile_sigue_con_una_sola_y_el_engineer_y_el_devops_ya_pueden_tener_otra(self):
+        c = self.reviewer('elyares-mobile')
+        self.draw()
+        self.assertNotIn('Otra', self.shown)
+        self.isl.chat_split()
+        self.assertEqual(self.isl.chat_family(), [c])
+        for agent in ('', 'elyares-devops'):
             c = self.reviewer(agent)
             self.draw()
-            self.assertNotIn('Otra', self.shown)
+            self.assertIn('Otra', self.shown)
             self.isl.chat_split()
-            self.assertIs(self.isl.chat, c)
-            self.assertEqual(self.isl.chat_family(), [c])
+            self.assertEqual(len(self.isl.chat_family()), 2)
+
+    def test_avisa_si_otro_que_modifica_el_repo_trabaja_en_la_misma_carpeta(self):
+        first = self.reviewer('')
+        self.isl.chat_split()
+        second = self.isl.chat
+        self.assertEqual(self.isl.chat_clash(), [])
+        first.busy = True
+        self.assertEqual(self.isl.chat_clash(), ['otra conversación suya'])
+        self.assertEqual(self.isl.chat_clash(first), [])           # ella misma no cuenta
+        self.draw()
+        self.assertIn('⚠ otra conversación suya trabaja en esta carpeta: pueden pisarse', self.shown)
+        # Otro agente que también modifica el repo, en la misma carpeta.
+        devops = app.chatview.chat.Chat('/x/proj', lambda ev: None, spawn=mock.Mock(), agent='elyares-devops')
+        devops.busy = True
+        self.isl.chats[self.isl.chat_key('elyares-devops', '/x/proj')] = devops
+        self.assertEqual(self.isl.chat_clash(second), ['otra conversación suya', 'elyares-devops'])
+        # Otro proyecto no cuenta, y uno de solo lectura no avisa ni se le avisa.
+        devops.cwd = '/y/otro'
+        self.assertEqual(self.isl.chat_clash(second), ['otra conversación suya'])
+        second.agent = 'elyares-reviewer'
+        self.assertEqual(self.isl.chat_clash(second), [])
 
     def test_hay_un_tope_de_conversaciones_por_agente(self):
         self.reviewer()

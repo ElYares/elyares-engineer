@@ -281,10 +281,13 @@ respuesta**, que abre el chat para leerla entera.
   que acabe. Con más de una, debajo de la cabecera sale la fila de las del
   agente (`● ` si trabaja, `! ` si espera respuesta; un clic pasa a ella y la ×
   cierra las que no trabajan; **Nuevo** en una la empieza de cero en su lugar).
-  Hasta 5. Solo los que no modifican el repo (architect, auditor, reviewer,
-  designer, researcher): el engineer, el mobile y el devops tienen una sola por
-  proyecto, porque dos suyas sobre la misma carpeta se pisarían
-  (`chat.SINGLE_AGENTS`). Los workflows siguen usando la de siempre.
+  Hasta 5, con cualquiera de la familia menos el mobile (`chat.SINGLE_AGENTS`).
+  Los que modifican el repo (engineer, mobile, devops; `chat.WRITER_AGENTS`)
+  pueden pisarse si dos trabajan a la vez sobre la misma carpeta: cuando otra
+  conversación suya, o de otro de ellos, está trabajando en el proyecto, el chat
+  saca arriba un aviso ámbar («⚠ otra conversación suya trabaja en esta carpeta:
+  pueden pisarse»). No lo impide; para trabajar de verdad en paralelo, cada una
+  en su `git worktree`. Los workflows siguen usando la de siempre.
 - **El teclado:** mientras escribes, el chat lo toma entero. Esc lo suelta sin
   cerrar el chat y un clic en la caja lo vuelve a tomar; si pasan 90 s sin
   teclear, lo suelta solo.

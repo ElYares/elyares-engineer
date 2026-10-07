@@ -23,8 +23,9 @@ Con el chat abierto, el permiso sale también en una tarjeta encima de la
 caja.
 
 Hay una conversación por proyecto y agente (`chats`, con la clave de
-`chat_key`); los que no modifican el repo pueden tener otras a su lado (`chat_extra`,
-«Otra»), con su fila bajo la cabecera, y `all_chats` las junta todas. Cada pestaña del tablero es un proyecto y manda sobre su chat:
+`chat_key`); cada agente puede tener otras a su lado (`chat_extra`, «Otra»; el mobile no),
+con su fila bajo la cabecera, y `all_chats` las junta todas. Si dos que modifican el repo
+trabajan en la misma carpeta, un aviso lo dice (`chat_clash`). Cada pestaña del tablero es un proyecto y manda sobre su chat:
 con el tablero a la vista, el chat que se abre es el de la pestaña elegida
 (`chat_of`), y los encargos a los tres van a las conversaciones de ese
 proyecto. El proyecto de una pestaña es aquel en el que se empezó su
@@ -107,6 +108,7 @@ CHAT_ASK_H = 74               # la tarjeta del permiso
 CHAT_OPT_H = 38               # cada opción de una pregunta de Claude
 CHAT_TABS_H = 26              # la fila de conversaciones de un agente, cuando hay más de una
 CHAT_TAB_LABEL = 16           # letras del título de cada una
+CHAT_WARN_H = 26              # el aviso de que otra conversación trabaja en la misma carpeta
 CHAT_CHIP_H = 22              # las etiquetas de las imágenes pegadas
 CHAT_MAX_IMAGES = 5
 CHAT_SHOW_AT = 40             # la caja de texto sale cuando a la isla le falta esto para abrirse
@@ -324,8 +326,8 @@ class ChatView:
         return [x for x in (self.chats.get(key), *self.chat_extra.get(key, [])) if x is not None]
 
     def chat_can_split(self, c=None):
-        """¿Puede tener otra conversación a su lado? Solo los que no modifican
-        el repo, y hasta MAX_CHATS."""
+        """¿Puede tener otra conversación a su lado? Todos menos los de
+        `SINGLE_AGENTS`, y hasta MAX_CHATS."""
         c = c or self.chat
         return c is not None and c.agent not in chat.SINGLE_AGENTS and len(self.chat_family(c)) < chat.MAX_CHATS
 
@@ -340,6 +342,24 @@ class ChatView:
         c = self.chat_make(old.agent, old.cwd)
         self.chat_extra.setdefault(self.chat_key(old.agent, old.cwd), []).append(c)
         self.show_chat(c, typing=True)
+
+    def chat_clash(self, c=None):
+        """Quién más, de los que modifican el repo, trabaja ahora en el proyecto
+        de `c` (otra conversación suya u otro agente): dos a la vez sobre la
+        misma carpeta pueden pisarse. [] si no hay nadie o `c` solo lee."""
+        c = c or self.chat
+        if c is None or c.agent not in chat.WRITER_AGENTS:
+            return []
+        root = state.project_root(c.cwd)
+        names = []
+        for other in self.all_chats():
+            if other is c or not other.busy or other.agent not in chat.WRITER_AGENTS:
+                continue
+            if state.project_root(other.cwd) == root:
+                name = 'otra conversación suya' if other.agent == c.agent else other.name
+                if name not in names:
+                    names.append(name)
+        return names
 
     def chat_switch(self, i):
         """Un clic en una conversación de la fila: se pasa a ella."""
@@ -1137,6 +1157,10 @@ class ChatView:
         if len(self.chat_family()) > 1:
             self.draw_chat_tabs(cr, left, top, width, alpha)
             top += CHAT_TABS_H
+        clash = self.chat_clash()
+        if clash:
+            self.draw_chat_clash(cr, left, top, width, alpha, clash)
+            top += CHAT_WARN_H
         self.draw_chat_log(cr, left, top, width, bottom - 8, alpha)
         self.draw_chat_input(cr, left, box_y, width, ih, alpha)
         self.chat_box = (int(left + CHAT_INPUT_INSET), int(box_y + CHAT_INPUT_PAD), int(text_w),
@@ -1387,6 +1411,17 @@ class ChatView:
         cr.set_source_rgba(1, 1, 1, .07 * alpha)
         cr.rectangle(left, CHAT_HEAD + 2, width, 1)
         cr.fill()
+
+    def draw_chat_clash(self, cr, left, y, width, alpha, names):
+        """El aviso de que otra conversación que modifica el repo ya trabaja en
+        esta carpeta, en el ámbar de los avisos."""
+        r, g, b = mascot.rgba(paint.AMBER)[:3]
+        mascot.rrect(cr, left, y, width, CHAT_WARN_H - 4, 8)
+        cr.set_source_rgba(r, g, b, .14 * alpha)
+        cr.fill()
+        who = ', '.join(names)
+        self.put(cr, f'⚠ {who} trabaja en esta carpeta: pueden pisarse', FONT_STEP, left + 10, y + 4, (r, g, b), alpha,
+                 width=width - 20)
 
     def chat_title(self, c, i):
         """El nombre de una conversación de la fila: lo primero que se le pidió."""
