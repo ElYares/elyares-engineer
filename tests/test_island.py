@@ -2188,6 +2188,32 @@ class Ficha(IslandCase):
         self.isl.draw_card(cairo.Context(surface), 20, app.PREVIEW_W, app.OPEN_H, height, 1)
         self.assertEqual(set(self.isl.buttons), {'dismiss', 0})
 
+    def reply_card(self, tint):
+        self.isl.model.handle({'event': 'alert', 'session_id': 'chat:s1', 'name': 'proj', 'tone': 'ok',
+                               'message': 'terminó', 'where': 'elyares-reviewer', 'note': 'Sonnet 5.5',
+                               'tint': tint, 'lines': ['Revisé el PR 12:', '- falta un test', '- el nombre engaña'],
+                               'actions': [{'label': 'Ver respuesta', 'chat': 's1'}]}, now=T)
+        self.isl.refresh()
+        return self.isl.model.sessions['chat:s1']
+
+    def test_la_respuesta_de_un_agente_tiñe_su_ficha_con_su_color(self):
+        self.assertEqual(self.reply_card('reviewer').tint, 'reviewer')
+        self.assertEqual(self.reply_card('no-existe').tint, '')       # un personaje que no hay: sin tinte
+        s = self.reply_card('reviewer')
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, app.WIN_W, app.WIN_H)
+        cr = cairo.Context(surface)
+        height = app.PREVIEW_HEAD + 3 * app.CODE_LINE_H + 2 * app.PREVIEW_PAD + app.CARD_BUTTONS
+        self.isl.draw_card(cr, 20, app.PREVIEW_W, app.OPEN_H, height, 1)
+        # La barra del agente, en el borde derecho de la ficha, con el color del reviewer.
+        r, g, b, _ = app.mascot.rgba(app.mascot.accent('reviewer'))
+        x, y = int(20 + app.PREVIEW_W - 14 - 1), int(app.OPEN_H + 20)
+        data = surface.get_data()
+        px = surface.get_stride() * y + 4 * x
+        blue, green, red = data[px], data[px + 1], data[px + 2]
+        self.assertAlmostEqual(red / 255, r, delta=.05)
+        self.assertAlmostEqual(green / 255, g, delta=.05)
+        self.assertAlmostEqual(blue / 255, b, delta=.05)
+
     def test_la_ficha_mas_alta_cabe_en_la_ventana(self):
         tallest = (app.PREVIEW_HEAD + state.CARD_LINES * app.CODE_LINE_H + 2 * app.PREVIEW_PAD
                    + app.CARD_BUTTONS)

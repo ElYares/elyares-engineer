@@ -713,6 +713,7 @@ class ChatView:
         self.model.handle({'event': 'alert', 'session_id': f'chat:{c.session}', 'name': c.project,
                            'message': f'{c.name} terminó · ver respuesta', 'tone': 'ok',
                            'ttl': CHAT_REPLY_SECS, 'where': c.name, 'note': chat.model_name(c.model_id),
+                           'tint': state.AGENT_ROLES.get(c.agent, state.MAIN_ROLE),
                            'lines': lines[:CHAT_REPLY_LINES],
                            'actions': [{'label': 'Ver respuesta', 'chat': c.session or True, 'after': 'clear'}]})
 
@@ -1561,33 +1562,33 @@ class ChatView:
                 start = None
         return spans
 
+    def draw_tinted(self, cr, left, top, width, height, color, alpha, radius=6):
+        """Un fondo oscuro a lo ancho con la barra del color a la derecha y un
+        degradado de ese color que se apaga hacia la izquierda: el de los bloques
+        de código y el de la respuesta de un aviso."""
+        r, g, b = color
+        mascot.rrect(cr, left, top, width, height, radius)
+        cr.save()
+        cr.clip()
+        cr.set_source_rgba(0, 0, 0, .34 * alpha)
+        cr.paint()
+        fade = cairo.LinearGradient(left + width, 0, left, 0)
+        fade.add_color_stop_rgba(0, r, g, b, .30 * alpha)
+        fade.add_color_stop_rgba(.55, r, g, b, .09 * alpha)
+        fade.add_color_stop_rgba(1, r, g, b, .02 * alpha)
+        cr.set_source(fade)
+        cr.paint()
+        cr.rectangle(left + width - CHAT_BAR, top, CHAT_BAR, height)
+        cr.set_source_rgba(r, g, b, alpha)
+        cr.fill()
+        cr.restore()
+
     def draw_code_backgrounds(self, cr, layout, left, right, y, alpha):
         """El fondo de cada bloque de código, como el de tus mensajes: a lo
-        ancho, con la barra del agente a la derecha y un degradado de su color que se apaga
-        hacia la izquierda."""
-        r, g, b = self.chat_color()
+        ancho, con la barra del agente a la derecha y un degradado de su color
+        que se apaga hacia la izquierda."""
         for top, bottom in self.code_spans(layout):
-            top, h = y + top, bottom - top
-            cr.new_sub_path()
-            cr.arc(right - 6, top + 6, 6, -math.pi / 2, 0)
-            cr.arc(right - 6, top + h - 6, 6, 0, math.pi / 2)
-            cr.arc(left + 6, top + h - 6, 6, math.pi / 2, math.pi)
-            cr.arc(left + 6, top + 6, 6, math.pi, 3 * math.pi / 2)
-            cr.close_path()
-            cr.save()
-            cr.clip()
-            cr.set_source_rgba(0, 0, 0, .34 * alpha)
-            cr.paint()
-            fade = cairo.LinearGradient(right, 0, left, 0)
-            fade.add_color_stop_rgba(0, r, g, b, .30 * alpha)
-            fade.add_color_stop_rgba(.55, r, g, b, .09 * alpha)
-            fade.add_color_stop_rgba(1, r, g, b, .02 * alpha)
-            cr.set_source(fade)
-            cr.paint()
-            cr.rectangle(right - CHAT_BAR, top, CHAT_BAR, h)
-            cr.set_source_rgba(r, g, b, alpha)
-            cr.fill()
-            cr.restore()
+            self.draw_tinted(cr, left, y + top, right - left, bottom - top, self.chat_color(), alpha)
 
     def draw_code_links(self, cr, index, layout, right, y, alpha, top, bottom):
         """El lenguaje y «copiar» en el borde de arriba de cada bloque de código, a su derecha."""

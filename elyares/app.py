@@ -2199,9 +2199,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         left, right = x0 + 14, x0 + w - 14
         body = height - CARD_BUTTONS
         if body:
-            mascot.rrect(cr, left, top + 2, right - left, body - 6, 10)
-            cr.set_source_rgba(1, 1, 1, .05 * alpha)
-            cr.fill()
+            if s.tint:
+                # La respuesta de un agente: con su color, como sus bloques de código.
+                self.draw_tinted(cr, left, top + 2, right - left, body - 6, mascot.rgba(mascot.accent(s.tint))[:3],
+                                 alpha, 10)
+            else:
+                mascot.rrect(cr, left, top + 2, right - left, body - 6, 10)
+                cr.set_source_rgba(1, 1, 1, .05 * alpha)
+                cr.fill()
             tx, y = left + 12, top + PREVIEW_PAD
             if s.where or s.note:
                 # Arriba: de dónde sale a la izquierda, la nota a la derecha.
@@ -2215,7 +2220,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                     end -= 12
                 where = self._layout(cr, s.where, FONT_CODE, end - tx)
                 cr.move_to(tx, y + 2)
-                cr.set_source_rgba(*rgb(self.colors['path']), alpha)
+                cr.set_source_rgba(*(mascot.rgba(mascot.accent(s.tint))[:3] if s.tint else rgb(self.colors['path'])), alpha)
                 PangoCairo.show_layout(cr, where)
                 y += PREVIEW_HEAD
             for text in s.lines:
