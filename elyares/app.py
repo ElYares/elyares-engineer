@@ -644,7 +644,12 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def ink(self, role, light=TIP_LIGHT):
         """El color de un papel (`paint.colors`) para la burbuja: avivado."""
         color = self.colors[role]
-        return color if role in TIP_FIXED else paint.vivid(color, TIP_VIVID, light)
+        return color if role in TIP_FIXED else self.vivid(color, light)
+
+    @staticmethod
+    def vivid(color, light=TIP_LIGHT):
+        """Un #rrggbb avivado como el de la burbuja, para leerse sobre el vidrio."""
+        return paint.vivid(color, TIP_VIVID, light)
 
     def tip_markup(self, parts):
         """[(texto, papel)] como marcado de Pango, con los colores de la burbuja."""

@@ -146,6 +146,7 @@ NUMBERED = re.compile(r'(\s*)(\d+)[.)]\s+(.*)')
 QUOTE = re.compile(r'\s*>\s?(.*)')
 DIVIDER = re.compile(r'\s*([-*_])(\s*\1){2,}\s*')
 BOLD = re.compile(r'\*\*(.+?)\*\*')
+STEP_TITLE = re.compile(r'\s*\*\*((?:(?!\*\*).)+)\*\*\s*')
 ITALIC = re.compile(r'(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])|(?<![\w])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![\w])')
 LINK = re.compile(r'\[([^\]]+)\]\(([^)\s]+)\)')
 CODE = re.compile(r'`([^`]+)`')
@@ -226,6 +227,14 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
             if rich and out and out[-1] != '':
                 out.append('')          # un respiro antes de un título
             out.append(f'<span foreground="{head}" weight="bold"{size}>{inline(m[2])}</span>')
+            continue
+        m = STEP_TITLE.fullmatch(line) if rich else None
+        if m:
+            # Una línea toda en negrita («**A. Paso**») es el título de un paso:
+            # va en el color de los títulos para que se vea dónde empieza.
+            if out and out[-1] != '':
+                out.append('')
+            out.append(f'<span foreground="{head}" weight="bold">{inline(m[1])}</span>')
             continue
         if rich and DIVIDER.fullmatch(line):
             out.append(f'<span foreground="{dim or head}">{"─" * DIVIDER_WIDTH}</span>')
@@ -327,18 +336,21 @@ def _inline(line, mono, bold=None, rich=False):
     """Negritas, `código` y, si `rich`, cursivas y enlaces dentro de una línea.
     Lo que va entre acentos graves se queda como está: ahí un `**` o un `_`
     son del código."""
-    out = []
-    for part in re.split(r'(`[^`]+`)', line):
-        if len(part) > 2 and part.startswith('`') and part.endswith('`'):
-            out.append(f'{mono}{html.escape(part[1:-1], quote=False)}</span>')
-            continue
-        part = html.escape(part, quote=False)
-        if rich:
-            part = LINK.sub(r'<u>\1</u>', part)
-            part = ITALIC.sub(lambda m: f'<i>{m[1] or m[2]}</i>', part)
-        tag = f'<span weight="bold" foreground="{bold}">\\1</span>' if bold else r'<b>\1</b>'
-        out.append(BOLD.sub(tag, part))
-    return ''.join(out)
+    # El código se aparta con una marca para que una negrita pueda envolverlo:
+    # «**la carpeta de `main`**» tiene sus dos ** a cada lado del acento grave.
+    spans = []
+
+    def stash(m):
+        spans.append(f'{mono}{html.escape(m[1], quote=False)}</span>')
+        return f'{len(spans) - 1}'
+
+    part = html.escape(CODE.sub(stash, re.sub('[]', '', line)), quote=False)
+    if rich:
+        part = LINK.sub(r'<u>\1</u>', part)
+        part = ITALIC.sub(lambda m: f'<i>{m[1] or m[2]}</i>', part)
+    tag = f'<span weight="bold" foreground="{bold}">\\1</span>' if bold else r'<b>\1</b>'
+    part = BOLD.sub(tag, part)
+    return re.sub('(\\d+)', lambda m: spans[int(m[1])], part)
 
 
 def context_role(pct):
