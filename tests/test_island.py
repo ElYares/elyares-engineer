@@ -909,6 +909,70 @@ class Chat(Dibujo):
         self.isl.on_click(None, 1, x + w / 2, y + h / 2)
         c.answer.assert_called_once_with(True)
 
+    def ask_questions(self, *questions):
+        c = self.conversation()
+        c.busy = True
+        c.asking = {'id': 'r-9', 'tool': 'AskUserQuestion', 'text': 'Pregunta',
+                    'input': {'questions': list(questions)}}
+        c.answer_questions = mock.Mock()
+        c.answer = mock.Mock()
+        self.draw()
+        return c
+
+    def click(self, key):
+        x, y, w, h = self.isl.buttons[key]
+        self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.draw()
+
+    def test_una_pregunta_de_opciones_se_contesta_con_un_clic(self):
+        one = {'question': '¿Qué base?', 'header': 'Base', 'multiSelect': False,
+               'options': [{'label': 'Postgres', 'description': 'relacional'}, {'label': 'SQLite'}]}
+        c = self.ask_questions(one)
+        for text in ('Te pregunta', 'Base', '¿Qué base?', 'Postgres', 'relacional', 'SQLite', 'Omitir'):
+            self.assertIn(text, self.shown)
+        self.assertNotIn('Permitir', self.shown)
+        self.click('chat-opt:1')
+        c.answer_questions.assert_called_once_with({'¿Qué base?': 'SQLite'})
+        c.answer.assert_not_called()
+
+    def test_en_una_pregunta_de_varias_opciones_se_marca_y_listo_las_manda(self):
+        many = {'question': '¿Qué incluir?', 'header': 'Incluir', 'multiSelect': True,
+                'options': [{'label': 'Tests'}, {'label': 'Docs'}, {'label': 'CI'}]}
+        c = self.ask_questions(many)
+        self.assertNotIn('Listo', self.shown)
+        self.click('chat-opt:0')
+        self.click('chat-opt:2')
+        self.assertIn('Listo', self.shown)
+        c.answer_questions.assert_not_called()
+        self.click('chat-opt:0')                    # se desmarca
+        self.click('chat-next')
+        c.answer_questions.assert_called_once_with({'¿Qué incluir?': 'CI'})
+
+    def test_varias_preguntas_van_una_a_una_y_se_mandan_juntas(self):
+        a = {'question': 'Uno', 'options': [{'label': 'a1'}, {'label': 'a2'}]}
+        b = {'question': 'Dos', 'options': [{'label': 'b1'}, {'label': 'b2'}]}
+        c = self.ask_questions(a, b)
+        self.assertIn('Te pregunta · 1 de 2', self.shown)
+        self.click('chat-opt:1')
+        c.answer_questions.assert_not_called()
+        self.assertIn('Te pregunta · 2 de 2', self.shown)
+        self.click('chat-opt:0')
+        c.answer_questions.assert_called_once_with({'Uno': 'a2', 'Dos': 'b1'})
+
+    def test_lo_escrito_con_una_pregunta_delante_es_otra_respuesta(self):
+        c = self.ask_questions({'question': '¿Qué base?', 'options': [{'label': 'Postgres'}, {'label': 'SQLite'}]})
+        self.isl.chat_text = lambda: ' Mongo '
+        self.isl.chat_set_text = mock.Mock()
+        self.isl.on_chat_enter()
+        c.answer_questions.assert_called_once_with({'¿Qué base?': 'Mongo'})
+        self.isl.chat_set_text.assert_called_once_with('')
+
+    def test_omitir_una_pregunta_la_deniega(self):
+        c = self.ask_questions({'question': '¿Qué base?', 'options': [{'label': 'Postgres'}, {'label': 'SQLite'}]})
+        self.click('chat-deny')
+        c.answer.assert_called_once_with(False)
+        c.answer_questions.assert_not_called()
+
     def test_al_mandar_se_cierra_y_se_ve_trabajar_en_el_tablero(self):
         c = self.conversation()
         c.send = mock.Mock(return_value=True)
@@ -941,6 +1005,18 @@ class Chat(Dibujo):
         x, y, w, h = self.isl.buttons['allow']
         self.isl.on_click(None, 1, x + w / 2, y + h / 2)
         c.answer.assert_called_once_with(True)
+
+    def test_una_pregunta_del_chat_abre_el_chat_y_no_va_al_tablero(self):
+        c = self.conversation()
+        self.isl.chat_open = False
+        c.session = 's-chat'
+        self.isl.on_chat({'type': 'control_request', 'request_id': 'r', 'request': {
+            'subtype': 'can_use_tool', 'tool_name': 'AskUserQuestion',
+            'input': {'questions': [{'question': '¿Cuál?', 'options': [{'label': 'A'}, {'label': 'B'}]}]}}})
+        self.assertTrue(self.isl.chat_open)         # Permitir no es una respuesta: se contesta en el chat
+        self.assertIsNone(self.isl.model.sessions['s-chat'].ask if 's-chat' in self.isl.model.sessions else None)
+        self.draw()
+        self.assertIn('¿Cuál?', self.shown)
 
     def test_al_terminar_avisa_con_el_principio_de_la_respuesta(self):
         c = self.conversation()

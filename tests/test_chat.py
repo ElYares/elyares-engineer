@@ -105,6 +105,30 @@ class Conversacion(ChatCase):
         self.assertEqual([e.kind for e in self.c.entries], ['you'])
         self.assertEqual(self.c.tokens, 0)
 
+    def test_una_pregunta_de_opciones_se_contesta_con_lo_elegido(self):
+        self.c.send('pregunta')
+        self.c.feed({'type': 'control_request', 'request_id': 'r-2', 'request': {
+            'subtype': 'can_use_tool', 'tool_name': 'AskUserQuestion',
+            'input': {'questions': [
+                {'question': '¿Qué base?', 'header': 'Base', 'multiSelect': False,
+                 'options': [{'label': 'Postgres', 'description': 'relacional'}, {'label': 'SQLite'}, {}]},
+                {'question': 'sin opciones', 'options': []}, 'basura']}}})
+        self.assertEqual(self.c.questions(), [{'question': '¿Qué base?', 'header': 'Base', 'multi': False,
+                                               'options': [('Postgres', 'relacional'), ('SQLite', '')]}])
+        self.assertTrue(self.c.answer_questions({'¿Qué base?': 'Postgres'}))
+        self.assertIsNone(self.c.asking)
+        self.assertEqual(self.c.questions(), [])
+        sent = self.procs[0].sent()[-1]['response']
+        self.assertEqual(sent['request_id'], 'r-2')
+        self.assertEqual(sent['response']['behavior'], 'allow')
+        self.assertEqual(sent['response']['updatedInput']['answers'], {'¿Qué base?': 'Postgres'})
+        self.assertIn('questions', sent['response']['updatedInput'])
+        self.assertEqual(self.c.entries[-1].text, 'Respondiste: Postgres')
+
+    def test_un_permiso_no_es_una_pregunta(self):
+        self.c.asking = {'id': 'r-1', 'tool': 'Bash', 'input': {'command': 'ls'}, 'text': 'Ejecutando ls'}
+        self.assertEqual(self.c.questions(), [])
+
     def test_el_init_da_la_sesion_y_los_comandos(self):
         self.c.commands = {'commit': 'Convierte el working tree…'}
         self.c.feed({'type': 'system', 'subtype': 'init', 'session_id': 's-1',

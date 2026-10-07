@@ -939,6 +939,10 @@ puede esperar tu clic sin bloquear nada: el prompt de la terminal sigue ahí.
   decidir si el proceso de Claude no tiene terminal.
 - `AskUserQuestion` y `ExitPlanMode` no llevan botones: piden una respuesta, no
   un permiso.
+  En el chat de la isla, `AskUserQuestion` sí se contesta: el chat se abre en la
+  pregunta con una fila por opción (un clic la elige; si admite varias, se marcan
+  y **Listo** las manda; con varias preguntas van una a una). Lo que escribas en
+  la caja y Enter es «otra respuesta», y **Omitir** la deniega.
 
 ## Notas
 

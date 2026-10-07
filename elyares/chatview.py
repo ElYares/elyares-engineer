@@ -103,6 +103,7 @@ CHAT_SCROLL = 48              # lo que baja o sube la conversación con cada pas
 CHAT_SUGGEST = 6              # lo que se ve a la vez en la lista de "/" o de "@"
 CHAT_SUGGEST_H = 24           # alto de cada uno, y de cada opción de un menú
 CHAT_ASK_H = 74               # la tarjeta del permiso
+CHAT_OPT_H = 38               # cada opción de una pregunta de Claude
 CHAT_CHIP_H = 22              # las etiquetas de las imágenes pegadas
 CHAT_MAX_IMAGES = 5
 CHAT_SHOW_AT = 40             # la caja de texto sale cuando a la isla le falta esto para abrirse
@@ -182,6 +183,7 @@ class ChatView:
         self.chat_saved = None        # lo último que se guardó de las conversaciones
         self.chat_code = {}           # de cada respuesta, sus bloques de código: [(lenguaje, texto)]
         self.chat_copied = None       # la respuesta recién copiada: (su sitio en la conversación, cuándo)
+        self.chat_quiz = None         # la pregunta de opciones en curso: {id, n, answers, marked}
         self.entry = self.entry_box = None
 
     def chat_widgets(self, overlay):
@@ -608,6 +610,12 @@ class ChatView:
         cualquier sesión, y la isla se abre en su pestaña para contestarlo."""
         if not c.session:
             return
+        if c.questions():
+            # Una pregunta no se contesta con Permitir: el chat se abre en ella.
+            self.tab = c.session
+            self.show_chat(c)
+            self.expand(None if self.settings['pinned'] else CHAT_WATCH_SECS * 10)
+            return
         self.model.handle({'event': 'ask', 'session_id': c.session, 'cwd': c.cwd,
                            'tool_name': c.asking['tool'], 'tool_input': c.asking['input']}, ChatAsk(c))
         self.tab = c.session
@@ -733,6 +741,14 @@ class ChatView:
     def on_chat_enter(self):
         found = self.suggestions()
         text = self.chat_text()
+        if self.quiz() is not None and text.strip():
+            # Con una pregunta delante, lo escrito es «otra respuesta».
+            self.quiz_answer(text.strip())
+            self.chat_set_text('')
+            self.chat_release()
+            self.refresh()
+            self.ensure_tick()
+            return
         if found:
             name = found[min(self.chat_pick, len(found) - 1)][0]
             sigil, _, start, end = self.chat_token()
@@ -917,12 +933,62 @@ class ChatView:
         self.ensure_tick()
 
     def on_chat_button(self, key):
-        """Permitir o Denegar en la tarjeta del permiso."""
-        if self.chat is not None and self.chat.asking:
+        """Permitir o Denegar en la tarjeta del permiso; en la de una pregunta,
+        una opción (`chat-opt:N`), «Listo» o «Omitir»."""
+        if self.chat is None or not self.chat.asking:
+            return
+        if self.chat.questions() and key != 'chat-deny':
+            if key.startswith('chat-opt:'):
+                self.quiz_pick(int(key[9:]))
+            elif key == 'chat-next':
+                self.quiz_next()
+        else:
             self.chat.answer(key == 'chat-allow')
-            self.chat_release()
-            self.refresh()
-            self.ensure_tick()
+            self.chat_quiz = None
+        self.chat_release()
+        self.refresh()
+        self.ensure_tick()
+
+    def quiz(self):
+        """La pregunta de opciones en curso, con lo ya contestado; None si lo
+        pendiente no es una pregunta. Empieza de cero con cada pedido nuevo."""
+        c = self.chat
+        if c is None or not c.questions():
+            return None
+        if self.chat_quiz is None or self.chat_quiz['id'] != c.asking['id']:
+            self.chat_quiz = {'id': c.asking['id'], 'n': 0, 'answers': {}, 'marked': []}
+        return self.chat_quiz
+
+    def quiz_pick(self, i):
+        """Una opción de la pregunta en curso: una sola se contesta ya; con
+        varias se marca, y «Listo» las manda."""
+        quiz, questions = self.quiz(), self.chat.questions()
+        q = questions[quiz['n']]
+        if i >= len(q['options']):
+            return
+        label = q['options'][i][0]
+        if not q['multi']:
+            self.quiz_answer(label)
+        elif label in quiz['marked']:
+            quiz['marked'].remove(label)
+        else:
+            quiz['marked'].append(label)
+
+    def quiz_next(self):
+        """«Listo» en una pregunta de varias opciones, con al menos una marcada."""
+        quiz = self.quiz()
+        if quiz['marked']:
+            self.quiz_answer(', '.join(quiz['marked']))
+
+    def quiz_answer(self, text):
+        """Lo contestado a la pregunta en curso; con la última, todo va a Claude."""
+        quiz, questions = self.quiz(), self.chat.questions()
+        quiz['answers'][questions[quiz['n']]['question']] = text
+        quiz['n'] += 1
+        quiz['marked'] = []
+        if quiz['n'] >= len(questions):
+            self.chat.answer_questions(quiz['answers'])
+            self.chat_quiz = None
 
     # ── dibujo ──────────────────────────────────────────────────────────────
 
@@ -945,7 +1011,7 @@ class ChatView:
         if c is None or (c.proc is None and not c.entries):
             return 'Listo para empezar', 'text'
         if c.asking:
-            return 'Pide permiso', 'bad'
+            return ('Te pregunta' if c.questions() else 'Pide permiso'), 'bad'
         if c.busy:
             return ('Escribiendo…' if c.streaming else 'Pensando…'), 'cmd'
         return 'Listo', 'pass'
@@ -981,8 +1047,9 @@ class ChatView:
             self.draw_chat_images(cr, left, bottom, width, alpha)
         c = self.chat
         if c is not None and c.asking:
-            bottom -= CHAT_ASK_H + 8
-            self.draw_chat_ask(cr, left, bottom + 4, width, alpha)
+            ask_h = self.chat_ask_h(cr, width)
+            bottom -= ask_h + 8
+            self.draw_chat_ask(cr, left, bottom + 4, width, alpha, ask_h)
         top = CHAT_HEAD + 6
         self.draw_chat_log(cr, left, top, width, bottom - 8, alpha)
         self.draw_chat_input(cr, left, box_y, width, ih, alpha)
@@ -1464,8 +1531,64 @@ class ChatView:
             self.tip_text(cr, layout, left + (width - lw) / 2, y, mascot.rgba(self.ink(role))[:3], alpha, False)
             y += lh + 8
 
-    def draw_chat_ask(self, cr, left, y, width, alpha):
+    def chat_ask_h(self, cr, width):
+        """Alto de la tarjeta de lo pendiente: la del permiso es fija; la de una
+        pregunta crece con su texto y sus opciones."""
+        quiz = self.quiz()
+        if quiz is None:
+            return CHAT_ASK_H
+        q = self.chat.questions()[quiz['n']]
+        layout = self._layout(cr, q['question'], FONT_YOU, width - 24, 2)
+        return 34 + layout.get_pixel_size()[1] + len(q['options']) * (CHAT_OPT_H + 4) + 30
+
+    def draw_chat_quiz(self, cr, left, y, width, alpha, height):
+        """La pregunta de opciones de Claude, encima de la caja: su texto y una
+        fila por opción. En las de varias opciones se marcan y «Listo» las manda;
+        lo que se escriba en la caja es otra respuesta."""
+        quiz = self.quiz()
+        questions = self.chat.questions()
+        q = questions[quiz['n']]
+        color = self.chat_color()
+        mascot.rrect(cr, left, y, width, height, 12)
+        cr.set_source_rgba(*color, .10 * alpha)
+        cr.fill_preserve()
+        cr.set_source_rgba(*color, .45 * alpha)
+        cr.set_line_width(1)
+        cr.stroke()
+        head = q['header'] or 'Te pregunta'
+        if len(questions) > 1:
+            head += f' · {quiz["n"] + 1} de {len(questions)}'
+        self.put(cr, head, FONT_LINK, left + 12, y + 10, color, alpha)
+        ink, soft = mascot.rgba(self.ink('arg'))[:3], mascot.rgba(self.ink('text', .66))[:3]
+        text_h = self._layout(cr, q['question'], FONT_YOU, width - 24, 2).get_pixel_size()[1]
+        self.put(cr, q['question'], FONT_YOU, left + 12, y + 28, ink, alpha, width=width - 24, lines=2)
+        row = y + 32 + text_h
+        for i, (label, desc) in enumerate(q['options']):
+            marked = label in quiz['marked']
+            key = f'chat-opt:{i}'
+            self.buttons[key] = (left + 8, row, width - 16, CHAT_OPT_H)
+            over = self.over(left + 8, row, width - 16, CHAT_OPT_H)
+            mascot.rrect(cr, left + 8, row, width - 16, CHAT_OPT_H, 8)
+            cr.set_source_rgba(*(color if marked else (1, 1, 1)), (.30 if marked else .12 if over else .05) * alpha)
+            cr.fill()
+            mark = ('☑ ' if marked else '☐ ') if q['multi'] else ''
+            self.put(cr, mark + label, FONT_LINK, left + 18, row + 5, (1, 1, 1) if over or marked else ink, alpha,
+                     width=width - 36)
+            if desc:
+                self.put(cr, desc, FONT_STEP, left + 18, row + 21, soft, alpha, width=width - 36)
+            row += CHAT_OPT_H + 4
+        by = y + height - 8 - 22
+        self.put(cr, 'o escribe otra respuesta y Enter', FONT_STEP, left + 12, by + 3, soft, alpha, width=width - 200)
+        right = left + width - 12
+        self.draw_button(cr, 'chat-deny', 'Omitir', right - 84, by, False, alpha)
+        if q['multi'] and quiz['marked']:
+            self.draw_button(cr, 'chat-next', 'Listo', right - 2 * 84 - 8, by, True, alpha)
+
+    def draw_chat_ask(self, cr, left, y, width, alpha, height=CHAT_ASK_H):
         """La tarjeta del permiso, encima de la caja."""
+        if self.quiz() is not None:
+            self.draw_chat_quiz(cr, left, y, width, alpha, height)
+            return
         ask = self.chat.asking
         red = mascot.rgba(self.ink('bad'))[:3]
         mascot.rrect(cr, left, y, width, CHAT_ASK_H, 12)
