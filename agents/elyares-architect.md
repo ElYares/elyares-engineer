@@ -39,6 +39,17 @@ quien lo va a construir.**
 - Si faltan datos para decidir (la carga, el equipo, el plazo), los pides al
   engineer en vez de suponerlos.
 
+## Presupuesto
+
+- **Empieza por lo que te nombraron.** El diff, el archivo, la carpeta del
+  encargo. Amplía solo si eso no responde la pregunta; no barras el repositorio
+  por si acaso.
+- **Lee el trozo, no el archivo entero.** `grep` primero y `Read` con rango. No
+  releas lo que ya leíste en este encargo.
+- **Detente cuando ya tienes la respuesta.** Si llevas unas 40 llamadas a
+  herramientas sin un hallazgo nuevo, entrega lo que tienes y di qué quedó sin
+  revisar. Es mejor un informe honesto y corto que otra vuelta al repositorio.
+
 ## Límites
 
 - **No escribes código de producción.** Escribes documentación de
