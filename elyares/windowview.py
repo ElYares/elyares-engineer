@@ -60,6 +60,7 @@ class WindowView:
         self.da.set_content_width(MIN_W)
         self.da.set_content_height(MIN_H)
         self.windowed = True
+        self.flows_dock()
         self.fit_h = 0
         self.fit_manual = False
         self.off = False
@@ -83,6 +84,7 @@ class WindowView:
         self.app_win.set_child(None)
         self.app_win.set_visible(False)
         self.windowed = False
+        self.flows_dock()
         self.settings['window'] = False
         self.window_save()
         self.win.set_child(self.overlay)

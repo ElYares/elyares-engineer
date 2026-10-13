@@ -155,10 +155,17 @@ class Hook(unittest.TestCase):
                         'git push --delete origin feat/x', 'git reset --hard', 'git checkout -- .',
                         'git checkout main', 'git rebase v2', 'git merge v2', 'git clean -fd', 'git stash',
                         'gh pr merge 12', 'gh pr close 12', 'gh auth switch --user ElYares', 'gh auth logout', 'gh release create v3', 'rm -rf build',
-                        'ssh prod', 'make deploy', 'npm install', "bash -c 'git push --force'"):
+                        'ssh prod', 'ssh prod make update', "ssh prod 'sudo systemctl restart nginx'",
+                        'scp a.sql prod:/tmp/', 'scp prod:/etc/x ~/x', 'sftp prod', 'make deploy', 'npm install', "bash -c 'git push --force'"):
             code, said = run('entrega', {'tool_input': {'command': command}})
             self.assertEqual(code, 2, command)
             self.assertIn('lee y entrega', said)
+        # El devops entra a un servidor, pero solo a leer.
+        for command in ("ssh prod 'tail -50 /var/log/nginx/error.log'", "ssh -p 2222 prod 'crontab -l'",
+                        "ssh prod 'cd ~/app && git log --oneline -5 && ls storage'",
+                        'scp prod:/etc/nginx/nginx.conf /tmp/'):
+            self.assertEqual(run('entrega', {'tool_input': {'command': command}}), (0, ''), command)
+        self.assertEqual(run('solo-lectura', {'tool_input': {'command': "ssh prod 'ls'"}})[0], 2)
         # Lo de entregar sigue frenado para los que solo leen.
         self.assertEqual(run('solo-lectura', {'tool_input': {'command': 'git commit -m x'}})[0], 2)
         self.assertEqual(run('solo-lectura', {'tool_input': {'command': 'gh pr create'}})[0], 2)

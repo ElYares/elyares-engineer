@@ -958,6 +958,36 @@ class Chat(Dibujo):
         self.assertEqual({k for _, k, *_ in self.isl.hits} >= {'close', 'new', 'type'}, True)
         self.assertIsNotNone(self.isl.chat_box)
 
+    def test_una_tabla_se_dibuja_como_una_cuadricula(self):
+        E = app.chatview.chat.Entry
+        long = 'una celda con tanto texto que no cabe en un renglón de la conversación ' * 2
+        entry = E('claude', f'Antes\n\n| Atajo | Acción |\n|---|---:|\n| `SUPER + ,` | {long}|\n| otro | 2 |\n\ndespués')
+        self.conversation().entries = [entry]
+        inner = 560 - app.chatview.CHAT_INDENT
+        layout, height, _, grids = self.isl.chat_layout(self.cr, 0, entry, 560)
+        (cells, widths, heights, headed), = grids
+        self.assertTrue(headed)
+        self.assertEqual([cell.get_text() for cell in cells[1]], ['SUPER + ,', long.strip()])   # sin acentos graves
+        self.assertLessEqual(sum(widths), inner)                    # cabe a lo ancho...
+        self.assertGreater(cells[1][1].get_line_count(), 1)         # ...porque la celda larga se parte en su columna
+        self.assertEqual(cells[2][1].get_alignment(), app.chatview.Pango.Alignment.RIGHT)
+        # El texto le guarda su hueco: lo de después va debajo de la tabla.
+        self.assertGreater(height, sum(heights) + 2 * layout.get_line(0).get_pixel_extents()[1].height)
+        self.assertNotIn('|', layout.get_text())
+        self.draw()
+
+    def test_un_markdown_mal_cerrado_sale_como_texto(self):
+        E = app.chatview.chat.Entry
+        entry = E('claude', '*a **b* c**')                          # una cursiva y una negrita cruzadas
+        self.conversation().entries = [entry]
+        layout, *_ = self.isl.chat_layout(self.cr, 0, entry, 560)
+        self.assertEqual(layout.get_text(), '*a **b* c**')
+        # Y dentro de una celda, que va aparte: sus letras, sin el marcado.
+        entry = E('claude', '| a |\n|---|\n| *x **y* z** |')
+        *_, grids = self.isl.chat_layout(self.cr, 0, entry, 560)
+        self.assertEqual(grids[0][0][1][0].get_text(), 'x y z')
+        self.draw()
+
     def test_el_permiso_se_contesta_en_su_tarjeta(self):
         c = self.conversation()
         c.busy = True
@@ -2627,8 +2657,8 @@ class Flujos(IslandCase):
         self.assertEqual(len(draft.w.steps), app.workflowview.WF_MAX_STEPS)
 
 
-class FlujosDibujo(IslandCase):
-    """La isla de los flujos, dibujada fuera de pantalla junto a la de siempre."""
+class FlujosBase(IslandCase):
+    """Lo que comparten las pruebas de los flujos: la isla armada y cómo se dibuja y se pulsa."""
 
     WIDTH = 1920                    # la pantalla
 
@@ -2666,6 +2696,10 @@ class FlujosDibujo(IslandCase):
         else:
             _, _, x, y, w, h = next(hit for hit in isl.wf_hits if hit[:2] == ('wf', key))
         isl.on_flows_click(None, 1, x + w / 2, y + h / 2)
+
+
+class FlujosDibujo(FlujosBase):
+    """La isla de los flujos, dibujada fuera de pantalla junto a la de siempre."""
 
     def test_sale_a_la_izquierda_de_la_isla_y_del_otro_lado_si_no_cabe(self):
         isl = self.isl
@@ -2777,14 +2811,14 @@ class FlujosDibujo(IslandCase):
                      E('foot', 'x')]
         isl.chat, isl.chat_open = c, True
         isl.chat_cache = {}
-        layout, _, _ = isl.chat_layout(self.cr, 0, c.entries[0], 560)
+        layout, *_ = isl.chat_layout(self.cr, 0, c.entries[0], 560)
         markup = layout.get_attributes()
         self.assertIsNotNone(markup)                    # tiene negritas y código: no es texto plano
         self.assertIn('•', layout.get_text())            # la viñeta, no el guion
         self.assertNotIn('**', layout.get_text())
         self.assertNotIn('`', layout.get_text())
         # Lo que escribes tú sigue siendo texto tal cual.
-        plain, _, _ = isl.chat_layout(self.cr, 1, E('you', 'haz **esto**'), 560)
+        plain, *_ = isl.chat_layout(self.cr, 1, E('you', 'haz **esto**'), 560)
         self.assertIn('**', plain.get_text())
         # «copiar» de la respuesta de un agente no se lleva lo que mandó el workflow.
         c.entries = [E('flow', 'x'), E('claude', 'hecho'), E('foot', 'y')]
@@ -2884,6 +2918,76 @@ class FlujosDibujo(IslandCase):
         # Dibujar la de los flujos deja lo pulsable de cada una en su sitio.
         self.assertEqual((isl.hits, isl.buttons, isl.pointer), ([('chat', 'x', 0, 0, 1, 1)], {'allow': (0, 0, 1, 1)}, (3, 4)))
         self.assertTrue(isl.wf_hits)
+
+
+class FlujosEnVentana(FlujosBase):
+    """El panel de los flujos dentro de la ventana de la app, no en su capa."""
+
+    WIDTH = 1000                    # lo que mide la ventana
+
+    def setUp(self):
+        super().setUp()
+        isl = self.isl
+        isl.windowed = True
+        isl.workflows = [self.flow]
+        isl.h = 400                 # el alto que la ventana le deja al contenido
+
+    def test_el_panel_llena_la_ventana_y_no_hay_pastilla(self):
+        isl = self.isl
+        isl.settings['flows_collapsed'] = isl.wf_collapsed = True      # de cuando era capa
+        isl.open_workflows()
+        self.draw()
+        x0, w, h = isl.flows_rect(self.WIDTH)
+        self.assertEqual((x0, w, h), (0, self.WIDTH, 400))
+        self.assertFalse(isl.wf_pill())
+        self.assertIn('Workflows', self.shown)                         # el panel, no «Flujos» en su pastilla
+        self.assertNotIn('wf-collapse', isl.wf_buttons)                # colapsar no existe aquí
+
+    def test_los_proyectos_salen_dentro_de_la_ventana(self):
+        isl = self.isl
+        isl.projects_open = True
+        self.assertEqual(isl.target(), 'projects')                     # en la misma ventana, no en otra capa
+        self.assertTrue(isl.windowed)
+
+    def test_la_ventana_toma_el_alto_del_panel(self):
+        isl = self.isl
+        isl.chat_open = True                                           # lo de abajo: el chat, más alto
+        isl.open_workflows()
+        self.assertEqual(isl.goal()[1], isl.workflows_goal()[1])
+        isl.close_workflows()
+        self.assertEqual(isl.goal(), (app.chatview.CHAT_W, app.chatview.CHAT_H))
+
+    def test_un_clic_en_el_panel_lo_atiende(self):
+        isl = self.isl
+        isl.open_workflows()
+        self.draw()
+        self.click('new')
+        self.assertEqual(isl.wf_screen, 'edit')
+        self.draw()
+        self.assertIsNotNone(isl.wf_box)                               # la caja de texto sobre el nombre
+
+    def test_el_panel_pasa_de_la_capa_a_la_ventana_y_vuelve(self):
+        isl = self.isl
+        isl.windowed = False
+        isl.flows_win, isl.flows_overlay = mock.Mock(), mock.Mock()
+        isl.overlay = mock.Mock()
+        isl.flows_overlay.get_parent.return_value = isl.flows_win
+        isl.wf_open = True
+        isl.windowed = True
+        isl.flows_dock()
+        isl.flows_win.set_child.assert_called_once_with(None)
+        isl.overlay.add_overlay.assert_called_once_with(isl.flows_overlay)
+        isl.flows_win.set_visible.assert_called_with(False)            # la capa no se ve
+        isl.flows_overlay.set_visible.assert_called_with(True)         # el panel sí
+        isl.wf_open = False
+        isl.flows_dock()
+        isl.flows_overlay.set_visible.assert_called_with(False)
+        # Se cierra la ventana: vuelve a su capa.
+        isl.windowed = False
+        isl.flows_overlay.get_parent.return_value = isl.overlay
+        isl.flows_dock()
+        isl.overlay.remove_overlay.assert_called_once_with(isl.flows_overlay)
+        isl.flows_win.set_child.assert_called_with(isl.flows_overlay)
 
 
 class Ventana(Dibujo):
