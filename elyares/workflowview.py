@@ -35,7 +35,8 @@ Shift+Tab, al anterior; Esc lo suelta. El agente de un paso y el proyecto se
 eligen en un menú, como el de «con quién hablas» del chat.
 
 Quién ejecuta la cadena es la isla: cada paso se le manda al chat de ese
-agente en el proyecto (`chat_for`), como si se lo escribieras tú, y cuando
+agente en el proyecto (`chat_free`: la de siempre y, si trabaja, otra libre
+o una nueva), como si se lo escribieras tú, y cuando
 ese turno acaba (`workflow_event`, que llama `on_chat`) sale el siguiente con
 lo que contestó el anterior. Por eso cada paso corre con los permisos de ese
 chat, ni más ni menos, y se ve trabajar en el tablero como cualquier otro.
@@ -141,7 +142,7 @@ class WorkflowView:
         self.wf_menu_at = None        # dónde sale el menú abierto, del último dibujo
         self.wf_error = None          # (texto, referencia, cómo reintentar)
         self.wf_collapsed = bool(self.settings.get('flows_collapsed'))
-        self.flows_win = self.flows_da = self.wf_entry = self.wf_entry_box = None
+        self.flows_win = self.flows_da = self.wf_entry = self.wf_entry_box = self.flows_overlay = None
         self.fw, self.fh, self.fvw, self.fvh = float(WF_PILL_W), 0.0, 0.0, 0.0
         self.fticking, self.flast = False, None
         self.wf_hits, self.wf_buttons, self.wf_pointer = [], {}, None
@@ -172,7 +173,7 @@ class WorkflowView:
             elif not os.path.isdir(run.w.project):
                 why = 'la carpeta del proyecto ya no existe'
             else:
-                c = self.chat_for(workflows.chat_agent(step.agent), run.w.project)
+                c = self.chat_free(workflows.chat_agent(step.agent), run.w.project)
                 if c.busy:
                     why = 'está ocupado con otro turno'
                 elif not c.send(run.prompt(i), shown=run.shown(i), kind='flow'):
@@ -266,14 +267,20 @@ class WorkflowView:
             self.projects = projects.listing()
         win = self.flows_window()
         if win is not None:
-            self.flows_monitor()
-            win.set_visible(True)
+            if self.windowed:
+                if self.chat_typing:
+                    self.chat_type(False)       # el teclado es de la caja del panel, no de la del chat
+                self.flows_dock()
+            else:
+                self.flows_monitor()
+                win.set_visible(True)
         self.wf_redraw()
 
     def close_workflows(self):
         """Quita la isla de los flujos. Lo que se editaba sigue ahí al volver."""
         self.wf_focus(None)
         self.wf_open, self.wf_menu, self.wf_confirm = False, None, None
+        self.flows_dock()
         self.wf_redraw()
 
     def wf_collapse(self, on):
@@ -283,6 +290,11 @@ class WorkflowView:
         self.settings['flows_collapsed'] = self.wf_collapsed
         settings.save(self.settings)
         self.wf_redraw()
+
+    def wf_pill(self):
+        """¿Se ve como pastilla? En la ventana de la app no hay pastilla: es
+        el panel entero o nada."""
+        return self.wf_collapsed and not self.windowed
 
     def workflows_tick(self):
         """Cada segundo: suelta el teclado si hace rato que no se teclea y, con
@@ -313,7 +325,7 @@ class WorkflowView:
         nada (sin alto) si está cerrada."""
         if not self.wf_open:
             return self.fw, 0
-        return (WF_PILL_W, WF_PILL_H) if self.wf_collapsed else self.workflows_goal()
+        return (WF_PILL_W, WF_PILL_H) if self.wf_pill() else self.workflows_goal()
 
     # ── los campos de texto: una caja propia, encima del que se escribe ─────
 
@@ -342,8 +354,9 @@ class WorkflowView:
         self.wf_typing = bool(on) and self.wf_open
         self.wf_keyed = time.monotonic()
         if self.flows_win is not None:
-            LayerShell.set_keyboard_mode(
-                self.flows_win, LayerShell.KeyboardMode.ON_DEMAND if self.wf_typing else LayerShell.KeyboardMode.NONE)
+            if not self.windowed:
+                LayerShell.set_keyboard_mode(
+                    self.flows_win, LayerShell.KeyboardMode.ON_DEMAND if self.wf_typing else LayerShell.KeyboardMode.NONE)
             if self.wf_typing and self.wf_entry_box is not None and self.wf_entry_box.get_visible():
                 self.wf_entry.grab_focus()         # si no, lo hace `wf_place_entry` al ponerla en su sitio
         self.wf_redraw()
@@ -452,7 +465,26 @@ class WorkflowView:
         overlay.add_overlay(box)
         win.set_child(overlay)
         self.flows_win, self.flows_da, self.wf_entry, self.wf_entry_box = win, da, view, box
+        self.flows_overlay = overlay
         return win
+
+    def flows_dock(self):
+        """Dónde está el panel. En modo ventana no es una capa: su dibujo y su
+        caja pasan al `overlay` de la ventana de la app y, abierto, la cubren
+        entera; cerrado, se esconden. Fuera de ese modo vuelve a su capa."""
+        win, panel = self.flows_win, self.flows_overlay
+        if win is None or panel is None:
+            return
+        if self.windowed:
+            if panel.get_parent() is win:
+                win.set_child(None)
+                self.overlay.add_overlay(panel)
+            win.set_visible(False)
+            panel.set_visible(self.wf_open)
+        elif panel.get_parent() is self.overlay:
+            self.overlay.remove_overlay(panel)
+            win.set_child(panel)
+            panel.set_visible(True)
 
     def flows_monitor(self):
         """La isla de los flujos sale en la pantalla en la que está la isla."""
@@ -484,6 +516,9 @@ class WorkflowView:
         """(x, ancho, alto) de la isla de los flujos en su ventana: pegada a
         la de siempre, del lado que le toca."""
         from . import app
+        if self.windowed:
+            self.wf_side = 'left'
+            return self.island_rect(width)      # la ventana es el panel: todo el ancho y su alto
         w, h = clamp(self.fw, 0, WF_W), clamp(self.fh, 0, WF_WIN_H)
         win_left = self.offset() if self.moved() else (width - app.WIN_W) / 2
         ix0, iw, _ = self.island_rect(app.WIN_W)
@@ -506,7 +541,7 @@ class WorkflowView:
 
     def flows_follow(self):
         """La isla de siempre se movió o cambió de tamaño: la de los flujos la sigue."""
-        if self.flows_win is not None:
+        if self.flows_win is not None and not self.windowed:
             LayerShell.set_margin(self.flows_win, LayerShell.Edge.TOP, self.top())
         if self.flows_da is not None and self.wf_open:
             self.flows_da.queue_draw()
@@ -529,14 +564,16 @@ class WorkflowView:
         widget.queue_draw()
         if settled:
             self.fticking = False
-            if not self.wf_open and self.flows_win is not None:
+            if self.windowed:
+                self.flows_dock()
+            elif not self.wf_open and self.flows_win is not None:
                 self.flows_win.set_visible(False)       # ya se cerró: no deja nada que tapar
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
 
     def flows_region(self):
         """Solo la isla recibe clics; fuera de ella pasan a las ventanas de abajo."""
-        surface = self.flows_win.get_surface() if self.flows_win is not None else None
+        surface = self.flows_win.get_surface() if self.flows_win is not None and not self.windowed else None
         if surface is None:
             return
         x0, w, h = self.flows_rect(self.flows_da.get_width())
@@ -566,7 +603,7 @@ class WorkflowView:
         self.hits, self.buttons, self.pointer = [], {}, self.wf_pointer
         self.wf_box = None
         try:
-            if self.wf_collapsed:
+            if self.wf_pill():
                 self.draw_wf_pill(cr, x0, w, h, clamp((h - 14) / 20))
             else:
                 self.draw_workflows(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 40) / 40))
@@ -617,7 +654,7 @@ class WorkflowView:
         x0, w, h = self.flows_rect(self.flows_da.get_width())
         if not (x0 <= x <= x0 + w and y <= h):
             return
-        if self.wf_collapsed:
+        if self.wf_pill():
             self.wf_collapse(False)
             return
         for key, (bx, by, bw, bh) in self.wf_buttons.items():
@@ -631,7 +668,7 @@ class WorkflowView:
 
     def on_flows_scroll(self, dy):
         pointer = self.wf_pointer
-        if pointer is None or self.wf_collapsed:
+        if pointer is None or self.wf_pill():
             return False
         x0, w, h = self.flows_rect(self.flows_da.get_width())
         if not (x0 <= pointer[0] <= x0 + w and pointer[1] <= h):
@@ -649,7 +686,7 @@ class WorkflowView:
         if box is None:
             return
         show = (self.wf_field is not None and self.wf_typing and self.wf_box is not None
-                and not self.wf_collapsed and h > self.flows_goal()[1] - 40)
+                and not self.wf_pill() and h > self.flows_goal()[1] - 40)
         if show:
             x, y, w, hh = self.wf_box
             if (box.get_margin_start(), box.get_margin_top()) != (x, y):
@@ -900,8 +937,9 @@ class WorkflowView:
         elif screen == 'run':
             x -= self.wf_link(cr, 'back', '‹ todos', x, 14, alpha, right=True) + 14
         arrow = WF_SIDES[self.wf_side]
-        x -= self.wf_link(cr, 'collapse', f'colapsar {arrow}' if arrow == '›' else f'{arrow} colapsar', x, 14,
-                          alpha, right=True) + 14
+        if not self.windowed:
+            x -= self.wf_link(cr, 'collapse', f'colapsar {arrow}' if arrow == '›' else f'{arrow} colapsar', x, 14,
+                              alpha, right=True) + 14
         tw = self.wf_put(cr, title, FONT_WF_TITLE, left, 14, TITLE, alpha, width=x - left - 120)
         if note:
             self.wf_put(cr, note, FONT_WF_NOTE, left + tw + 12, 17, soft, alpha, width=x - left - tw - 24)

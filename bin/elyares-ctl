@@ -10,6 +10,11 @@ Uso: elyares-ctl <orden>
               Con quién: engineer, architect, auditor, reviewer, designer, mobile,
               devops o researcher, el chat de ese agente.
               Con --dir: en el proyecto de esa carpeta
+    window [toggle]
+              abre la app en una ventana normal, con el tablero y el chat, y
+              esconde la isla mientras está abierta; cerrarla devuelve la isla.
+              Con la ventana ya abierta, la enfoca; con `toggle`, la cierra.
+              Si elyares-engineer no corre, lo arranca
     projects  abre el panel de proyectos, para empezar a trabajar en uno; otra vez, lo cierra
     workflows abre el panel de workflows: cadenas de agentes que se guardan y se
               lanzan sobre un proyecto; otra vez, lo cierra
@@ -36,15 +41,41 @@ Uso: elyares-ctl <orden>
 import json
 import os
 import socket
+import subprocess
 import sys
+import time
 
-ORDERS = ('open', 'chat', 'projects', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
+ORDERS = ('open', 'chat', 'window', 'projects', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
           'glass', 'allow', 'deny', 'status', 'toggle')
 REPLIES = ('allow', 'deny', 'status', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
 AGENTS = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', 'devops', 'researcher')
 PLACES = ('left', 'right', 'center', 'up', 'down', 'reset')
 STATES = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
+
+
+def wake(path):
+    """Abrir la app desde el lanzador no tiene que fallar porque el servicio
+    esté parado: lo arranca y espera a que abra su socket (hasta 10 s)."""
+    def up():
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(0.3)
+                s.connect(path)
+            return True
+        except OSError:
+            return False
+    if up():
+        return
+    try:
+        subprocess.run(['systemctl', '--user', 'start', 'elyares-engineer'], timeout=10, check=False,
+                       capture_output=True)
+    except (OSError, subprocess.SubprocessError):
+        return
+    for _ in range(50):
+        if up():
+            return
+        time.sleep(0.2)
 
 
 def main():
@@ -63,7 +94,8 @@ def main():
         print(__doc__.strip(), file=sys.stderr)
         return 2
     if order not in ORDERS or (order == 'toggle' and source not in SOURCES) or (
-            order == 'chat' and source and source not in AGENTS):
+            order == 'chat' and source and source not in AGENTS) or (
+            order == 'window' and source not in ('', 'toggle')):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     msg = {'control': order}
@@ -73,12 +105,16 @@ def main():
         msg['agent'] = source
     if order == 'move':
         msg['where'] = source
+    if order == 'window' and source:
+        msg['how'] = source
     if folder:
         msg['cwd'] = folder
     if order in REPLIES:
         msg['reply'] = True
     path = os.path.join(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'),
                         'elyares.sock')
+    if order == 'window':
+        wake(path)
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(0.3)

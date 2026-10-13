@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Elyares Engineer
+GenericName=Vigía de Claude Code
+Comment=El tablero de sesiones y el chat con Claude, en una ventana
+Exec=@BIN@/elyares-ctl window
+Icon=dev.elyares.Engineer
+Terminal=false
+Categories=Development;
+StartupWMClass=dev.elyares.Engineer
+Keywords=claude;agentes;isla;chat;

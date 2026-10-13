@@ -42,6 +42,15 @@ done
 install -m 644 "$here/systemd/elyares-engineer.service" "$unit_dir/"
 echo "✓ binarios en $bin_dir y servicio en $unit_dir"
 
+# La app en ventana: su entrada para el lanzador (Walker) y su ícono. Se
+# copian, no se enlazan; el `Exec` lleva la ruta de este equipo.
+apps_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+icons_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+mkdir -p "$apps_dir" "$icons_dir"
+sed "s|@BIN@|$bin_dir|" "$here/share/dev.elyares.Engineer.desktop" > "$apps_dir/dev.elyares.Engineer.desktop"
+install -m 644 "$here/share/dev.elyares.Engineer.svg" "$icons_dir/"
+echo "✓ entrada «Elyares Engineer» en $apps_dir"
+
 # En omarchy: al cambiar de tema, elyares-engineer vuelve a leer el color de acento.
 omarchy_hooks="$HOME/.config/omarchy/hooks"
 if [ -d "$omarchy_hooks" ]; then

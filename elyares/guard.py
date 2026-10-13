@@ -7,7 +7,9 @@ Uso, con el payload del hook por stdin (install.sh lo copia como `elyares-guard`
                                entra a un servidor o toca lo desplegado
   elyares-guard entrega        el Bash del devops: como solo-lectura, y además lo
                                de entregar un cambio: preparar archivos, hacer
-                               el commit, subir la rama y abrir o editar su PR
+                               el commit, subir la rama y abrir o editar su PR,
+                               y entrar a un servidor por `ssh` a leer (el
+                               comando remoto pasa por las mismas reglas)
   elyares-guard solo-docs      el Edit y el Write de un agente que solo documenta
                                (el architect, el researcher): nada que no sea
                                documentación
@@ -97,6 +99,8 @@ XARGS_VALUE_FLAGS = {'-I', '-n', '-P', '-d', '-L', '-s', '-E'}
 # Operación. Un agente que solo lee no entra a ningún servidor ni cambia el
 # estado de nada que esté desplegado.
 REMOTE = {'ssh', 'scp', 'sftp', 'mosh', 'telnet'}
+SSH_VALUE_FLAGS = {'-p', '-i', '-o', '-l', '-J', '-F', '-b', '-c', '-D', '-E', '-e', '-I', '-L',
+                   '-m', '-O', '-Q', '-R', '-S', '-W', '-w', '-B', '-P'}
 MAKE_READ = {'test', 'tests', 'lint', 'check', 'typecheck', 'analyse', 'analyze', 'stan',
              'phpstan', 'help', 'list'}
 MAKE_DRY = {'-n', '--dry-run', '--just-print', '--recon', '-q', '--question', '-p',
@@ -323,6 +327,23 @@ def docker(args, scratch, depth):
     return simple(inner, scratch, depth + 1)
 
 
+def ssh(args, scratch, depth):
+    """`ssh host comando`: pasa si el comando remoto también es de solo lectura."""
+    rest = after_options(args, SSH_VALUE_FLAGS)[1:]               # sin el host
+    if not rest:
+        return '`ssh` sin un comando abre una sesión interactiva'
+    reason = check(' '.join(rest), scratch, depth + 1)
+    return f'en el servidor, {reason}' if reason else None
+
+
+def scp(args, scratch):
+    """`scp host:ruta local`: solo para traer algo a /tmp; subir cambia el servidor."""
+    paths = [a for a in after_options(args, SSH_VALUE_FLAGS) if not a.startswith('-')]
+    if len(paths) < 2 or ':' in paths[-1] or not writable(paths[-1], scratch):
+        return '`scp` solo trae archivos del servidor, y a /tmp'
+    return None
+
+
 def simple(segment, scratch, depth=0):
     """El motivo por el que un comando simple no es de solo lectura, o None."""
     reason = redirect(segment, scratch)
@@ -378,6 +399,10 @@ def simple(segment, scratch, depth=0):
         sub = after_options(rest)[:1]
         return None if not sub or sub[0] in SYSTEMCTL_READ else f'`systemctl {sub[0]}` cambia un servicio'
     if name in REMOTE:
+        if DELIVERS and name == 'ssh':
+            return ssh(rest, scratch, depth)
+        if DELIVERS and name == 'scp':
+            return scp(rest, scratch)
         return f'`{name}` se conecta a otro equipo'
     if name == 'make':
         return make(rest)

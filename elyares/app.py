@@ -84,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, chatview, coffe, commands, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, projectview, settings, sources, state, store, testrun, theme, workflowview)
+               preview, projectview, settings, sources, state, store, testrun, theme, windowview, workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
 MAX_ROWS = 5          # filas de la lista de alertas, con la cabecera de siempre
@@ -254,7 +254,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowView):
+class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowView, windowview.WindowView):
     def __init__(self, app):
         self.gtk_app = app              # la ventana de los flujos se crea con ella, la primera vez que se abre
         self.model = Model()
@@ -310,6 +310,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.chat_init()
         self.chat_restore(store.load_chats())
         self.workflows_init()
+        self.window_init()
+        self.island_w, self.island_h = WIN_W, WIN_H     # lo que mide la capa, para devolvérselo al cerrar la ventana
         self.reloading = False          # se pidió volver a arrancar: en cuanto no haya turnos en curso
         self.tip = None                 # (fuente, centro, opacidad) de la pastilla bajo el cursor
         self.tip_key = None
@@ -383,6 +385,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         overlay = Gtk.Overlay()
         overlay.set_child(da)
         win.set_child(overlay)
+        self.overlay = overlay
         self.da = da
         self.chat_widgets(overlay)
 
@@ -393,6 +396,9 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
 
         win.present()
         self.update_region()
+        if self.settings.get('window'):
+            # Estaba en ventana al recargarse (o al apagarse): vuelve a estarlo.
+            GLib.idle_add(lambda: self.open_window() or GLib.SOURCE_REMOVE)
 
         ipc.serve(lambda msg, req: GLib.idle_add(self.on_socket, msg, req),
                   lambda req: GLib.idle_add(self.on_gone, req))
@@ -689,7 +695,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         elif order == 'toggle':
             if (msg or {}).get('source') in sources.PREFIXES:
                 self.toggle_source(msg['source'])
+        elif order == 'window':
+            if (msg or {}).get('how') == 'toggle':
+                self.toggle_window()
+            else:
+                self.open_window()
         elif order == 'hide':
+            if self.windowed:
+                return GLib.SOURCE_REMOVE
             self.off = not self.off
             self.collapse()
         elif order == 'compact':
@@ -836,7 +849,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         a izquierda: si está fijada, cuántas sesiones hay, el contexto de la
         que se muestra y si pide permiso."""
         best = self.view.session
-        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] else []
+        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] and not self.windowed else []
         if self.view.count > 1:
             notes.append((f'{self.view.count} sesiones', MUTED_COLOR[:3]))
         if best and best.context >= CONTEXT_SHOW:
@@ -1058,7 +1071,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.collapse_id = 0
         # Fijada no se cierra: solo suelta la alerta que se había elegido en la
         # lista, para que no tape algo más urgente.
-        self.expanded = self.settings['pinned']
+        self.expanded = self.settings['pinned'] or self.windowed
         if not self.expanded:
             self.tab_manual = False     # al cerrarse, la próxima vez vuelve a seguir lo que pasa
             self.focus = None           # al volver a abrirla, el tablero y no un desglose
@@ -1078,6 +1091,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         """Fija la isla abierta, o la suelta para que vuelva a cerrarse sola.
         Fijada se queda además en el monitor donde se fijó; suelta vuelve a
         seguir al enfocado, que puede ser otro."""
+        if self.windowed:
+            return                      # la ventana ya es la isla abierta del todo
         pinned = self.settings['pinned'] = not self.settings['pinned']
         self.settings['pinned_monitor'] = (self.monitor or {}).get('name', '') if pinned else ''
         settings.save(self.settings)
@@ -1091,6 +1106,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 self.on_focused_monitor(focused['name'])
 
     def toggle_compact(self):
+        if self.windowed:
+            return
         if self.chat_open:
             self.close_chat()           # el chat manda sobre la isla mientras está abierto: sin cerrarlo no se achica
         self.settings['compact'] = not self.settings['compact']
@@ -1098,7 +1115,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.collapse()
 
     def target(self):
-        if self.off:
+        if self.off and not self.windowed:
             return 'off'
         if self.chat_open:
             # El chat ocupa la isla mientras está abierto, fijada o no.
@@ -1106,7 +1123,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if self.projects_open:
             return 'projects'
         mode = self.view.mode
-        if self.expanded:
+        if self.expanded or self.windowed:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
             # la cabecera de siempre: es donde están las fuentes.
             if self.claude():
@@ -1195,6 +1212,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def goal(self):
         """Tamaño al que va la isla: el del modo, más el detalle entero, las
         filas y las fuentes."""
+        if self.windowed and self.wf_open:
+            return BOARD_W, self.workflows_goal()[1]    # el panel de flujos cubre la ventana, sea lo que sea lo de abajo
         mode = self.target()
         if mode == 'chat':
             return chatview.CHAT_W, chatview.CHAT_H
@@ -1260,7 +1279,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         for i in range(monitors.get_n_items()):
             mon = monitors.get_item(i)
             if mon.get_connector() == name:
-                LayerShell.set_monitor(self.win, mon)
+                if not self.windowed:
+                    LayerShell.set_monitor(self.win, mon)
                 self.screen_w = mon.get_geometry().width
                 self.screen_h = mon.get_geometry().height
                 self.place()
@@ -1286,7 +1306,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         como siempre, y el compositor la centra; en otro sitio, anclada
         también a la izquierda, con el margen que le toca en esa pantalla."""
         win = getattr(self, 'win', None)
-        if win is None:
+        if win is None or self.windowed:
             return
         moved = self.moved()
         LayerShell.set_anchor(win, LayerShell.Edge.LEFT, moved)
@@ -1469,6 +1489,9 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.next_blink = now + 2 + random.random() * 3.5
         self.update_look(now)
         self.update_region()
+        if settled and self.windowed:
+            # La burbuja de una pastilla pide sitio debajo: solo mientras se ve.
+            self.window_fit(self.h, TIP_ROOM if self.tip else 0)
         self.flows_follow()             # la isla de los flujos va pegada a ésta
 
         widget.queue_draw()
@@ -1510,6 +1533,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.look[1] += (self.look_target[1] - self.look[1]) * 0.15
 
     def update_region(self):
+        if self.windowed:
+            return                      # la ventana de la app recibe en todo su área
         w = int(max(self.w, SIZES['hidden'][0]))
         h = int(max(self.h, HOVER_STRIP))
         # Escondida del todo no recibe nada: ni la franja que la hace asomarse.
@@ -1522,8 +1547,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     # ── dibujo ───────────────────────────────────────────────────────────────
 
     def island_rect(self, width):
-        w = clamp(self.w, 0, width)
         h = clamp(self.h, 0, WIN_H)
+        if self.windowed:
+            return 0, width, h          # en la ventana, a lo ancho: no es una isla suelta
+        w = clamp(self.w, 0, width)
         return (width - w) / 2, w, h
 
     def island_fill(self, cr, x0, w, h):
@@ -1532,6 +1559,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         contorno como camino, para recortar con él, y devuelve el filo claro
         del vidrio (un camino) o None."""
         r = min(26, h / 2, w / 2) if h > 12 else min(8, h)
+        if self.windowed:
+            r = 0                       # sin esquinas ni filo: el cuerpo de una ventana
         cr.move_to(x0, 0)
         cr.line_to(x0 + w, 0)
         cr.line_to(x0 + w, h - r)
@@ -1539,14 +1568,16 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.line_to(x0 + r, h)
         cr.arc(x0 + r, h - r, r, math.pi / 2, math.pi)
         cr.close_path()
-        glass = self.settings['glass']
+        glass = self.settings['glass'] and not self.windowed
         cr.set_source_rgba(*ISLAND_BG[:3], GLASS_ALPHA if glass else ISLAND_BG[3])
         cr.fill_preserve()
         return cr.copy_path() if glass else None
 
     def draw(self, _da, cr, width, _height):
         cr.set_operator(cairo.OPERATOR_SOURCE)
-        cr.set_source_rgba(0, 0, 0, 0)
+        # En la ventana no hay capa que el compositor desenfoque ni nada detrás:
+        # el fondo es el de la isla, entero.
+        cr.set_source_rgba(*ISLAND_BG[:3], 1) if self.windowed else cr.set_source_rgba(0, 0, 0, 0)
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
 
@@ -1662,6 +1693,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 cr.restore()
             if mode == 'peek':
                 self.draw_minis(cr, x0, w, h, pet_alpha * clamp((w - SIZES['peek'][0]) / 20))
+            if mode in ('petit', 'peek'):
+                self.draw_reply_count(cr, x0, w, pet_alpha)
+        elif mode == 'hidden':
+            self.draw_reply_count(cr, x0, w, 1.0, h)
 
         # Con botones, el texto sube y deja la fila de abajo para ellos.
         ask_alpha = clamp((full_h - SIZES['open'][1]) / 16) if self.view.ask else 0.0
@@ -1696,6 +1731,33 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if ask_alpha > 0 and text_alpha > 0:
             self.draw_buttons(cr, x0 + w - 18, full_h - 14, ask_alpha * text_alpha)
         return full_h, head, text_alpha
+
+    def draw_reply_count(self, cr, x0, w, alpha, strip=0):
+        """Cuántas respuestas de agentes esperan, para cuando el tablero no se
+        ve: un número en la esquina de la pastilla o de la isla asomada, con el
+        color de la última; escondida (`strip` es su alto), una marca en su
+        franja. Nada si no hay ninguna."""
+        waiting = self.replies()
+        if not waiting or alpha <= 0:
+            return
+        tint = waiting[0].tint
+        color = mascot.rgba(mascot.accent(tint))[:3] if tint else rgb(self.colors['ok'])
+        if strip:
+            cr.rectangle(x0 + w / 2 - 20, 0, 40, strip)
+            cr.set_source_rgba(*color, alpha)
+            cr.fill()
+            return
+        r = 8
+        cx, cy = x0 + w - r - 4, r + 3
+        cr.new_sub_path()
+        cr.arc(cx, cy, r, 0, 2 * math.pi)
+        cr.set_source_rgba(*color, alpha)
+        cr.fill()
+        label = self._layout(cr, str(len(waiting)) if len(waiting) < 10 else '9+', FONT_DETAIL)
+        lw, lh = label.get_pixel_size()
+        cr.move_to(cx - lw / 2, cy - lh / 2)
+        cr.set_source_rgba(.04, .04, .06, alpha)
+        PangoCairo.show_layout(cr, label)
 
     def draw_minis(self, cr, x0, w, h, alpha):
         """Las caritas de los demás que trabajan, a la derecha de la mascota."""
@@ -1828,7 +1890,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def draw_tabs(self, cr, x0, w, current, alpha):
         """Una pestaña por sesión, y a la derecha las notas de la elegida."""
         right = x0 + w - 18
-        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] else []
+        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] and not self.windowed else []
         if current.context >= CONTEXT_SHOW:
             notes.append((f'contexto {current.context:.0f}%',
                           rgb(self.colors[paint.context_role(current.context)])))

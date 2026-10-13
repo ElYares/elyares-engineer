@@ -77,6 +77,7 @@ de dibujo (`_layout`, `tip_text`, `draw_button`, `face`, `ink`, `who`).
 """
 
 import html
+import itertools
 import math
 import os
 import subprocess
@@ -111,6 +112,9 @@ CHAT_TABS_H = 26              # la fila de conversaciones de un agente, cuando h
 CHAT_TAB_LABEL = 16           # letras del título de cada una
 CHAT_WARN_H = 26              # el aviso de que otra conversación trabaja en la misma carpeta
 CHAT_FOOT_ROW = 18            # la fila de enlaces bajo el pie, cuando a su lado no caben
+CHAT_TABLE_PAD = (10, 5)      # relleno de cada celda de una tabla: a los lados, y arriba y abajo
+CHAT_TABLE_MIN = 24           # lo menos que mide una columna, por muchas que tenga la tabla
+CHAT_TABLE_GAP = 3            # el aire sobre la caja de una tabla y bajo ella: que no toque el texto
 CHAT_CHIP_H = 22              # las etiquetas de las imágenes pegadas
 CHAT_MAX_IMAGES = 5
 CHAT_SHOW_AT = 40             # la caja de texto sale cuando a la isla le falta esto para abrirse
@@ -305,6 +309,23 @@ class ChatView:
             c = self.chats[key] = self.chat_make(agent, cwd)
         return c
 
+    def chat_free(self, agent, cwd):
+        """Una conversación con ese agente en ese proyecto que no esté
+        trabajando, para lo que corre solo (un paso de un workflow): la de
+        siempre si está libre; si no, otra libre de las que ya hay; si no,
+        una nueva (`chat_split` sin mostrarla), hasta MAX_CHATS. Con todas
+        ocupadas, o con un agente de `SINGLE_AGENTS`, la de siempre."""
+        first = self.chat_for(agent, cwd)
+        family = self.chat_family(first)
+        for c in family:
+            if not c.busy:
+                return c
+        if not self.chat_can_split(first):
+            return first
+        c = self.chat_make(first.agent, first.cwd)
+        self.chat_extra.setdefault(self.chat_key(first.agent, first.cwd), []).append(c)
+        return c
+
     def chat_make(self, agent, cwd):
         """Una conversación nueva, sin guardarla en ningún sitio."""
         pick = {} if agent else {'model': self.settings.get('chat_model', ''),
@@ -495,7 +516,8 @@ class ChatView:
     def chat_tick(self, now):
         """Cada segundo: suelta el teclado si hace rato que no se teclea,
         duerme las conversaciones que no se usan y las guarda si cambiaron."""
-        if self.chat_typing and now - self.chat_keyed > CHAT_IDLE_SECS:
+        # En la ventana el teclado es el de una app normal: lo suelta el foco, no el reloj.
+        if self.chat_typing and not self.windowed and now - self.chat_keyed > CHAT_IDLE_SECS:
             if self.chat_open:
                 self.chat_type(False)
             else:
@@ -1483,7 +1505,7 @@ class ChatView:
 
     def chat_layout(self, cr, index, entry, width):
         """Lo que mide y dibuja una cosa de la conversación, guardado mientras
-        no cambie: (layout, alto que ocupa, papel)."""
+        no cambie: (layout, alto que ocupa, papel, sus tablas ya medidas)."""
         key = (index, entry.kind, entry.text, entry.images, width)
         hit = self.chat_cache.get(key)
         if hit is not None:
@@ -1491,42 +1513,44 @@ class ChatView:
             return hit
         inner = width - CHAT_INDENT
         if entry.kind == 'claude':
-            blocks = []
-            markup = self.chat_markdown(entry.text, blocks)
-            if not Pango.parse_markup(markup, -1, '\0')[0]:
-                markup, blocks = html.escape(entry.text, quote=False), []     # un markdown que no se pudo leer
+            blocks, tables = [], []
+            markup = self.chat_markdown(entry.text, blocks, tables)
+            if not self.chat_reads(markup):
+                markup, blocks, tables = html.escape(entry.text, quote=False), [], []   # un markdown que no se pudo leer
             self.chat_code[index] = blocks
             layout = self.chat_wrap(cr, entry.text, FONT_CHAT, inner, markup)
-            hit = (layout, layout.get_pixel_size()[1], 'arg')
+            grids = self.chat_grids(cr, layout, tables, FONT_CHAT, inner)
+            hit = (layout, layout.get_pixel_size()[1], 'arg', grids)
         elif entry.kind in ('you', 'flow'):
-            text, markup = entry.text, None
+            text, markup, tables = entry.text, None, []
             if entry.images:
                 text += ('\n' if text else '') + ('1 imagen' if entry.images == 1 else f'{entry.images} imágenes')
             if entry.kind == 'flow':
                 # Lo que manda un workflow viene en markdown, como lo que contesta Claude.
                 blocks = []
-                markup = self.chat_markdown(text, blocks)
-                if not Pango.parse_markup(markup, -1, '\0')[0]:
-                    markup, blocks = None, []
+                markup = self.chat_markdown(text, blocks, tables)
+                if not self.chat_reads(markup):
+                    markup, blocks, tables = None, [], []
                 self.chat_code[index] = blocks
             layout = self.chat_wrap(cr, text, FONT_YOU, inner - CHAT_BLOCK_PAD, markup)
-            hit = (layout, layout.get_pixel_size()[1] + 2 * CHAT_BLOCK_PAD, 'arg')
+            grids = self.chat_grids(cr, layout, tables, FONT_YOU, inner - CHAT_BLOCK_PAD)
+            hit = (layout, layout.get_pixel_size()[1] + 2 * CHAT_BLOCK_PAD, 'arg', grids)
         elif entry.kind == 'foot':
             color = mascot.accent(self.chat_role())
             markup = (f'<span foreground="{color}">▣</span>  '
                       f'<span foreground="{self.ink("text", .6)}">{html.escape(entry.text, quote=False)}</span>')
             layout = self._layout(cr, '▣  ' + entry.text, FONT_STEP, inner, 1, markup=markup)
             row = CHAT_FOOT_ROW if self.chat_foot_wraps(cr, index, layout.get_pixel_size()[0], inner) else 0
-            hit = (layout, layout.get_pixel_size()[1] + 4 + row, None)
+            hit = (layout, layout.get_pixel_size()[1] + 4 + row, None, [])
         else:
             layout = self._layout(cr, entry.text, FONT_LINK, inner, 2)
-            hit = (layout, layout.get_pixel_size()[1], 'bad' if entry.kind == 'error' else 'text')
+            hit = (layout, layout.get_pixel_size()[1], 'bad' if entry.kind == 'error' else 'text', [])
         if len(self.chat_cache) > 600:
             self.chat_cache.clear()
         self.chat_cache[key] = hit
         return hit
 
-    def chat_markdown(self, text, blocks=None):
+    def chat_markdown(self, text, blocks=None, tables=None):
         """Lo que escribe Claude, con la jerarquía de la isla: los títulos en su
         color, las negritas más claras que el texto, el código en el acento
         del tema y las viñetas y los números en el color de quien habla."""
@@ -1537,7 +1561,61 @@ class ChatView:
         ink['cmd'] = tone          # el comando de un bloque y el código en línea, del color del agente
         return paint.markdown(text, tone, self.ink('head'), bold='#ffffff',
                               dim=self.colors['text'], accent=agent,
-                              ink=ink, shade=shade, blocks=blocks)
+                              ink=ink, shade=shade, blocks=blocks, tables=tables)
+
+    @staticmethod
+    def chat_reads(markup):
+        """¿Entiende Pango este marcado? Con uno mal cerrado lanza un error, y
+        un error dentro de `draw` deja la isla en blanco."""
+        try:
+            return Pango.parse_markup(markup, -1, '\0')[0]
+        except GLib.Error:
+            return False
+
+    def chat_grids(self, cr, layout, tables, font, width):
+        """Las tablas de un texto, medidas para caber en `width`, y su hueco
+        hecho en él: cada TABLE_MARK pasa a ocupar lo que mide su tabla."""
+        if not tables:
+            return []
+        grids = [self.chat_grid(cr, table, font, width) for table in tables]
+        text, attrs = layout.get_text(), layout.get_attributes() or Pango.AttrList()
+        marks = [len(text[:i].encode()) for i, ch in enumerate(text) if ch == paint.TABLE_MARK]
+        for at, (_, widths, heights, _) in zip(marks, grids):
+            box = Pango.Rectangle()
+            box.width = sum(widths) * Pango.SCALE
+            box.height = (sum(heights) + 2 * CHAT_TABLE_GAP) * Pango.SCALE
+            box.y = -box.height
+            hole = Pango.attr_shape_new(box, box)
+            hole.start_index, hole.end_index = at, at + len(paint.TABLE_MARK.encode())
+            attrs.insert(hole)
+        layout.set_attributes(attrs)
+        return grids
+
+    def chat_grid(self, cr, table, font, width):
+        """Una tabla medida: (celdas, ancho de cada columna, alto de cada fila,
+        con cabecera). La columna que cabe en su parte del ancho se queda con
+        lo suyo; las demás se reparten lo que sobra y parten su texto. Se
+        guarda: mientras Claude sigue escribiendo debajo, la tabla no cambia."""
+        key = (font, width, str(table))
+        if key in self.chat_cache:
+            return self.chat_cache[key]
+        rows, align, headed = table
+        pad_x, pad_y = CHAT_TABLE_PAD
+        cells = [[self.chat_wrap(cr, '', font, None, cell if self.chat_reads(cell) else paint.plain(cell))
+                  for cell in row] for row in rows]
+        natural = [max(row[i].get_pixel_size()[0] for row in cells) + 1 for i in range(len(align))]
+        widths, room = [0] * len(natural), width - 2 * pad_x * len(natural)
+        for n, i in enumerate(sorted(range(len(natural)), key=natural.__getitem__)):
+            widths[i] = max(CHAT_TABLE_MIN, min(natural[i], int(room / (len(natural) - n))))
+            room -= widths[i]
+        sides = {0.0: Pango.Alignment.LEFT, .5: Pango.Alignment.CENTER, 1.0: Pango.Alignment.RIGHT}
+        for row in cells:
+            for cell, w, side in zip(row, widths, align):
+                cell.set_width(w * Pango.SCALE)
+                cell.set_alignment(sides[side])
+        heights = [max(cell.get_pixel_size()[1] for cell in row) + 2 * pad_y for row in cells]
+        self.chat_cache[key] = cells, [w + 2 * pad_x for w in widths], heights, headed
+        return self.chat_cache[key]
 
     def chat_wrap(self, cr, text, font, width, markup=None):
         """Un texto partido en todas las líneas que haga falta, sin cortarse."""
@@ -1563,7 +1641,7 @@ class ChatView:
         y = bottom + self.chat_scroll
         color = self.chat_color()
         for index in range(len(items) - 1, -1, -1):
-            (layout, hh, role), entry = items[index], c.entries[index]
+            (layout, hh, role, grids), entry = items[index], c.entries[index]
             y -= hh
             if y > bottom:
                 y -= CHAT_GAP
@@ -1582,6 +1660,7 @@ class ChatView:
                 if entry.kind == 'flow':
                     self.draw_code_backgrounds(cr, layout, x - 2, left + width - 8, y + CHAT_BLOCK_PAD, alpha)
                 self.tip_text(cr, layout, x, y + CHAT_BLOCK_PAD, mascot.rgba(self.ink('arg'))[:3], alpha, False)
+                self.draw_tables(cr, layout, grids, x, y + CHAT_BLOCK_PAD, mascot.rgba(self.ink('arg'))[:3], alpha)
                 if entry.kind == 'flow':
                     self.draw_code_links(cr, index, layout, left + width, y + CHAT_BLOCK_PAD, alpha, top, bottom)
             elif role is None:
@@ -1597,6 +1676,7 @@ class ChatView:
                 if entry.kind == 'claude':
                     self.draw_code_backgrounds(cr, layout, x - 2, left + width, y, alpha)
                 self.tip_text(cr, layout, x, y, tone, alpha, False)
+                self.draw_tables(cr, layout, grids, x, y, tone, alpha)
                 if entry.kind == 'claude':
                     self.draw_code_links(cr, index, layout, left + width, y, alpha, top, bottom)
             y -= CHAT_GAP
@@ -1647,6 +1727,49 @@ class ChatView:
         que se apaga hacia la izquierda."""
         for top, bottom in self.code_spans(layout):
             self.draw_tinted(cr, left, y + top, right - left, bottom - top, self.chat_color(), alpha)
+
+    def draw_tables(self, cr, layout, grids, x, y, tone, alpha):
+        """Las tablas de un texto, cada una en el hueco que le guarda: una caja
+        con el borde y la cabecera del color del agente, una raya entre fila y
+        fila, y cada celda en su columna."""
+        if not grids:
+            return
+        text = layout.get_text()
+        marks = [len(text[:i].encode()) for i, ch in enumerate(text) if ch == paint.TABLE_MARK]
+        r, g, b = self.chat_color()
+        pad_x, pad_y = CHAT_TABLE_PAD
+        for at, (cells, widths, heights, headed) in zip(marks, grids):
+            pos = layout.index_to_pos(at)
+            left, top = x + pos.x / Pango.SCALE, y + pos.y / Pango.SCALE + CHAT_TABLE_GAP
+            width, height = sum(widths), sum(heights)
+            cr.save()
+            mascot.rrect(cr, left, top, width, height, 6)
+            cr.clip()
+            cr.set_source_rgba(0, 0, 0, .26 * alpha)
+            cr.paint()
+            if headed:
+                cr.rectangle(left, top, width, heights[0])
+                cr.set_source_rgba(r, g, b, .20 * alpha)
+                cr.fill()
+            _, seen_top, _, seen_bottom = cr.clip_extents()
+            tops = itertools.accumulate(heights, initial=top)
+            for n, (row, row_h, row_y) in enumerate(zip(cells, heights, tops)):
+                if row_y + row_h < seen_top or row_y > seen_bottom:
+                    continue                # una fila que el scroll deja fuera
+                if n > int(headed):         # bajo la cabecera no: ahí ya cambia el fondo
+                    cr.rectangle(left, row_y, width, 1)
+                    cr.set_source_rgba(1, 1, 1, .08 * alpha)
+                    cr.fill()
+                cell_x = left
+                for cell, cell_w in zip(row, widths):
+                    PangoCairo.update_layout(cr, cell)
+                    self.tip_text(cr, cell, cell_x + pad_x, row_y + pad_y, tone, alpha, False)
+                    cell_x += cell_w
+            cr.restore()
+            mascot.rrect(cr, left + .5, top + .5, width - 1, height - 1, 6)
+            cr.set_source_rgba(r, g, b, .32 * alpha)
+            cr.set_line_width(1)
+            cr.stroke()
 
     def draw_code_links(self, cr, index, layout, right, y, alpha, top, bottom):
         """El lenguaje y «copiar» en el borde de arriba de cada bloque de código, a su derecha."""

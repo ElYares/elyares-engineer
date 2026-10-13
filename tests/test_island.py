@@ -862,6 +862,37 @@ class Tablero(Dibujo):
         self.isl.focus = ('a', 'engineer')
         self.assertEqual(self.isl.card_h('board'), 0)
 
+    def test_las_respuestas_que_esperan_se_cuentan_sin_el_tablero(self):
+        isl = self.isl
+        self.work('a')
+        self.draw()
+        self.assertNotIn('2', self.shown)                           # nada que contar
+        self.reply('elyares-reviewer', 'reviewer', 'api')
+        self.reply('elyares-designer', 'designer', 'web', at=2)
+        self.assertEqual(len(isl.replies()), 2)
+        # Asomada o en pastilla, sin el tablero a la vista: el número, en la esquina.
+        for compact in (False, True):
+            with self.subTest(compact=compact):
+                isl.settings['compact'] = compact
+                isl.view.mode = 'petit' if compact else 'peek'
+                isl.w, isl.h = app.SIZES[isl.view.mode]
+                self.shown.clear()
+                isl.draw_head(self.cr, 0, isl.w, isl.h, isl.view.mode, False, T)
+                self.assertIn('2', self.shown)
+        # Escondida: una marca en su franja, con el color de la última y sin número.
+        self.shown.clear()
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 120, 6)
+        cr = cairo.Context(surface)
+        isl.draw_head(cr, 0, 120, 6, 'hidden', False, T)
+        self.assertNotIn('2', self.shown)
+        self.assertTrue(any(surface.get_data()))
+        # El tablero ya las muestra en su ficha: ahí no se cuentan.
+        isl.expanded = True
+        self.assertEqual(isl.target(), 'board')
+        self.shown.clear()
+        self.draw()
+        self.assertNotIn('2', self.shown)
+
     def test_asomada_salen_las_caritas_de_los_demas(self):
         self.work('a')
         alone = self.isl.goal()
@@ -957,6 +988,36 @@ class Chat(Dibujo):
             self.assertIn(text, self.shown)
         self.assertEqual({k for _, k, *_ in self.isl.hits} >= {'close', 'new', 'type'}, True)
         self.assertIsNotNone(self.isl.chat_box)
+
+    def test_una_tabla_se_dibuja_como_una_cuadricula(self):
+        E = app.chatview.chat.Entry
+        long = 'una celda con tanto texto que no cabe en un renglón de la conversación ' * 2
+        entry = E('claude', f'Antes\n\n| Atajo | Acción |\n|---|---:|\n| `SUPER + ,` | {long}|\n| otro | 2 |\n\ndespués')
+        self.conversation().entries = [entry]
+        inner = 560 - app.chatview.CHAT_INDENT
+        layout, height, _, grids = self.isl.chat_layout(self.cr, 0, entry, 560)
+        (cells, widths, heights, headed), = grids
+        self.assertTrue(headed)
+        self.assertEqual([cell.get_text() for cell in cells[1]], ['SUPER + ,', long.strip()])   # sin acentos graves
+        self.assertLessEqual(sum(widths), inner)                    # cabe a lo ancho...
+        self.assertGreater(cells[1][1].get_line_count(), 1)         # ...porque la celda larga se parte en su columna
+        self.assertEqual(cells[2][1].get_alignment(), app.chatview.Pango.Alignment.RIGHT)
+        # El texto le guarda su hueco: lo de después va debajo de la tabla.
+        self.assertGreater(height, sum(heights) + 2 * layout.get_line(0).get_pixel_extents()[1].height)
+        self.assertNotIn('|', layout.get_text())
+        self.draw()
+
+    def test_un_markdown_mal_cerrado_sale_como_texto(self):
+        E = app.chatview.chat.Entry
+        entry = E('claude', '*a **b* c**')                          # una cursiva y una negrita cruzadas
+        self.conversation().entries = [entry]
+        layout, *_ = self.isl.chat_layout(self.cr, 0, entry, 560)
+        self.assertEqual(layout.get_text(), '*a **b* c**')
+        # Y dentro de una celda, que va aparte: sus letras, sin el marcado.
+        entry = E('claude', '| a |\n|---|\n| *x **y* z** |')
+        *_, grids = self.isl.chat_layout(self.cr, 0, entry, 560)
+        self.assertEqual(grids[0][0][1][0].get_text(), 'x y z')
+        self.draw()
 
     def test_el_permiso_se_contesta_en_su_tarjeta(self):
         c = self.conversation()
@@ -2412,17 +2473,23 @@ class Flujos(IslandCase):
                                                       W.Step('elyares-engineer', 'hazlo')])
         self.chats = {}
         self.isl.chat_for = self.chat_for
+        self.isl.chat_make = self.chat_make
+
+    def chat_make(self, agent, cwd):
+        c = mock.Mock(busy=False, agent=agent, cwd=cwd, cut=False, asking=None, session='', model_id='',
+                      project='proj', context=0)
+        c.name = agent or state.MAIN_AGENT
+        c.send.return_value = True
+        c.feed.return_value = True
+        c.reply.return_value = f'lo de {agent or "engineer"}'
+        c.dump.return_value = {}
+        return c
 
     def chat_for(self, agent, cwd):
-        """El chat de cada agente, de mentira: apunta lo que se le manda."""
+        """El chat de cada agente, de mentira: apunta lo que se le manda. Queda
+        también donde la isla guarda los suyos, para que vea sus «otras»."""
         if agent not in self.chats:
-            c = mock.Mock(busy=False, agent=agent, cwd=cwd, cut=False, asking=None, session='', model_id='',
-                          project='proj', context=0)
-            c.name = agent or state.MAIN_AGENT
-            c.send.return_value = True
-            c.feed.return_value = True
-            c.reply.return_value = f'lo de {agent or "engineer"}'
-            self.chats[agent] = c
+            self.chats[agent] = self.isl.chats[self.isl.chat_key(agent, cwd)] = self.chat_make(agent, cwd)
         return self.chats[agent]
 
     def done(self, agent, **event):
@@ -2485,8 +2552,30 @@ class Flujos(IslandCase):
         self.assertEqual(self.isl.workflow_trouble(0),
                          'El paso 1 (elyares-designer) no salió: develop no está al día.')
 
-    def test_un_agente_ocupado_no_empieza_y_con_seguir_pasa_al_siguiente(self):
+    def test_con_su_agente_ocupado_el_paso_usa_otra_conversacion(self):
+        first = self.chat_for('elyares-designer', '/x/proj')
+        first.busy = True
+        self.isl.workflow_launch(self.flow)
+        first.send.assert_not_called()                  # la de siempre sigue con lo suyo
+        (other,) = self.isl.chat_extra[self.isl.chat_key('elyares-designer', '/x/proj')]
+        other.send.assert_called_once()                 # el paso corre en una nueva
+        self.assertIs(self.isl.wf_chat, other)
+        self.assertTrue(self.isl.wf_run.running)
+        # Al acabar su turno sigue el siguiente paso, como siempre.
+        self.isl.on_chat({'type': 'result'}, other)
+        self.chats[''].send.assert_called_once()
+        # Otro workflow encuentra esa conversación libre y la reusa, sin abrir una más.
+        self.done('')
+        self.assertFalse(self.isl.wf_run.running)
+        self.isl.workflow_launch(self.flow)
+        self.assertEqual(len(self.isl.chat_extra[self.isl.chat_key('elyares-designer', '/x/proj')]), 1)
+        self.assertEqual(other.send.call_count, 2)
+
+    def test_un_agente_ocupado_en_todas_no_empieza_y_con_seguir_pasa_al_siguiente(self):
+        key = self.isl.chat_key('elyares-designer', '/x/proj')
         self.chat_for('elyares-designer', '/x/proj').busy = True
+        self.isl.chat_extra[key] = [mock.Mock(busy=True, agent='elyares-designer', cwd='/x/proj')
+                                    for _ in range(app.chatview.chat.MAX_CHATS - 1)]
         self.isl.workflow_launch(self.flow)
         run = self.isl.wf_run
         self.chats['elyares-designer'].send.assert_not_called()
@@ -2627,8 +2716,8 @@ class Flujos(IslandCase):
         self.assertEqual(len(draft.w.steps), app.workflowview.WF_MAX_STEPS)
 
 
-class FlujosDibujo(IslandCase):
-    """La isla de los flujos, dibujada fuera de pantalla junto a la de siempre."""
+class FlujosBase(IslandCase):
+    """Lo que comparten las pruebas de los flujos: la isla armada y cómo se dibuja y se pulsa."""
 
     WIDTH = 1920                    # la pantalla
 
@@ -2666,6 +2755,10 @@ class FlujosDibujo(IslandCase):
         else:
             _, _, x, y, w, h = next(hit for hit in isl.wf_hits if hit[:2] == ('wf', key))
         isl.on_flows_click(None, 1, x + w / 2, y + h / 2)
+
+
+class FlujosDibujo(FlujosBase):
+    """La isla de los flujos, dibujada fuera de pantalla junto a la de siempre."""
 
     def test_sale_a_la_izquierda_de_la_isla_y_del_otro_lado_si_no_cabe(self):
         isl = self.isl
@@ -2777,14 +2870,14 @@ class FlujosDibujo(IslandCase):
                      E('foot', 'x')]
         isl.chat, isl.chat_open = c, True
         isl.chat_cache = {}
-        layout, _, _ = isl.chat_layout(self.cr, 0, c.entries[0], 560)
+        layout, *_ = isl.chat_layout(self.cr, 0, c.entries[0], 560)
         markup = layout.get_attributes()
         self.assertIsNotNone(markup)                    # tiene negritas y código: no es texto plano
         self.assertIn('•', layout.get_text())            # la viñeta, no el guion
         self.assertNotIn('**', layout.get_text())
         self.assertNotIn('`', layout.get_text())
         # Lo que escribes tú sigue siendo texto tal cual.
-        plain, _, _ = isl.chat_layout(self.cr, 1, E('you', 'haz **esto**'), 560)
+        plain, *_ = isl.chat_layout(self.cr, 1, E('you', 'haz **esto**'), 560)
         self.assertIn('**', plain.get_text())
         # «copiar» de la respuesta de un agente no se lleva lo que mandó el workflow.
         c.entries = [E('flow', 'x'), E('claude', 'hecho'), E('foot', 'y')]
@@ -2884,6 +2977,288 @@ class FlujosDibujo(IslandCase):
         # Dibujar la de los flujos deja lo pulsable de cada una en su sitio.
         self.assertEqual((isl.hits, isl.buttons, isl.pointer), ([('chat', 'x', 0, 0, 1, 1)], {'allow': (0, 0, 1, 1)}, (3, 4)))
         self.assertTrue(isl.wf_hits)
+
+
+class FlujosEnVentana(FlujosBase):
+    """El panel de los flujos dentro de la ventana de la app, no en su capa."""
+
+    WIDTH = 1000                    # lo que mide la ventana
+
+    def setUp(self):
+        super().setUp()
+        isl = self.isl
+        isl.windowed = True
+        isl.workflows = [self.flow]
+        isl.h = 400                 # el alto que la ventana le deja al contenido
+
+    def test_el_panel_llena_la_ventana_y_no_hay_pastilla(self):
+        isl = self.isl
+        isl.settings['flows_collapsed'] = isl.wf_collapsed = True      # de cuando era capa
+        isl.open_workflows()
+        self.draw()
+        x0, w, h = isl.flows_rect(self.WIDTH)
+        self.assertEqual((x0, w, h), (0, self.WIDTH, 400))
+        self.assertFalse(isl.wf_pill())
+        self.assertIn('Workflows', self.shown)                         # el panel, no «Flujos» en su pastilla
+        self.assertNotIn('wf-collapse', isl.wf_buttons)                # colapsar no existe aquí
+
+    def test_los_proyectos_salen_dentro_de_la_ventana(self):
+        isl = self.isl
+        isl.projects_open = True
+        self.assertEqual(isl.target(), 'projects')                     # en la misma ventana, no en otra capa
+        self.assertTrue(isl.windowed)
+
+    def test_la_ventana_toma_el_alto_del_panel(self):
+        isl = self.isl
+        isl.chat_open = True                                           # lo de abajo: el chat, más alto
+        isl.open_workflows()
+        self.assertEqual(isl.goal()[1], isl.workflows_goal()[1])
+        isl.close_workflows()
+        self.assertEqual(isl.goal(), (app.chatview.CHAT_W, app.chatview.CHAT_H))
+
+    def test_un_clic_en_el_panel_lo_atiende(self):
+        isl = self.isl
+        isl.open_workflows()
+        self.draw()
+        self.click('new')
+        self.assertEqual(isl.wf_screen, 'edit')
+        self.draw()
+        self.assertIsNotNone(isl.wf_box)                               # la caja de texto sobre el nombre
+
+    def test_el_panel_pasa_de_la_capa_a_la_ventana_y_vuelve(self):
+        isl = self.isl
+        isl.windowed = False
+        isl.flows_win, isl.flows_overlay = mock.Mock(), mock.Mock()
+        isl.overlay = mock.Mock()
+        isl.flows_overlay.get_parent.return_value = isl.flows_win
+        isl.wf_open = True
+        isl.windowed = True
+        isl.flows_dock()
+        isl.flows_win.set_child.assert_called_once_with(None)
+        isl.overlay.add_overlay.assert_called_once_with(isl.flows_overlay)
+        isl.flows_win.set_visible.assert_called_with(False)            # la capa no se ve
+        isl.flows_overlay.set_visible.assert_called_with(True)         # el panel sí
+        isl.wf_open = False
+        isl.flows_dock()
+        isl.flows_overlay.set_visible.assert_called_with(False)
+        # Se cierra la ventana: vuelve a su capa.
+        isl.windowed = False
+        isl.flows_overlay.get_parent.return_value = isl.overlay
+        isl.flows_dock()
+        isl.overlay.remove_overlay.assert_called_once_with(isl.flows_overlay)
+        isl.flows_win.set_child.assert_called_with(isl.flows_overlay)
+
+
+class Ventana(Dibujo):
+    """La isla como app: la misma isla, en una ventana normal."""
+
+    def setUp(self):
+        super().setUp()
+        isl = self.isl
+        isl.window_init()
+        isl.island_w, isl.island_h = app.WIN_W, app.WIN_H
+        isl.win, isl.overlay, isl.region = mock.Mock(), mock.Mock(), None
+        isl.screen_w, isl.screen_h = 1920, 1080
+        isl.gtk_app = mock.Mock()
+        isl.app_win = mock.Mock()
+        isl.da.set_content_width, isl.da.set_content_height = mock.Mock(), mock.Mock()
+        isl.expand = isl.place = isl.update_region = mock.Mock()
+        self.isl.window_save = mock.Mock()
+
+    def test_abrir_mueve_el_dibujo_de_la_capa_a_la_ventana(self):
+        isl = self.isl
+        isl.open_window()
+        self.assertTrue(isl.windowed)
+        isl.win.set_child.assert_called_once_with(None)
+        isl.app_win.set_child.assert_called_once_with(isl.overlay)
+        isl.win.set_visible.assert_called_once_with(False)
+        isl.app_win.present.assert_called_once()
+        self.assertTrue(isl.settings['window'])
+
+    def test_cerrar_devuelve_la_isla_con_su_tamano(self):
+        isl = self.isl
+        isl.open_window()
+        isl.win.reset_mock()
+        isl.collapse = mock.Mock()
+        isl.close_window()
+        self.assertFalse(isl.windowed)
+        isl.win.set_child.assert_called_once_with(isl.overlay)
+        isl.win.present.assert_called_once()
+        isl.place.assert_called()
+        self.assertFalse(isl.settings['window'])
+        isl.da.set_content_width.assert_called_with(app.WIN_W)
+
+    def test_abrirla_otra_vez_la_enfoca_y_no_crea_otra(self):
+        isl = self.isl
+        isl.open_window()
+        isl.app_win.reset_mock()
+        isl.open_window()
+        isl.app_win.set_child.assert_not_called()
+        isl.app_win.present.assert_called_once()
+
+    def test_cerrar_sin_estar_abierta_no_hace_nada(self):
+        self.isl.close_window()
+        self.isl.win.set_child.assert_not_called()
+
+    def test_la_x_de_la_ventana_no_sale_del_programa(self):
+        isl = self.isl
+        isl.open_window()
+        isl.collapse = mock.Mock()
+        self.assertTrue(isl.on_window_close(isl.app_win))        # True: GTK no la destruye
+        self.assertFalse(isl.windowed)
+
+    def test_en_ventana_no_se_esconde_ni_se_cierra_sola(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.off = True
+        self.work('a')
+        self.assertEqual(isl.target(), 'board')
+        isl.hover = isl.expanded = False
+        app.Island.collapse(isl)
+        self.assertTrue(isl.expanded)
+        self.assertEqual(isl.target(), 'board')
+
+    def test_en_ventana_fijar_y_achicar_no_tocan_las_preferencias(self):
+        isl = self.isl
+        isl.windowed = True
+        before = dict(isl.settings)
+        isl.toggle_pinned()
+        isl.toggle_compact()
+        self.assertEqual(isl.settings, before)
+        self.saved.assert_not_called()
+
+    def test_en_ventana_no_se_toca_el_layer_shell(self):
+        isl = self.isl
+        isl.windowed = True
+        with mock.patch.object(app.LayerShell, 'set_anchor') as anchor:
+            app.Island.place(isl)
+            app.Island.update_region(isl)
+        anchor.assert_not_called()
+        isl.win.get_surface.assert_not_called()
+
+    def test_la_orden_window_abre_y_toggle_alterna(self):
+        isl = self.isl
+        isl.on_control('window', {'control': 'window'})
+        self.assertTrue(isl.windowed)
+        isl.collapse = mock.Mock()
+        isl.on_control('window', {'control': 'window'})          # otra vez: enfoca, no cierra
+        self.assertTrue(isl.windowed)
+        isl.on_control('window', {'control': 'window', 'how': 'toggle'})
+        self.assertFalse(isl.windowed)
+
+    def test_el_fondo_de_la_ventana_es_opaco(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.expanded = True
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 700, 500)
+        self.cr = cairo.Context(surface)
+        isl.da = mock.Mock(get_width=lambda: 700)
+        isl.w, isl.h = isl.goal()
+        isl.draw(None, self.cr, 700, 500)
+        surface.flush()
+        data = surface.get_data()
+        corner = bytes(data[0:4])                                # esquina de arriba a la izquierda, BGRA
+        self.assertEqual(corner[3], 255)
+        far = (499 * 700 + 699) * 4                              # y la de abajo a la derecha
+        self.assertEqual(bytes(data[far:far + 4])[3], 255)
+
+    def fit_win(self):
+        """La ventana abierta, con un ancho y un alto que se pueden cambiar."""
+        isl = self.isl
+        isl.open_window()
+        isl.app_win.get_width.return_value = 660
+        isl.app_win.get_height.return_value = 0
+        return isl
+
+    def test_la_ventana_sigue_el_alto_del_contenido(self):
+        isl = self.fit_win()
+        with mock.patch.object(app.windowview.hypr, 'request') as ask, \
+                mock.patch.object(app.windowview.time, 'monotonic', lambda: 100.0):
+            isl.window_fit(400, 0)
+            self.assertEqual(ask.call_count, 1)
+            self.assertIn('resizewindowpixel exact 660 412,class:', ask.call_args[0][0])
+            isl.app_win.get_height.return_value = 412           # Hyprland la dejó como se pidió
+            isl.window_fit(402, 0)                       # un cambio chico no la mueve
+            self.assertEqual(ask.call_count, 1)
+            isl.window_fit(620, 0)
+            self.assertIn('exact 660 632,', ask.call_args[0][0])
+            self.assertFalse(isl.fit_manual)
+
+    def test_si_la_estira_a_mano_el_alto_ya_no_se_toca(self):
+        isl = self.fit_win()
+        clock = [100.0]
+        with mock.patch.object(app.windowview.hypr, 'request') as ask, \
+                mock.patch.object(app.windowview.time, 'monotonic', lambda: clock[0]):
+            isl.window_fit(400, 0)                       # pide 412
+            isl.app_win.get_height.return_value = 700    # y Yared la dejó en 700
+            clock[0] += 5
+            isl.window_fit(400, 0)
+            self.assertTrue(isl.fit_manual)
+            self.assertEqual(isl.settings['window_size'], [660, 700])
+            isl.window_fit(620, 0)                       # el chat se abre: no la mueve
+            self.assertEqual(ask.call_count, 1)
+
+    def test_recien_pedido_el_alto_no_se_toma_por_estirado(self):
+        isl = self.fit_win()
+        with mock.patch.object(app.windowview.hypr, 'request'), \
+                mock.patch.object(app.windowview.time, 'monotonic', lambda: 100.0):
+            isl.window_fit(400, 0)
+            isl.app_win.get_height.return_value = 760    # Hyprland aún no la encoge
+            isl.window_fit(400, 0)
+        self.assertFalse(isl.fit_manual)
+
+    def test_la_medida_que_dejo_se_respeta_al_abrirla(self):
+        isl = self.isl
+        isl.settings['window_size'] = [820, 700]
+        with mock.patch.object(app.windowview.GLib, 'timeout_add') as later:
+            isl.open_window()
+        self.assertTrue(isl.fit_manual)
+        self.assertEqual(later.call_args[0][1:], (isl.window_restore, (820, 700)))
+        with mock.patch.object(app.windowview.hypr, 'request') as ask:
+            isl.window_restore((820, 700))
+        self.assertIn('exact 820 700,class:', ask.call_args[0][0])
+
+    def test_una_medida_guardada_rota_no_se_usa(self):
+        isl = self.isl
+        for bad in ([], None, [820], ['a', 'b'], [10, 10], [820, 700, 1]):
+            isl.settings['window_size'] = bad
+            self.assertIsNone(isl.window_kept())
+
+    def test_sin_hyprland_la_ventana_se_ajusta_por_gtk(self):
+        isl = self.isl
+        isl.open_window()
+        isl.app_win.get_width.return_value = 660
+        isl.app_win.get_height.return_value = 0
+        with mock.patch.object(app.windowview.hypr, 'request', side_effect=OSError):
+            isl.window_fit(400, 0)
+        isl.app_win.set_default_size.assert_called_once_with(660, 412)
+
+    def test_en_ventana_la_isla_va_a_todo_el_ancho_sin_esquinas(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.w, isl.h = 600, 250
+        self.assertEqual(isl.island_rect(1000), (0, 1000, 250))
+        isl.windowed = False
+        self.assertEqual(isl.island_rect(1000), (200, 600, 250))
+
+    def test_en_ventana_no_dice_fijada(self):
+        isl = self.isl
+        isl.settings['pinned'] = True
+        self.work('a')
+        isl.expanded = True
+        self.draw()
+        self.assertIn('fijada', self.shown)
+        isl.windowed = True
+        self.draw()
+        self.assertNotIn('fijada', self.shown)
+
+    def test_el_tamano_de_la_ventana_cabe_en_la_pantalla(self):
+        isl = self.isl
+        isl.screen_w, isl.screen_h = 800, 600
+        width, height = isl.window_size()
+        self.assertLessEqual(width, 800)
+        self.assertLessEqual(height, 600)
+        self.assertGreaterEqual((width, height), (480, 320))
 
 
 if __name__ == '__main__':

@@ -12,7 +12,9 @@ import os
 # `position`: dónde va la isla a lo ancho de la pantalla, de 0 (izquierda) a 100
 # (derecha); 50, su sitio de siempre, es el centro.
 # `position_y`: cuántos px baja desde el borde de arriba; 0 es su sitio de siempre.
-DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'position': 50, 'position_y': 0,
+# `window`: la app estaba en ventana (y no en isla) al apagarse o recargarse.
+# `window_size`: [ancho, alto] que Yared le dejó a la ventana; [] hasta que la estira.
+DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'position': 50, 'position_y': 0, 'window': False, 'window_size': [],
             'chat_model': '',
             'chat_effort': '', 'devherd': True,
             'flows_collapsed': False,

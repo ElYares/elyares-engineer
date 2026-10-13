@@ -510,6 +510,33 @@ class Markdown(unittest.TestCase):
         rows = [line.split('">', 1)[1].rsplit('</span>', 1)[0] for line in out.split('\n')]
         self.assertEqual(rows, ['<b>Rama           Estado</b>', 'sprint-021026  al día', 'main           atrás'])
 
+    def test_una_tabla_para_dibujar_va_aparte_y_deja_su_hueco(self):
+        tables = []
+        out = paint.markdown('Antes\n| Atajo | Acción | N |\n|:---|:---:|---:|\n'
+                             '| `a \\| b` y `x|y` | **Cerrar** | 1 |\n| solo |\nfin',
+                             code='#111111', head='#222222', tables=tables)
+        self.assertEqual(out.split('\n'), ['Antes', paint.TABLE_MARK, 'fin'])
+        (rows, align, headed), = tables
+        self.assertTrue(headed)
+        self.assertEqual(align, [0.0, .5, 1.0])                         # los `:` de la fila de guiones
+        self.assertEqual(rows[0][0], '<span foreground="#222222" weight="bold">Atajo</span>')
+        # El código va sin sus acentos graves, y un | escapado o dentro de él no parte la celda.
+        self.assertEqual(paint.plain(rows[1][0]), 'a | b y x|y')
+        self.assertIn('foreground="#111111">a | b</span>', rows[1][0])
+        self.assertEqual(rows[1][1:], ['<b>Cerrar</b>', '1'])
+        self.assertEqual(rows[2], ['solo', '', ''])                     # a una fila corta se le completan las celdas
+        # Una sola fila, sin la de guiones, no lleva cabecera.
+        tables = []
+        paint.markdown('| a | b |', tables=tables)
+        self.assertEqual(tables, [([['a', 'b']], [0.0, 0.0], False)])
+
+    def test_una_linea_de_solo_barras_no_es_una_tabla(self):
+        for bars in ('|', '||', '|---|', '| |'):
+            tables = []
+            self.assertEqual(paint.markdown(f'hola\n{bars}\nfin', tables=tables), 'hola\nfin')
+            self.assertEqual(tables, [])
+            self.assertEqual(paint.markdown(f'hola\n{bars}\nfin'), 'hola\nfin')
+
 
 if __name__ == '__main__':
     unittest.main()
