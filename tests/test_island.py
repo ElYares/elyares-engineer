@@ -2999,16 +2999,95 @@ class Ventana(Dibujo):
         far = (499 * 700 + 699) * 4                              # y la de abajo a la derecha
         self.assertEqual(bytes(data[far:far + 4])[3], 255)
 
-    def test_la_ventana_sigue_el_alto_del_contenido(self):
+    def fit_win(self):
+        """La ventana abierta, con un ancho y un alto que se pueden cambiar."""
         isl = self.isl
         isl.open_window()
         isl.app_win.get_width.return_value = 660
-        isl.window_fit(400, 0)
-        isl.app_win.set_default_size.assert_called_once_with(660, 400 + 12)
-        isl.window_fit(402, 0)                           # un cambio chico no la mueve
-        self.assertEqual(isl.app_win.set_default_size.call_count, 1)
-        isl.window_fit(620, 0)
-        isl.app_win.set_default_size.assert_called_with(660, 620 + 12)
+        isl.app_win.get_height.return_value = 0
+        return isl
+
+    def test_la_ventana_sigue_el_alto_del_contenido(self):
+        isl = self.fit_win()
+        with mock.patch.object(app.windowview.hypr, 'request') as ask, \
+                mock.patch.object(app.windowview.time, 'monotonic', lambda: 100.0):
+            isl.window_fit(400, 0)
+            self.assertEqual(ask.call_count, 1)
+            self.assertIn('resizewindowpixel exact 660 412,class:', ask.call_args[0][0])
+            isl.app_win.get_height.return_value = 412           # Hyprland la dejó como se pidió
+            isl.window_fit(402, 0)                       # un cambio chico no la mueve
+            self.assertEqual(ask.call_count, 1)
+            isl.window_fit(620, 0)
+            self.assertIn('exact 660 632,', ask.call_args[0][0])
+            self.assertFalse(isl.fit_manual)
+
+    def test_si_la_estira_a_mano_el_alto_ya_no_se_toca(self):
+        isl = self.fit_win()
+        clock = [100.0]
+        with mock.patch.object(app.windowview.hypr, 'request') as ask, \
+                mock.patch.object(app.windowview.time, 'monotonic', lambda: clock[0]):
+            isl.window_fit(400, 0)                       # pide 412
+            isl.app_win.get_height.return_value = 700    # y Yared la dejó en 700
+            clock[0] += 5
+            isl.window_fit(400, 0)
+            self.assertTrue(isl.fit_manual)
+            self.assertEqual(isl.settings['window_size'], [660, 700])
+            isl.window_fit(620, 0)                       # el chat se abre: no la mueve
+            self.assertEqual(ask.call_count, 1)
+
+    def test_recien_pedido_el_alto_no_se_toma_por_estirado(self):
+        isl = self.fit_win()
+        with mock.patch.object(app.windowview.hypr, 'request'), \
+                mock.patch.object(app.windowview.time, 'monotonic', lambda: 100.0):
+            isl.window_fit(400, 0)
+            isl.app_win.get_height.return_value = 760    # Hyprland aún no la encoge
+            isl.window_fit(400, 0)
+        self.assertFalse(isl.fit_manual)
+
+    def test_la_medida_que_dejo_se_respeta_al_abrirla(self):
+        isl = self.isl
+        isl.settings['window_size'] = [820, 700]
+        with mock.patch.object(app.windowview.GLib, 'timeout_add') as later:
+            isl.open_window()
+        self.assertTrue(isl.fit_manual)
+        self.assertEqual(later.call_args[0][1:], (isl.window_restore, (820, 700)))
+        with mock.patch.object(app.windowview.hypr, 'request') as ask:
+            isl.window_restore((820, 700))
+        self.assertIn('exact 820 700,class:', ask.call_args[0][0])
+
+    def test_una_medida_guardada_rota_no_se_usa(self):
+        isl = self.isl
+        for bad in ([], None, [820], ['a', 'b'], [10, 10], [820, 700, 1]):
+            isl.settings['window_size'] = bad
+            self.assertIsNone(isl.window_kept())
+
+    def test_sin_hyprland_la_ventana_se_ajusta_por_gtk(self):
+        isl = self.isl
+        isl.open_window()
+        isl.app_win.get_width.return_value = 660
+        isl.app_win.get_height.return_value = 0
+        with mock.patch.object(app.windowview.hypr, 'request', side_effect=OSError):
+            isl.window_fit(400, 0)
+        isl.app_win.set_default_size.assert_called_once_with(660, 412)
+
+    def test_en_ventana_la_isla_va_a_todo_el_ancho_sin_esquinas(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.w, isl.h = 600, 250
+        self.assertEqual(isl.island_rect(1000), (0, 1000, 250))
+        isl.windowed = False
+        self.assertEqual(isl.island_rect(1000), (200, 600, 250))
+
+    def test_en_ventana_no_dice_fijada(self):
+        isl = self.isl
+        isl.settings['pinned'] = True
+        self.work('a')
+        isl.expanded = True
+        self.draw()
+        self.assertIn('fijada', self.shown)
+        isl.windowed = True
+        self.draw()
+        self.assertNotIn('fijada', self.shown)
 
     def test_el_tamano_de_la_ventana_cabe_en_la_pantalla(self):
         isl = self.isl

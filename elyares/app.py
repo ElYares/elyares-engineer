@@ -849,7 +849,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         a izquierda: si está fijada, cuántas sesiones hay, el contexto de la
         que se muestra y si pide permiso."""
         best = self.view.session
-        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] else []
+        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] and not self.windowed else []
         if self.view.count > 1:
             notes.append((f'{self.view.count} sesiones', MUTED_COLOR[:3]))
         if best and best.context >= CONTEXT_SHOW:
@@ -1545,8 +1545,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     # ── dibujo ───────────────────────────────────────────────────────────────
 
     def island_rect(self, width):
-        w = clamp(self.w, 0, width)
         h = clamp(self.h, 0, WIN_H)
+        if self.windowed:
+            return 0, width, h          # en la ventana, a lo ancho: no es una isla suelta
+        w = clamp(self.w, 0, width)
         return (width - w) / 2, w, h
 
     def island_fill(self, cr, x0, w, h):
@@ -1555,6 +1557,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         contorno como camino, para recortar con él, y devuelve el filo claro
         del vidrio (un camino) o None."""
         r = min(26, h / 2, w / 2) if h > 12 else min(8, h)
+        if self.windowed:
+            r = 0                       # sin esquinas ni filo: el cuerpo de una ventana
         cr.move_to(x0, 0)
         cr.line_to(x0 + w, 0)
         cr.line_to(x0 + w, h - r)
@@ -1562,7 +1566,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.line_to(x0 + r, h)
         cr.arc(x0 + r, h - r, r, math.pi / 2, math.pi)
         cr.close_path()
-        glass = self.settings['glass']
+        glass = self.settings['glass'] and not self.windowed
         cr.set_source_rgba(*ISLAND_BG[:3], GLASS_ALPHA if glass else ISLAND_BG[3])
         cr.fill_preserve()
         return cr.copy_path() if glass else None
@@ -1853,7 +1857,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def draw_tabs(self, cr, x0, w, current, alpha):
         """Una pestaña por sesión, y a la derecha las notas de la elegida."""
         right = x0 + w - 18
-        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] else []
+        notes = [('fijada', rgb('accent'))] if self.settings['pinned'] and not self.windowed else []
         if current.context >= CONTEXT_SHOW:
             notes.append((f'contexto {current.context:.0f}%',
                           rgb(self.colors[paint.context_role(current.context)])))
