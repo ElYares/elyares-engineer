@@ -20,6 +20,8 @@ for name in elyares-engineer elyares-mascota; do
     && sed -i --follow-symlinks "/^# >>> $name >>>/,/^# <<< $name <<</d" "$bashrc"
 done
 systemctl --user daemon-reload
+rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/applications/dev.elyares.Engineer.desktop" \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/dev.elyares.Engineer.svg"
 for f in elyares-hook elyares-ctl elyares-demo elyares-statusline elyares-guard; do
   rm -f "$HOME/.local/bin/$f"
 done
