@@ -3204,6 +3204,27 @@ class Ventana(Dibujo):
         isl.on_control('window', {'control': 'window', 'how': 'toggle'})
         self.assertFalse(isl.windowed)
 
+    def test_con_vidrio_el_fondo_de_la_ventana_es_translucido_y_sin_filo(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.expanded = True
+        isl.settings['glass'] = True
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 700, 500)
+        self.cr = cairo.Context(surface)
+        isl.da = mock.Mock(get_width=lambda: 700)
+        isl.w, isl.h = isl.goal()
+        isl.draw(None, self.cr, 700, 500)
+        surface.flush()
+        data = surface.get_data()
+        corner = bytes(data[0:4])
+        self.assertEqual(corner[3], round(app.GLASS_ALPHA * 255))   # deja ver (y desenfocar) lo de atrás
+        self.assertLess(corner[3], 255)
+        self.assertIsNone(isl.island_fill(self.cr, 0, 700, 400))     # sin el filo claro de la isla suelta
+        isl.settings['glass'] = False                                # sin vidrio, entero como siempre
+        isl.draw(None, self.cr, 700, 500)
+        surface.flush()
+        self.assertEqual(bytes(surface.get_data()[0:4])[3], 255)
+
     def test_el_fondo_de_la_ventana_es_opaco(self):
         isl = self.isl
         isl.windowed = True
