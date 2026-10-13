@@ -166,7 +166,7 @@ def urls(text):
 
 
 def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=None,
-             ink=None, shade=None, blocks=None):
+             ink=None, shade=None, blocks=None, tables=None):
     """Lo que escribe Claude (markdown) como marcado de Pango, con lo justo
     para leerlo en la isla: negritas, `código` y títulos, viñetas, y los
     bloques de código y las tablas en monoespaciado, para que no se
@@ -182,7 +182,12 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
     de código salen resaltados según su lenguaje y sobre ese fondo, y el
     código inline también. `blocks` recibe [(lenguaje, texto)] de cada bloque,
     en orden. Cada bloque va entre dos líneas de respiro que llevan CODE_MARK
-    y CODE_END: con ellas la isla sabe dónde pintar su fondo."""
+    y CODE_END: con ellas la isla sabe dónde pintar su fondo.
+
+    Con `tables` (una lista), una tabla no va en el texto: deja en su sitio
+    una línea con TABLE_MARK y se apunta ahí como (filas, alineación, con
+    cabecera), para que la dibuje la isla, que es quien sabe cuánto mide cada
+    celda. Sin `tables` sale en monoespaciado, alineada con espacios."""
     rich = bool(bold or dim or accent)
     mono = f'<span font_family="monospace" foreground="{code}">'
     out, fenced, table, lang, body = [], False, [], '', []
@@ -191,12 +196,20 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
     def inline(line):
         return _inline(line, shaded, bold, rich)
 
-    for line in (text or '').split('\n'):
+    def grid(lines):
+        if tables is None:
+            return _table(lines, mono)
+        found = _grid(lines, inline, head)
+        if found:
+            tables.append(found)
+        return [TABLE_MARK] if found else []
+
+    for line in (text or '').replace(TABLE_MARK, '').split('\n'):
         if line.lstrip().startswith('|') and not fenced:
             table.append(line)
             continue
         if table:
-            out += _table(table, mono)
+            out += grid(table)
             table = []
         if FENCE.match(line):
             fenced = not fenced
@@ -257,7 +270,7 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
             continue
         out.append(inline(line))
     if table:
-        out += _table(table, mono)
+        out += grid(table)
     if fenced:                                      # un bloque que aún se está escribiendo
         if blocks is not None and body:
             blocks.append((lang, '\n'.join(body)))
@@ -271,6 +284,7 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
 COMMENT = {'python': '#', 'yaml': '#', 'js': '//', 'sql': '--', 'json': '//'}
 CODE_MARK = '\u2063'         # invisible: la línea de arriba de un bloque de código
 CODE_END = '\u2064'          # invisible: la de abajo
+TABLE_MARK = '\ufffc'        # el hueco de una tabla: la isla la dibuja ahí
 KEYWORDS = {
     'python': 'and as assert async await break class continue def del elif else except finally for from global if '
               'import in is lambda None nonlocal not or pass raise return self True False try while with yield',
@@ -315,16 +329,60 @@ def _code_line(line, lang, ink, mono):
 
 
 RULE = re.compile(r'[\s|:-]+')
+PIPE = re.compile(r'(?<!\\)\|(?=(?:[^`]*`[^`]*`)*[^`]*$)')
+TAG = re.compile(r'<[^>]+>')
+
+
+def plain(markup):
+    """Un marcado de Pango sin sus etiquetas: solo su texto, todavía escapado."""
+    return TAG.sub('', markup)
+
+
+def _cells(line):
+    """Las celdas de una fila. Un `|` escapado (\\|) o dentro de `código` no
+    parte la celda."""
+    body = line.strip()[1:]
+    if body.endswith('|') and not body.endswith('\\|'):
+        body = body[:-1]
+    return [cell.strip().replace('\\|', '|') for cell in PIPE.split(body)]
+
+
+def _rows(lines):
+    """Las filas de una tabla, todas con las mismas celdas y sin la fila de
+    guiones."""
+    rows = [_cells(line) for line in lines if not RULE.fullmatch(line)]
+    cols = max((len(row) for row in rows), default=0)
+    return [row + [''] * (cols - len(row)) for row in rows]
+
+
+def _grid(lines, inline, head):
+    """Una tabla de markdown para dibujarla: (filas, alineación, con
+    cabecera). Cada celda va ya en marcado de Pango, las de la cabecera en
+    negrita y en el color de los títulos; la alineación es, de cada columna,
+    0, .5 o 1 (izquierda, centro, derecha), según los `:` de la fila de
+    guiones. Sin ninguna fila no hay tabla."""
+    rows = _rows(lines)
+    if not rows:
+        return None
+    rule = next((line for line in lines if RULE.fullmatch(line)), '')
+    marks = [mark.strip() for mark in rule.strip().strip('|').split('|')]
+    align = [.5 if mark.startswith(':') and mark.endswith(':') and len(mark) > 1 else float(mark.endswith(':'))
+             for mark in marks]
+    align = (align + [0.0] * len(rows[0]))[:len(rows[0])]
+    headed = bool(rule) or len(rows) > 1
+    cells = [[inline(cell) for cell in row] for row in rows]
+    if headed:
+        cells[0] = [f'<span foreground="{head}" weight="bold">{cell}</span>' for cell in cells[0]]
+    return cells, align, headed
 
 
 def _table(lines, mono):
     """Una tabla de markdown, con sus columnas alineadas en monoespaciado:
     sin la fila de guiones y con la cabecera en negrita."""
-    rows = [[cell.strip() for cell in line.strip().strip('|').split('|')]
-            for line in lines if not RULE.fullmatch(line)]
-    cols = max(len(row) for row in rows)
-    rows = [row + [''] * (cols - len(row)) for row in rows]
-    widths = [max(len(row[i]) for row in rows) for i in range(cols)]
+    rows = _rows(lines)
+    if not rows:
+        return []
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
     out = []
     for n, row in enumerate(rows):
         text = html.escape('  '.join(cell.ljust(w) for cell, w in zip(row, widths)).rstrip(), quote=False)

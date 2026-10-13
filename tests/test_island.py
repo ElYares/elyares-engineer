@@ -958,6 +958,36 @@ class Chat(Dibujo):
         self.assertEqual({k for _, k, *_ in self.isl.hits} >= {'close', 'new', 'type'}, True)
         self.assertIsNotNone(self.isl.chat_box)
 
+    def test_una_tabla_se_dibuja_como_una_cuadricula(self):
+        E = app.chatview.chat.Entry
+        long = 'una celda con tanto texto que no cabe en un renglón de la conversación ' * 2
+        entry = E('claude', f'Antes\n\n| Atajo | Acción |\n|---|---:|\n| `SUPER + ,` | {long}|\n| otro | 2 |\n\ndespués')
+        self.conversation().entries = [entry]
+        inner = 560 - app.chatview.CHAT_INDENT
+        layout, height, _, grids = self.isl.chat_layout(self.cr, 0, entry, 560)
+        (cells, widths, heights, headed), = grids
+        self.assertTrue(headed)
+        self.assertEqual([cell.get_text() for cell in cells[1]], ['SUPER + ,', long.strip()])   # sin acentos graves
+        self.assertLessEqual(sum(widths), inner)                    # cabe a lo ancho...
+        self.assertGreater(cells[1][1].get_line_count(), 1)         # ...porque la celda larga se parte en su columna
+        self.assertEqual(cells[2][1].get_alignment(), app.chatview.Pango.Alignment.RIGHT)
+        # El texto le guarda su hueco: lo de después va debajo de la tabla.
+        self.assertGreater(height, sum(heights) + 2 * layout.get_line(0).get_pixel_extents()[1].height)
+        self.assertNotIn('|', layout.get_text())
+        self.draw()
+
+    def test_un_markdown_mal_cerrado_sale_como_texto(self):
+        E = app.chatview.chat.Entry
+        entry = E('claude', '*a **b* c**')                          # una cursiva y una negrita cruzadas
+        self.conversation().entries = [entry]
+        layout, *_ = self.isl.chat_layout(self.cr, 0, entry, 560)
+        self.assertEqual(layout.get_text(), '*a **b* c**')
+        # Y dentro de una celda, que va aparte: sus letras, sin el marcado.
+        entry = E('claude', '| a |\n|---|\n| *x **y* z** |')
+        *_, grids = self.isl.chat_layout(self.cr, 0, entry, 560)
+        self.assertEqual(grids[0][0][1][0].get_text(), 'x y z')
+        self.draw()
+
     def test_el_permiso_se_contesta_en_su_tarjeta(self):
         c = self.conversation()
         c.busy = True
@@ -2777,14 +2807,14 @@ class FlujosDibujo(IslandCase):
                      E('foot', 'x')]
         isl.chat, isl.chat_open = c, True
         isl.chat_cache = {}
-        layout, _, _ = isl.chat_layout(self.cr, 0, c.entries[0], 560)
+        layout, *_ = isl.chat_layout(self.cr, 0, c.entries[0], 560)
         markup = layout.get_attributes()
         self.assertIsNotNone(markup)                    # tiene negritas y código: no es texto plano
         self.assertIn('•', layout.get_text())            # la viñeta, no el guion
         self.assertNotIn('**', layout.get_text())
         self.assertNotIn('`', layout.get_text())
         # Lo que escribes tú sigue siendo texto tal cual.
-        plain, _, _ = isl.chat_layout(self.cr, 1, E('you', 'haz **esto**'), 560)
+        plain, *_ = isl.chat_layout(self.cr, 1, E('you', 'haz **esto**'), 560)
         self.assertIn('**', plain.get_text())
         # «copiar» de la respuesta de un agente no se lleva lo que mandó el workflow.
         c.entries = [E('flow', 'x'), E('claude', 'hecho'), E('foot', 'y')]
