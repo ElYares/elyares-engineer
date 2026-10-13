@@ -456,7 +456,7 @@ recargan con `/agents`.
 | `elyares-reviewer` | código limpio y mantenible: nombres, funciones, tests, textos de interfaz | lee, y escribe solo documentación cuando se le pide | `C1`–`C11`, `T5`–`T13`, `P2`, `P4`, `P7`, `UX1`–`UX6` |
 | `elyares-designer` | la interfaz: proponer una pantalla antes de construirla, revisar una ya hecha o inventariar el sistema de diseño del repo | lee, y escribe solo documentación cuando se le pide | `UI1`–`UI17`, `UX1`–`UX6`, `A1`–`A12` |
 | `elyares-mobile` | Flutter y React Native: revisar un diff, diagnosticar un build, un permiso o una notificación, comprobar que un release está listo | lee, y escribe solo documentación cuando se le pide | `M1`–`M27` |
-| `elyares-devops` | la operación: revisar un diff, un repo entero o un despliegue antes de hacerlo (CI, contenedores, `Makefile` y scripts de despliegue, migraciones, respaldos, colas) | lee, no entra a ningún servidor y, cuando se le pide, entrega un cambio ya hecho (commit, push y PR) y escribe documentación | `D1`–`D25` |
+| `elyares-devops` | la operación: revisar un diff, un repo entero o un despliegue antes de hacerlo (CI, contenedores, `Makefile` y scripts de despliegue, migraciones, respaldos, colas) | lee, entra a un servidor solo por `ssh` y solo a leer, y, cuando se le pide, entrega un cambio ya hecho (commit, push y PR) y escribe documentación | `D1`–`D25` |
 | `elyares-researcher` | investigar: una duda básica, un tema complejo, un repositorio ajeno, una comparación o una evaluación contra lo que ya tienes; y, cuando se le pide, documentarlo en la bitácora del proyecto en el vault | lee, busca en la web y escribe solo documentación | `R1`–`R14` |
 
 Se usan solo cuando se piden: por nombre ("usa elyares-auditor sobre este
