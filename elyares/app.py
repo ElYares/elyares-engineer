@@ -1248,7 +1248,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.hover = value
         if not value:
             self.pointer = None
-            self.collapse()
+            if not self.windowed:
+                self.collapse()         # la ventana ya es la isla abierta: salir con el ratón no suelta nada
         self.ensure_tick()
 
     def on_motion(self, _ctrl, x, y):
@@ -2901,8 +2902,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.target() in ('board', 'chat', 'projects') or (self.rows and y > self.rows[0][1]):
-            return
+        if self.windowed or self.target() in ('board', 'chat', 'projects') or (self.rows and y > self.rows[0][1]):
+            return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
         elif self.view.session:
