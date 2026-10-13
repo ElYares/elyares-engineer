@@ -495,7 +495,8 @@ class ChatView:
     def chat_tick(self, now):
         """Cada segundo: suelta el teclado si hace rato que no se teclea,
         duerme las conversaciones que no se usan y las guarda si cambiaron."""
-        if self.chat_typing and now - self.chat_keyed > CHAT_IDLE_SECS:
+        # En la ventana el teclado es el de una app normal: lo suelta el foco, no el reloj.
+        if self.chat_typing and not self.windowed and now - self.chat_keyed > CHAT_IDLE_SECS:
             if self.chat_open:
                 self.chat_type(False)
             else:

@@ -2886,5 +2886,138 @@ class FlujosDibujo(IslandCase):
         self.assertTrue(isl.wf_hits)
 
 
+class Ventana(Dibujo):
+    """La isla como app: la misma isla, en una ventana normal."""
+
+    def setUp(self):
+        super().setUp()
+        isl = self.isl
+        isl.window_init()
+        isl.island_w, isl.island_h = app.WIN_W, app.WIN_H
+        isl.win, isl.overlay, isl.region = mock.Mock(), mock.Mock(), None
+        isl.screen_w, isl.screen_h = 1920, 1080
+        isl.gtk_app = mock.Mock()
+        isl.app_win = mock.Mock()
+        isl.da.set_content_width, isl.da.set_content_height = mock.Mock(), mock.Mock()
+        isl.expand = isl.place = isl.update_region = mock.Mock()
+        self.isl.window_save = mock.Mock()
+
+    def test_abrir_mueve_el_dibujo_de_la_capa_a_la_ventana(self):
+        isl = self.isl
+        isl.open_window()
+        self.assertTrue(isl.windowed)
+        isl.win.set_child.assert_called_once_with(None)
+        isl.app_win.set_child.assert_called_once_with(isl.overlay)
+        isl.win.set_visible.assert_called_once_with(False)
+        isl.app_win.present.assert_called_once()
+        self.assertTrue(isl.settings['window'])
+
+    def test_cerrar_devuelve_la_isla_con_su_tamano(self):
+        isl = self.isl
+        isl.open_window()
+        isl.win.reset_mock()
+        isl.collapse = mock.Mock()
+        isl.close_window()
+        self.assertFalse(isl.windowed)
+        isl.win.set_child.assert_called_once_with(isl.overlay)
+        isl.win.present.assert_called_once()
+        isl.place.assert_called()
+        self.assertFalse(isl.settings['window'])
+        isl.da.set_content_width.assert_called_with(app.WIN_W)
+
+    def test_abrirla_otra_vez_la_enfoca_y_no_crea_otra(self):
+        isl = self.isl
+        isl.open_window()
+        isl.app_win.reset_mock()
+        isl.open_window()
+        isl.app_win.set_child.assert_not_called()
+        isl.app_win.present.assert_called_once()
+
+    def test_cerrar_sin_estar_abierta_no_hace_nada(self):
+        self.isl.close_window()
+        self.isl.win.set_child.assert_not_called()
+
+    def test_la_x_de_la_ventana_no_sale_del_programa(self):
+        isl = self.isl
+        isl.open_window()
+        isl.collapse = mock.Mock()
+        self.assertTrue(isl.on_window_close(isl.app_win))        # True: GTK no la destruye
+        self.assertFalse(isl.windowed)
+
+    def test_en_ventana_no_se_esconde_ni_se_cierra_sola(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.off = True
+        self.work('a')
+        self.assertEqual(isl.target(), 'board')
+        isl.hover = isl.expanded = False
+        app.Island.collapse(isl)
+        self.assertTrue(isl.expanded)
+        self.assertEqual(isl.target(), 'board')
+
+    def test_en_ventana_fijar_y_achicar_no_tocan_las_preferencias(self):
+        isl = self.isl
+        isl.windowed = True
+        before = dict(isl.settings)
+        isl.toggle_pinned()
+        isl.toggle_compact()
+        self.assertEqual(isl.settings, before)
+        self.saved.assert_not_called()
+
+    def test_en_ventana_no_se_toca_el_layer_shell(self):
+        isl = self.isl
+        isl.windowed = True
+        with mock.patch.object(app.LayerShell, 'set_anchor') as anchor:
+            app.Island.place(isl)
+            app.Island.update_region(isl)
+        anchor.assert_not_called()
+        isl.win.get_surface.assert_not_called()
+
+    def test_la_orden_window_abre_y_toggle_alterna(self):
+        isl = self.isl
+        isl.on_control('window', {'control': 'window'})
+        self.assertTrue(isl.windowed)
+        isl.collapse = mock.Mock()
+        isl.on_control('window', {'control': 'window'})          # otra vez: enfoca, no cierra
+        self.assertTrue(isl.windowed)
+        isl.on_control('window', {'control': 'window', 'how': 'toggle'})
+        self.assertFalse(isl.windowed)
+
+    def test_el_fondo_de_la_ventana_es_opaco(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.expanded = True
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 700, 500)
+        self.cr = cairo.Context(surface)
+        isl.da = mock.Mock(get_width=lambda: 700)
+        isl.w, isl.h = isl.goal()
+        isl.draw(None, self.cr, 700, 500)
+        surface.flush()
+        data = surface.get_data()
+        corner = bytes(data[0:4])                                # esquina de arriba a la izquierda, BGRA
+        self.assertEqual(corner[3], 255)
+        far = (499 * 700 + 699) * 4                              # y la de abajo a la derecha
+        self.assertEqual(bytes(data[far:far + 4])[3], 255)
+
+    def test_la_ventana_sigue_el_alto_del_contenido(self):
+        isl = self.isl
+        isl.open_window()
+        isl.app_win.get_width.return_value = 660
+        isl.window_fit(400, 0)
+        isl.app_win.set_default_size.assert_called_once_with(660, 400 + 12)
+        isl.window_fit(402, 0)                           # un cambio chico no la mueve
+        self.assertEqual(isl.app_win.set_default_size.call_count, 1)
+        isl.window_fit(620, 0)
+        isl.app_win.set_default_size.assert_called_with(660, 620 + 12)
+
+    def test_el_tamano_de_la_ventana_cabe_en_la_pantalla(self):
+        isl = self.isl
+        isl.screen_w, isl.screen_h = 800, 600
+        width, height = isl.window_size()
+        self.assertLessEqual(width, 800)
+        self.assertLessEqual(height, 600)
+        self.assertGreaterEqual((width, height), (480, 320))
+
+
 if __name__ == '__main__':
     unittest.main()
