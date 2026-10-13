@@ -2442,17 +2442,23 @@ class Flujos(IslandCase):
                                                       W.Step('elyares-engineer', 'hazlo')])
         self.chats = {}
         self.isl.chat_for = self.chat_for
+        self.isl.chat_make = self.chat_make
+
+    def chat_make(self, agent, cwd):
+        c = mock.Mock(busy=False, agent=agent, cwd=cwd, cut=False, asking=None, session='', model_id='',
+                      project='proj', context=0)
+        c.name = agent or state.MAIN_AGENT
+        c.send.return_value = True
+        c.feed.return_value = True
+        c.reply.return_value = f'lo de {agent or "engineer"}'
+        c.dump.return_value = {}
+        return c
 
     def chat_for(self, agent, cwd):
-        """El chat de cada agente, de mentira: apunta lo que se le manda."""
+        """El chat de cada agente, de mentira: apunta lo que se le manda. Queda
+        también donde la isla guarda los suyos, para que vea sus «otras»."""
         if agent not in self.chats:
-            c = mock.Mock(busy=False, agent=agent, cwd=cwd, cut=False, asking=None, session='', model_id='',
-                          project='proj', context=0)
-            c.name = agent or state.MAIN_AGENT
-            c.send.return_value = True
-            c.feed.return_value = True
-            c.reply.return_value = f'lo de {agent or "engineer"}'
-            self.chats[agent] = c
+            self.chats[agent] = self.isl.chats[self.isl.chat_key(agent, cwd)] = self.chat_make(agent, cwd)
         return self.chats[agent]
 
     def done(self, agent, **event):
@@ -2515,8 +2521,30 @@ class Flujos(IslandCase):
         self.assertEqual(self.isl.workflow_trouble(0),
                          'El paso 1 (elyares-designer) no salió: develop no está al día.')
 
-    def test_un_agente_ocupado_no_empieza_y_con_seguir_pasa_al_siguiente(self):
+    def test_con_su_agente_ocupado_el_paso_usa_otra_conversacion(self):
+        first = self.chat_for('elyares-designer', '/x/proj')
+        first.busy = True
+        self.isl.workflow_launch(self.flow)
+        first.send.assert_not_called()                  # la de siempre sigue con lo suyo
+        (other,) = self.isl.chat_extra[self.isl.chat_key('elyares-designer', '/x/proj')]
+        other.send.assert_called_once()                 # el paso corre en una nueva
+        self.assertIs(self.isl.wf_chat, other)
+        self.assertTrue(self.isl.wf_run.running)
+        # Al acabar su turno sigue el siguiente paso, como siempre.
+        self.isl.on_chat({'type': 'result'}, other)
+        self.chats[''].send.assert_called_once()
+        # Otro workflow encuentra esa conversación libre y la reusa, sin abrir una más.
+        self.done('')
+        self.assertFalse(self.isl.wf_run.running)
+        self.isl.workflow_launch(self.flow)
+        self.assertEqual(len(self.isl.chat_extra[self.isl.chat_key('elyares-designer', '/x/proj')]), 1)
+        self.assertEqual(other.send.call_count, 2)
+
+    def test_un_agente_ocupado_en_todas_no_empieza_y_con_seguir_pasa_al_siguiente(self):
+        key = self.isl.chat_key('elyares-designer', '/x/proj')
         self.chat_for('elyares-designer', '/x/proj').busy = True
+        self.isl.chat_extra[key] = [mock.Mock(busy=True, agent='elyares-designer', cwd='/x/proj')
+                                    for _ in range(app.chatview.chat.MAX_CHATS - 1)]
         self.isl.workflow_launch(self.flow)
         run = self.isl.wf_run
         self.chats['elyares-designer'].send.assert_not_called()

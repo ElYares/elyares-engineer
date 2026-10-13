@@ -35,7 +35,8 @@ Shift+Tab, al anterior; Esc lo suelta. El agente de un paso y el proyecto se
 eligen en un menú, como el de «con quién hablas» del chat.
 
 Quién ejecuta la cadena es la isla: cada paso se le manda al chat de ese
-agente en el proyecto (`chat_for`), como si se lo escribieras tú, y cuando
+agente en el proyecto (`chat_free`: la de siempre y, si trabaja, otra libre
+o una nueva), como si se lo escribieras tú, y cuando
 ese turno acaba (`workflow_event`, que llama `on_chat`) sale el siguiente con
 lo que contestó el anterior. Por eso cada paso corre con los permisos de ese
 chat, ni más ni menos, y se ve trabajar en el tablero como cualquier otro.
@@ -172,7 +173,7 @@ class WorkflowView:
             elif not os.path.isdir(run.w.project):
                 why = 'la carpeta del proyecto ya no existe'
             else:
-                c = self.chat_for(workflows.chat_agent(step.agent), run.w.project)
+                c = self.chat_free(workflows.chat_agent(step.agent), run.w.project)
                 if c.busy:
                     why = 'está ocupado con otro turno'
                 elif not c.send(run.prompt(i), shown=run.shown(i), kind='flow'):
