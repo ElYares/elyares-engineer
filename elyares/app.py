@@ -1569,16 +1569,19 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.line_to(x0 + r, h)
         cr.arc(x0 + r, h - r, r, math.pi / 2, math.pi)
         cr.close_path()
-        glass = self.settings['glass'] and not self.windowed
+        glass = self.settings['glass']
         cr.set_source_rgba(*ISLAND_BG[:3], GLASS_ALPHA if glass else ISLAND_BG[3])
         cr.fill_preserve()
-        return cr.copy_path() if glass else None
+        # Una ventana no lleva el filo claro: ya tiene su borde de Hyprland.
+        return cr.copy_path() if glass and not self.windowed else None
 
     def draw(self, _da, cr, width, _height):
         cr.set_operator(cairo.OPERATOR_SOURCE)
-        # En la ventana no hay capa que el compositor desenfoque ni nada detrás:
-        # el fondo es el de la isla, entero.
-        cr.set_source_rgba(*ISLAND_BG[:3], 1) if self.windowed else cr.set_source_rgba(0, 0, 0, 0)
+        # En la ventana sin vidrio no hay nada detrás que se vea: el fondo es el
+        # de la isla, entero. Con vidrio, transparente, y es Hyprland quien
+        # desenfoca lo de atrás (la ventana no es una capa: sin la regla de capa).
+        opaque = self.windowed and not self.settings['glass']
+        cr.set_source_rgba(*ISLAND_BG[:3], 1) if opaque else cr.set_source_rgba(0, 0, 0, 0)
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
 
