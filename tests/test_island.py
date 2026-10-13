@@ -3280,6 +3280,23 @@ class Ventana(Dibujo):
             isl.window_fit(660, 0)                       # y un contenido casi igual de alto no la mueve
             self.assertEqual(ask.call_count, 2)
 
+    def test_una_ventana_mas_corta_que_el_chat_se_sube_y_no_se_guarda_asi(self):
+        isl = self.isl
+        isl.settings['window_size'] = [660, 618]
+        with mock.patch.object(app.windowview.GLib, 'timeout_add'):
+            isl.open_window()
+        isl.app_win.get_width.return_value = 660
+        isl.app_win.get_height.return_value = 489       # Hyprland la dejó corta: el chat pierde su caja
+        clock = [100.0]
+        with mock.patch.object(app.windowview.hypr, 'request') as ask, \
+                mock.patch.object(app.windowview.time, 'monotonic', lambda: clock[0]):
+            isl.window_fit(620, 0)
+            self.assertIn('exact 660 632,', ask.call_args[0][0])        # lo menos que mide el chat
+            clock[0] += 5
+            isl.window_fit(620, 0)                                      # sigue corta: se vuelve a pedir
+            self.assertEqual(ask.call_count, 2)
+            self.assertEqual(isl.settings['window_size'], [660, 618])  # y esa medida corta no se toma por suya
+
     def test_recien_pedido_el_alto_no_se_toma_por_estirado(self):
         isl = self.fit_win()
         with mock.patch.object(app.windowview.hypr, 'request'), \

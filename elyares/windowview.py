@@ -136,7 +136,9 @@ class WindowView:
         now = time.monotonic()
         height = self.app_win.get_height()
         want = max(MIN_H, int(content_h) + int(room) + FIT_PAD)
-        if self.fit_h and height and abs(height - self.fit_h) >= FIT_STEP and now - self.fit_at > FIT_SETTLE:
+        floor = want                    # lo que mide el contenido: más corta, la ventana le corta lo de abajo
+        if self.fit_h and height and abs(height - self.fit_h) >= FIT_STEP and now - self.fit_at > FIT_SETTLE \
+                and height >= floor - FIT_STEP:
             # No es el alto que se pidió: Yared la estiró.
             self.fit_manual, self.fit_shrunk = True, False
             self.fit_h = height
@@ -144,13 +146,17 @@ class WindowView:
             return
         if self.fit_manual:
             kept = self.window_kept()
+            tall = height >= floor - FIT_STEP    # una más corta que el contenido no se guarda como su medida
             if kept is None:
-                self.window_remember()
-                return
-            self.fit_shrunk = kept[1] - want > FIT_VOID
-            want = want if self.fit_shrunk else kept[1]
-            self.window_remember()
-        if abs(want - self.fit_h) < FIT_STEP:
+                if tall:
+                    self.window_remember()
+                    return
+            else:
+                self.fit_shrunk = kept[1] - floor > FIT_VOID
+                want = floor if self.fit_shrunk else max(floor, kept[1])
+                if tall:
+                    self.window_remember()
+        if abs(want - self.fit_h) < FIT_STEP and not (height and height < floor - FIT_STEP):
             return
         self.fit_h, self.fit_at = want, now
         self.window_resize(self.app_win.get_width() or MIN_W, want)
