@@ -309,6 +309,23 @@ class ChatView:
             c = self.chats[key] = self.chat_make(agent, cwd)
         return c
 
+    def chat_free(self, agent, cwd):
+        """Una conversación con ese agente en ese proyecto que no esté
+        trabajando, para lo que corre solo (un paso de un workflow): la de
+        siempre si está libre; si no, otra libre de las que ya hay; si no,
+        una nueva (`chat_split` sin mostrarla), hasta MAX_CHATS. Con todas
+        ocupadas, o con un agente de `SINGLE_AGENTS`, la de siempre."""
+        first = self.chat_for(agent, cwd)
+        family = self.chat_family(first)
+        for c in family:
+            if not c.busy:
+                return c
+        if not self.chat_can_split(first):
+            return first
+        c = self.chat_make(first.agent, first.cwd)
+        self.chat_extra.setdefault(self.chat_key(first.agent, first.cwd), []).append(c)
+        return c
+
     def chat_make(self, agent, cwd):
         """Una conversación nueva, sin guardarla en ningún sitio."""
         pick = {} if agent else {'model': self.settings.get('chat_model', ''),

@@ -1693,6 +1693,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 cr.restore()
             if mode == 'peek':
                 self.draw_minis(cr, x0, w, h, pet_alpha * clamp((w - SIZES['peek'][0]) / 20))
+            if mode in ('petit', 'peek'):
+                self.draw_reply_count(cr, x0, w, pet_alpha)
+        elif mode == 'hidden':
+            self.draw_reply_count(cr, x0, w, 1.0, h)
 
         # Con botones, el texto sube y deja la fila de abajo para ellos.
         ask_alpha = clamp((full_h - SIZES['open'][1]) / 16) if self.view.ask else 0.0
@@ -1727,6 +1731,33 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if ask_alpha > 0 and text_alpha > 0:
             self.draw_buttons(cr, x0 + w - 18, full_h - 14, ask_alpha * text_alpha)
         return full_h, head, text_alpha
+
+    def draw_reply_count(self, cr, x0, w, alpha, strip=0):
+        """Cuántas respuestas de agentes esperan, para cuando el tablero no se
+        ve: un número en la esquina de la pastilla o de la isla asomada, con el
+        color de la última; escondida (`strip` es su alto), una marca en su
+        franja. Nada si no hay ninguna."""
+        waiting = self.replies()
+        if not waiting or alpha <= 0:
+            return
+        tint = waiting[0].tint
+        color = mascot.rgba(mascot.accent(tint))[:3] if tint else rgb(self.colors['ok'])
+        if strip:
+            cr.rectangle(x0 + w / 2 - 20, 0, 40, strip)
+            cr.set_source_rgba(*color, alpha)
+            cr.fill()
+            return
+        r = 8
+        cx, cy = x0 + w - r - 4, r + 3
+        cr.new_sub_path()
+        cr.arc(cx, cy, r, 0, 2 * math.pi)
+        cr.set_source_rgba(*color, alpha)
+        cr.fill()
+        label = self._layout(cr, str(len(waiting)) if len(waiting) < 10 else '9+', FONT_DETAIL)
+        lw, lh = label.get_pixel_size()
+        cr.move_to(cx - lw / 2, cy - lh / 2)
+        cr.set_source_rgba(.04, .04, .06, alpha)
+        PangoCairo.show_layout(cr, label)
 
     def draw_minis(self, cr, x0, w, h, alpha):
         """Las caritas de los demás que trabajan, a la derecha de la mascota."""
