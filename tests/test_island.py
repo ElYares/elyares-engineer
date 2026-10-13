@@ -3216,6 +3216,30 @@ class Ventana(Dibujo):
             isl.window_fit(620, 0)                       # el chat se abre: no la mueve
             self.assertEqual(ask.call_count, 1)
 
+    def test_con_su_medida_guardada_un_tablero_corto_la_encoge_y_el_chat_la_devuelve(self):
+        isl = self.isl
+        isl.settings['window_size'] = [660, 760]
+        with mock.patch.object(app.windowview.GLib, 'timeout_add'):
+            isl.open_window()
+        isl.app_win.get_width.return_value = 660
+        isl.app_win.get_height.return_value = 760
+        clock = [100.0]
+        with mock.patch.object(app.windowview.hypr, 'request') as ask, \
+                mock.patch.object(app.windowview.time, 'monotonic', lambda: clock[0]):
+            isl.window_fit(240, 0)                       # el tablero: 760 de alto para 240 de contenido
+            self.assertIn('exact 660 320,', ask.call_args[0][0])      # lo menos que mide
+            isl.app_win.get_height.return_value = 320    # Hyprland la dejó como se pidió
+            clock[0] += 5
+            isl.window_fit(240, 0)
+            self.assertEqual(ask.call_count, 1)          # sin brincar ni tomarse por estirada
+            self.assertEqual(isl.settings['window_size'], [660, 760])        # su medida no se pisó
+            isl.window_fit(740, 0)                       # abre el chat: recupera la suya
+            self.assertIn('exact 660 760,', ask.call_args[0][0])
+            isl.app_win.get_height.return_value = 760
+            clock[0] += 5
+            isl.window_fit(660, 0)                       # y un contenido casi igual de alto no la mueve
+            self.assertEqual(ask.call_count, 2)
+
     def test_recien_pedido_el_alto_no_se_toma_por_estirado(self):
         isl = self.fit_win()
         with mock.patch.object(app.windowview.hypr, 'request'), \
