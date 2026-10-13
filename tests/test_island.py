@@ -1277,6 +1277,24 @@ class Chat(Dibujo):
         self.draw()
         self.assertIn('¿Cuál?', self.shown)
 
+    def test_un_plan_se_lee_en_el_chat_y_se_aprueba_o_se_sigue_planeando(self):
+        c = self.conversation()
+        self.isl.chat_open = False
+        c.session = 's-chat'
+        self.isl.on_chat({'type': 'control_request', 'request_id': 'r', 'request': {
+            'subtype': 'can_use_tool', 'tool_name': 'ExitPlanMode',
+            'input': {'plan': '## Plan\n\n1. Cambiar **a.py**\n2. Probar'}}})
+        self.assertTrue(self.isl.chat_open)         # un plan no se aprueba a ciegas desde el tablero
+        self.assertIsNone(self.isl.model.sessions['s-chat'].ask if 's-chat' in self.isl.model.sessions else None)
+        self.draw()
+        for text in ('Propone un plan', 'Aprobar', 'Seguir planeando'):
+            self.assertIn(text, self.shown)
+        self.assertTrue(any('Cambiar' in text for text in self.shown))     # el plan, en la conversación
+        self.assertNotIn('Permitir', self.shown)
+        c.answer = mock.Mock(return_value=True)
+        self.click('chat-allow')
+        c.answer.assert_called_once_with(True)
+
     def test_al_terminar_deja_su_aviso_aunque_el_chat_estuviera_abierto(self):
         c = self.conversation()
         c.session, c.busy = 's-chat', True
@@ -3197,6 +3215,30 @@ class Ventana(Dibujo):
             self.assertEqual(isl.settings['window_size'], [660, 700])
             isl.window_fit(620, 0)                       # el chat se abre: no la mueve
             self.assertEqual(ask.call_count, 1)
+
+    def test_con_su_medida_guardada_un_tablero_corto_la_encoge_y_el_chat_la_devuelve(self):
+        isl = self.isl
+        isl.settings['window_size'] = [660, 760]
+        with mock.patch.object(app.windowview.GLib, 'timeout_add'):
+            isl.open_window()
+        isl.app_win.get_width.return_value = 660
+        isl.app_win.get_height.return_value = 760
+        clock = [100.0]
+        with mock.patch.object(app.windowview.hypr, 'request') as ask, \
+                mock.patch.object(app.windowview.time, 'monotonic', lambda: clock[0]):
+            isl.window_fit(240, 0)                       # el tablero: 760 de alto para 240 de contenido
+            self.assertIn('exact 660 320,', ask.call_args[0][0])      # lo menos que mide
+            isl.app_win.get_height.return_value = 320    # Hyprland la dejó como se pidió
+            clock[0] += 5
+            isl.window_fit(240, 0)
+            self.assertEqual(ask.call_count, 1)          # sin brincar ni tomarse por estirada
+            self.assertEqual(isl.settings['window_size'], [660, 760])        # su medida no se pisó
+            isl.window_fit(740, 0)                       # abre el chat: recupera la suya
+            self.assertIn('exact 660 760,', ask.call_args[0][0])
+            isl.app_win.get_height.return_value = 760
+            clock[0] += 5
+            isl.window_fit(660, 0)                       # y un contenido casi igual de alto no la mueve
+            self.assertEqual(ask.call_count, 2)
 
     def test_recien_pedido_el_alto_no_se_toma_por_estirado(self):
         isl = self.fit_win()

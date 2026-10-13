@@ -27,6 +27,7 @@ FIT_PAD = 12                     # aire bajo la isla
 FIT_STEP = 6                     # cambios de alto menores no mueven la ventana
 REMEMBER_SECS = 2                # cada cuánto se guarda el tamaño que Yared va dejando
 FIT_SETTLE = 0.6                 # lo que tarda Hyprland en dejarla del alto pedido
+FIT_VOID = 120                   # con su medida guardada, el vacío bajo el contenido que se tolera antes de ajustarla
 OPEN_H = 780                     # alto con el que abre: el tablero y el chat caben; el resto, con scroll de la pantalla
 
 
@@ -36,7 +37,8 @@ class WindowView:
 
     fit_h = 0                       # el último alto al que se ajustó la ventana
     fit_at = 0.0                    # cuándo se pidió
-    fit_manual = False              # Yared la estiró a mano: el alto ya no se toca
+    fit_manual = False              # Yared la estiró a mano: su medida manda para lo alto
+    fit_shrunk = False              # se encogió sola por un contenido corto: no se guarda ese alto
     fit_saved = (0, 0, 0.0)         # el último tamaño guardado: ancho, alto y cuándo
     windowed = False                # la isla, que se arma sin __init__ en las pruebas, la mira siempre
     app_win = None
@@ -125,20 +127,29 @@ class WindowView:
     def window_fit(self, content_h, room):
         """El alto de la ventana sigue al del contenido (más el sitio de las
         burbujas de las pastillas), para que no quede un negro debajo.
-        Mientras nadie la toque. Si Yared la estira (el alto ya no es el que
-        se pidió), se respeta lo que dejó y el alto no vuelve a ajustarse."""
+        Si Yared la estira (el alto ya no es el que se pidió), su medida manda:
+        se guarda y vale para lo alto (el chat). Un contenido mucho más corto
+        (el tablero) la encoge igual, sin pisar la medida guardada, y al
+        volver lo alto recupera la suya."""
         if self.app_win is None:
             return
         now = time.monotonic()
-        if self.fit_manual:
-            self.window_remember()
-            return
         height = self.app_win.get_height()
+        want = max(MIN_H, int(content_h) + int(room) + FIT_PAD)
         if self.fit_h and height and abs(height - self.fit_h) >= FIT_STEP and now - self.fit_at > FIT_SETTLE:
-            self.fit_manual = True
+            # No es el alto que se pidió: Yared la estiró.
+            self.fit_manual, self.fit_shrunk = True, False
+            self.fit_h = height
             self.window_remember(force=True)
             return
-        want = max(MIN_H, int(content_h) + int(room) + FIT_PAD)
+        if self.fit_manual:
+            kept = self.window_kept()
+            if kept is None:
+                self.window_remember()
+                return
+            self.fit_shrunk = kept[1] - want > FIT_VOID
+            want = want if self.fit_shrunk else kept[1]
+            self.window_remember()
         if abs(want - self.fit_h) < FIT_STEP:
             return
         self.fit_h, self.fit_at = want, now
@@ -169,6 +180,9 @@ class WindowView:
             return
         now = time.monotonic()
         width, height = self.app_win.get_width(), self.app_win.get_height()
+        kept = self.window_kept()
+        if self.fit_shrunk and kept:
+            height = kept[1]                # encogida por un contenido corto: la medida de Yared no cambia
         saved_w, saved_h, at = self.fit_saved
         if not width or not height or (width, height) == (saved_w, saved_h):
             return
@@ -179,6 +193,7 @@ class WindowView:
         self.window_save()
 
     def window_restore(self, size):
+        self.fit_h, self.fit_at = size[1], time.monotonic()     # lo pedido: no se toma por estirada
         self.window_resize(*size)
         return GLib.SOURCE_REMOVE
 
