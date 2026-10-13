@@ -1212,6 +1212,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def goal(self):
         """Tamaño al que va la isla: el del modo, más el detalle entero, las
         filas y las fuentes."""
+        if self.windowed and self.wf_open:
+            return BOARD_W, self.workflows_goal()[1]    # el panel de flujos cubre la ventana, sea lo que sea lo de abajo
         mode = self.target()
         if mode == 'chat':
             return chatview.CHAT_W, chatview.CHAT_H
