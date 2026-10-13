@@ -3125,6 +3125,46 @@ class Ventana(Dibujo):
         self.assertTrue(isl.on_window_close(isl.app_win))        # True: GTK no la destruye
         self.assertFalse(isl.windowed)
 
+    def test_al_volver_a_la_ventana_el_chat_retoma_el_teclado_sin_un_clic(self):
+        isl = self.isl
+        isl.open_window()
+        isl.chat_open, isl.chat_typing = True, True
+        isl.chat_type = mock.Mock(side_effect=lambda on: setattr(isl, 'chat_typing', on))
+        isl.on_window_focus(mock.Mock(is_active=lambda: False), None)       # otra ventana toma el foco
+        isl.chat_type.assert_called_with(False)
+        isl.on_window_focus(mock.Mock(is_active=lambda: True), None)        # vuelve
+        isl.chat_type.assert_called_with(True)
+        # Si no estaba escribiendo al irse, tampoco se pone a escribir sola.
+        isl.chat_typing = False
+        isl.on_window_focus(mock.Mock(is_active=lambda: False), None)
+        isl.chat_type.reset_mock()
+        isl.on_window_focus(mock.Mock(is_active=lambda: True), None)
+        isl.chat_type.assert_not_called()
+
+    def test_en_ventana_un_clic_en_el_vacio_no_hace_nada(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.w, isl.h = 600, 250
+        isl.da = mock.Mock(get_width=lambda: 800)
+        isl.go, isl.poke = mock.Mock(), mock.Mock()
+        isl.target = lambda: 'open'
+        isl.view = mock.Mock(session=mock.Mock())
+        isl.on_click(None, 1, 300, 120)
+        isl.go.assert_not_called()
+        isl.poke.assert_not_called()
+        isl.windowed = False                            # la isla de siempre sí salta al pane
+        isl.on_click(None, 1, 300, 120)
+        isl.go.assert_called_once()
+
+    def test_en_ventana_salir_con_el_raton_no_suelta_la_ficha_elegida(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.pin = 'a'
+        isl.set_hover(True)
+        isl.set_hover(False)
+        self.assertEqual(isl.pin, 'a')
+        self.assertTrue(isl.expanded or isl.windowed)
+
     def test_en_ventana_no_se_esconde_ni_se_cierra_sola(self):
         isl = self.isl
         isl.windowed = True

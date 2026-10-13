@@ -204,9 +204,15 @@ class WindowView:
         return True                     # la ventana ya la quitamos nosotros
 
     def on_window_focus(self, win, _param):
-        """Sin foco, la caja del chat no recibe teclas: se deja de «escribir»."""
-        if not win.is_active() and self.chat_typing:
-            self.chat_type(False)
+        """Sin foco, la caja del chat no recibe teclas: se deja de «escribir».
+        Al volver, el chat que estaba a la vista vuelve a tomar el teclado sin
+        un clic, como cualquier app."""
+        if not win.is_active():
+            self.window_typed = self.chat_typing
+            if self.chat_typing:
+                self.chat_type(False)
+        elif self.windowed and self.chat_open and not self.chat_typing and getattr(self, 'window_typed', True):
+            self.chat_type(True)
 
     def window_save(self):
         settings.save(self.settings)
