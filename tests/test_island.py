@@ -1277,6 +1277,24 @@ class Chat(Dibujo):
         self.draw()
         self.assertIn('¿Cuál?', self.shown)
 
+    def test_un_plan_se_lee_en_el_chat_y_se_aprueba_o_se_sigue_planeando(self):
+        c = self.conversation()
+        self.isl.chat_open = False
+        c.session = 's-chat'
+        self.isl.on_chat({'type': 'control_request', 'request_id': 'r', 'request': {
+            'subtype': 'can_use_tool', 'tool_name': 'ExitPlanMode',
+            'input': {'plan': '## Plan\n\n1. Cambiar **a.py**\n2. Probar'}}})
+        self.assertTrue(self.isl.chat_open)         # un plan no se aprueba a ciegas desde el tablero
+        self.assertIsNone(self.isl.model.sessions['s-chat'].ask if 's-chat' in self.isl.model.sessions else None)
+        self.draw()
+        for text in ('Propone un plan', 'Aprobar', 'Seguir planeando'):
+            self.assertIn(text, self.shown)
+        self.assertTrue(any('Cambiar' in text for text in self.shown))     # el plan, en la conversación
+        self.assertNotIn('Permitir', self.shown)
+        c.answer = mock.Mock(return_value=True)
+        self.click('chat-allow')
+        c.answer.assert_called_once_with(True)
+
     def test_al_terminar_deja_su_aviso_aunque_el_chat_estuviera_abierto(self):
         c = self.conversation()
         c.session, c.busy = 's-chat', True

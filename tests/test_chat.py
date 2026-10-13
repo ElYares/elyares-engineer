@@ -125,6 +125,36 @@ class Conversacion(ChatCase):
         self.assertIn('questions', sent['response']['updatedInput'])
         self.assertEqual(self.c.entries[-1].text, 'Respondiste: Postgres')
 
+    def plan(self, text='## Plan\n\n1. Cambiar `a.py`\n2. Probar'):
+        self.c.send('planea')
+        self.c.feed({'type': 'control_request', 'request_id': 'r-3', 'request': {
+            'subtype': 'can_use_tool', 'tool_name': 'ExitPlanMode', 'input': {'plan': text}}})
+
+    def test_un_plan_se_ve_en_la_conversacion_y_se_aprueba_con_su_texto(self):
+        self.plan()
+        self.assertEqual(self.c.entries[-1].kind, 'plan')                   # a la vista, para leerlo
+        self.assertIn('Cambiar `a.py`', self.c.entries[-1].text)
+        self.assertEqual(self.c.reply(), '')                                # y no cuenta como respuesta
+        self.assertEqual(self.c.questions(), [])
+        self.assertTrue(self.c.answer(True))
+        sent = self.procs[0].sent()[-1]['response']
+        self.assertEqual((sent['request_id'], sent['response']['behavior']), ('r-3', 'allow'))
+        self.assertIn('plan', sent['response']['updatedInput'])
+        self.assertEqual(self.c.entries[-1].text, 'Plan aprobado')
+
+    def test_seguir_planeando_le_dice_a_claude_que_no_lo_aplique(self):
+        self.plan()
+        self.assertTrue(self.c.answer(False))
+        sent = self.procs[0].sent()[-1]['response']['response']
+        self.assertEqual(sent['behavior'], 'deny')
+        self.assertIn('modo plan', sent['message'])
+        self.assertEqual(self.c.entries[-1].text, 'Sigues planeando: el plan no se aprobó')
+
+    def test_un_plan_vacio_no_deja_una_entrada_en_blanco(self):
+        self.plan('  ')
+        self.assertNotIn('plan', [e.kind for e in self.c.entries])
+        self.assertEqual(self.c.asking['tool'], 'ExitPlanMode')             # el permiso sigue: se contesta igual
+
     def test_un_permiso_no_es_una_pregunta(self):
         self.c.asking = {'id': 'r-1', 'tool': 'Bash', 'input': {'command': 'ls'}, 'text': 'Ejecutando ls'}
         self.assertEqual(self.c.questions(), [])

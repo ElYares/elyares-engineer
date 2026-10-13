@@ -240,6 +240,8 @@ def describe_tool(name, ti, root):
         return f'Subagente: {desc}' if desc else 'Lanzando un subagente'
     if name == 'TodoWrite':
         return 'Actualizando la lista de tareas'
+    if name == 'ExitPlanMode':
+        return 'Propone un plan para empezar a trabajar'
     if name.startswith('mcp__'):
         parts = name.split('__')
         return f'Usando {parts[1]}' if len(parts) > 1 else name

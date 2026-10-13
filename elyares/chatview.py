@@ -741,8 +741,8 @@ class ChatView:
         cualquier sesión, y la isla se abre en su pestaña para contestarlo."""
         if not c.session:
             return
-        if c.questions():
-            # Una pregunta no se contesta con Permitir: el chat se abre en ella.
+        if c.questions() or c.asking['tool'] == chat.PLAN_TOOL:
+            # Una pregunta o un plan no se contestan con Permitir sin verlos: el chat se abre en ellos.
             self.tab = c.session
             self.show_chat(c)
             self.expand(None if self.settings['pinned'] else CHAT_WATCH_SECS * 10)
@@ -1521,12 +1521,12 @@ class ChatView:
             layout = self.chat_wrap(cr, entry.text, FONT_CHAT, inner, markup)
             grids = self.chat_grids(cr, layout, tables, FONT_CHAT, inner)
             hit = (layout, layout.get_pixel_size()[1], 'arg', grids)
-        elif entry.kind in ('you', 'flow'):
+        elif entry.kind in ('you', 'flow', 'plan'):
             text, markup, tables = entry.text, None, []
             if entry.images:
                 text += ('\n' if text else '') + ('1 imagen' if entry.images == 1 else f'{entry.images} imágenes')
-            if entry.kind == 'flow':
-                # Lo que manda un workflow viene en markdown, como lo que contesta Claude.
+            if entry.kind in ('flow', 'plan'):
+                # Lo que manda un workflow y el plan de Claude vienen en markdown, como su respuesta.
                 blocks = []
                 markup = self.chat_markdown(text, blocks, tables)
                 if not self.chat_reads(markup):
@@ -1649,7 +1649,7 @@ class ChatView:
             if y + hh < top:
                 break
             x = left + CHAT_INDENT
-            if entry.kind in ('you', 'flow'):
+            if entry.kind in ('you', 'flow', 'plan'):
                 # Tu bloque: a todo lo ancho, teñido, con la barra del color del agente.
                 cr.rectangle(left, y, width, hh)
                 cr.set_source_rgba(1, 1, 1, .055 * alpha)
@@ -1657,11 +1657,11 @@ class ChatView:
                 cr.rectangle(left, y, CHAT_BAR, hh)
                 cr.set_source_rgba(*color, alpha)
                 cr.fill()
-                if entry.kind == 'flow':
+                if entry.kind in ('flow', 'plan'):
                     self.draw_code_backgrounds(cr, layout, x - 2, left + width - 8, y + CHAT_BLOCK_PAD, alpha)
                 self.tip_text(cr, layout, x, y + CHAT_BLOCK_PAD, mascot.rgba(self.ink('arg'))[:3], alpha, False)
                 self.draw_tables(cr, layout, grids, x, y + CHAT_BLOCK_PAD, mascot.rgba(self.ink('arg'))[:3], alpha)
-                if entry.kind == 'flow':
+                if entry.kind in ('flow', 'plan'):
                     self.draw_code_links(cr, index, layout, left + width, y + CHAT_BLOCK_PAD, alpha, top, bottom)
             elif role is None:
                 self.tip_text(cr, layout, x, y + 2, None, alpha, False)
@@ -1924,13 +1924,16 @@ class ChatView:
         cr.set_source_rgba(*red, .45 * alpha)
         cr.set_line_width(1)
         cr.stroke()
-        self.put(cr, 'Pide permiso', FONT_LINK, left + 12, y + 10, red, alpha)
-        self.put(cr, ask['text'], FONT_YOU, left + 12, y + 28, mascot.rgba(self.ink('arg'))[:3], alpha,
-                 width=width - 24)
+        plan = ask['tool'] == chat.PLAN_TOOL
+        self.put(cr, 'Propone un plan' if plan else 'Pide permiso', FONT_LINK, left + 12, y + 10, red, alpha)
+        self.put(cr, 'Léelo arriba en la conversación y apruébalo para que empiece' if plan else ask['text'],
+                 FONT_YOU, left + 12, y + 28, mascot.rgba(self.ink('arg'))[:3], alpha, width=width - 24)
         by = y + CHAT_ASK_H - 8 - 26
         right = left + width - 12
-        self.draw_button(cr, 'chat-allow', 'Permitir', right - 84, by, True, alpha)
-        self.draw_button(cr, 'chat-deny', 'Denegar', right - 2 * 84 - 8, by, False, alpha)
+        wide = 128 if plan else 84
+        self.draw_button(cr, 'chat-allow', 'Aprobar' if plan else 'Permitir', right - wide, by, True, alpha, wide)
+        self.draw_button(cr, 'chat-deny', 'Seguir planeando' if plan else 'Denegar', right - wide - 8 - wide, by,
+                         False, alpha, wide)
 
     def draw_chat_suggest(self, cr, left, width, bottom, found, alpha):
         """La lista de comandos al escribir "/", la de agentes y archivos con

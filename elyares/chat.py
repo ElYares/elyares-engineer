@@ -79,7 +79,10 @@ MAX_FILES = 4000          # archivos del proyecto que se ofrecen al escribir "@"
 MAX_MENTIONS = 40         # lo que cabe en la lista de "@"
 FILES_SECS = 30           # cada cuánto se vuelven a listar los archivos del proyecto
 DENY_MESSAGE = 'El usuario lo denegó desde el chat de elyares-engineer.'
+PLAN_DENY_MESSAGE = ('El usuario no aprobó el plan todavía desde el chat de elyares-engineer: '
+                     'sigue en modo plan, no lo apliques y pregúntale qué quiere cambiar.')
 QUESTION_TOOL = 'AskUserQuestion'     # pide elegir entre opciones, no permiso
+PLAN_TOOL = 'ExitPlanMode'            # propone un plan: se aprueba viéndolo, o se sigue planeando
 # Los que modifican el repo: dos conversaciones suyas sobre la misma carpeta
 # pueden pisarse, y la isla avisa cuando pasa. Los demás solo leen y reportan.
 WRITER_AGENTS = ('', 'elyares-mobile', 'elyares-devops')
@@ -383,9 +386,12 @@ class Chat:
         ask, self.asking = self.asking, None
         if ask is None:
             return False
+        plan = ask['tool'] == PLAN_TOOL
         decision = ({'behavior': 'allow', 'updatedInput': ask['input']} if allow
-                    else {'behavior': 'deny', 'message': DENY_MESSAGE})
-        if not allow:
+                    else {'behavior': 'deny', 'message': PLAN_DENY_MESSAGE if plan else DENY_MESSAGE})
+        if plan:
+            self._add('note', 'Plan aprobado' if allow else 'Sigues planeando: el plan no se aprobó')
+        elif not allow:
             self._add('note', f'Denegado: {ask["text"]}')
         return self._write({'type': 'control_response',
                             'response': {'subtype': 'success', 'request_id': ask['id'], 'response': decision}})
@@ -470,6 +476,9 @@ class Chat:
             tool_input = req.get('input') if isinstance(req.get('input'), dict) else {}
             self.asking = {'id': event.get('request_id'), 'tool': req.get('tool_name') or '',
                            'input': tool_input, 'text': self.describe(req.get('tool_name'), tool_input)}
+            plan = tool_input.get('plan')
+            if self.asking['tool'] == PLAN_TOOL and isinstance(plan, str) and plan.strip():
+                self._add('plan', plan.strip())      # el plan, a la vista en la conversación, para aprobarlo leyéndolo
             return True
         if kind == 'result':
             self.busy = self.streaming = False
