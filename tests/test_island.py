@@ -862,6 +862,37 @@ class Tablero(Dibujo):
         self.isl.focus = ('a', 'engineer')
         self.assertEqual(self.isl.card_h('board'), 0)
 
+    def test_las_respuestas_que_esperan_se_cuentan_sin_el_tablero(self):
+        isl = self.isl
+        self.work('a')
+        self.draw()
+        self.assertNotIn('2', self.shown)                           # nada que contar
+        self.reply('elyares-reviewer', 'reviewer', 'api')
+        self.reply('elyares-designer', 'designer', 'web', at=2)
+        self.assertEqual(len(isl.replies()), 2)
+        # Asomada o en pastilla, sin el tablero a la vista: el número, en la esquina.
+        for compact in (False, True):
+            with self.subTest(compact=compact):
+                isl.settings['compact'] = compact
+                isl.view.mode = 'petit' if compact else 'peek'
+                isl.w, isl.h = app.SIZES[isl.view.mode]
+                self.shown.clear()
+                isl.draw_head(self.cr, 0, isl.w, isl.h, isl.view.mode, False, T)
+                self.assertIn('2', self.shown)
+        # Escondida: una marca en su franja, con el color de la última y sin número.
+        self.shown.clear()
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 120, 6)
+        cr = cairo.Context(surface)
+        isl.draw_head(cr, 0, 120, 6, 'hidden', False, T)
+        self.assertNotIn('2', self.shown)
+        self.assertTrue(any(surface.get_data()))
+        # El tablero ya las muestra en su ficha: ahí no se cuentan.
+        isl.expanded = True
+        self.assertEqual(isl.target(), 'board')
+        self.shown.clear()
+        self.draw()
+        self.assertNotIn('2', self.shown)
+
     def test_asomada_salen_las_caritas_de_los_demas(self):
         self.work('a')
         alone = self.isl.goal()
