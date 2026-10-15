@@ -3093,6 +3093,23 @@ class Ventana(Dibujo):
         isl.app_win.present.assert_called_once()
         self.assertTrue(isl.settings['window'])
 
+    def test_el_estado_de_la_sesion_va_en_palabras(self):
+        from elyares.state import Member
+        def team(*states):
+            return [Member('r', 'r', state=st, since=100.0 if st == 'working' else 0.0) for st in states]
+        state = self.isl.window_state
+        self.assertEqual(state(team('working', 'permission'), 400.0), 'Pide permiso')
+        self.assertEqual(state(team('working'), 280.0), 'Trabaja · 3 min 00 s')
+        self.assertEqual(state(team('waiting'), 0), 'Espera respuesta')
+        self.assertEqual(state(team('done', 'idle'), 0), 'Terminó')
+        self.assertEqual(state(team('idle'), 0), 'En reposo')
+
+    def test_una_fila_de_la_barra_lateral_cambia_de_pestana(self):
+        self.isl.tab = 'a'
+        self.isl.window_pick('b')
+        self.assertEqual(self.isl.tab, 'b')
+        self.assertTrue(self.isl.tab_manual)
+
     def test_cerrar_devuelve_la_isla_con_su_tamano(self):
         isl = self.isl
         isl.open_window()

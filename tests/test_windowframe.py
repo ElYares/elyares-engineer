@@ -58,6 +58,32 @@ class Marco(unittest.TestCase):
         marked = [k for k, b in self.frame.buttons.items() if b.get_active()]
         self.assertEqual(marked, ['projects'])
 
+    ROWS = [('a', 'api · chat', '#ff6b6b', 'Pide permiso'), ('b', 'web', None, 'En reposo')]
+
+    def test_la_barra_lateral_lista_las_sesiones_con_su_estado_en_texto(self):
+        self.frame.set_sessions(self.ROWS, 'b')
+        rows = []
+        row = self.frame.sidebar.get_first_child()
+        while row is not None:
+            rows.append(row.sid)
+            row = row.get_next_sibling()
+        self.assertEqual(rows, ['a', 'b'])
+        self.assertEqual(self.frame.sidebar.get_selected_row().sid, 'b')
+
+    def test_elegir_una_fila_avisa_y_sincronizar_no(self):
+        picked = []
+        frame = windowframe.Frame(self.clicks.append, picked.append)
+        frame.set_sessions(self.ROWS, 'a')
+        self.assertEqual(picked, [])
+        frame.sidebar.emit('row-activated', frame.sidebar.get_row_at_index(1))
+        self.assertEqual(picked, ['b'])
+
+    def test_sin_cambios_no_se_reconstruye(self):
+        self.frame.set_sessions(self.ROWS, 'a')
+        first = self.frame.sidebar.get_first_child()
+        self.frame.set_sessions(list(self.ROWS), 'a')
+        self.assertIs(self.frame.sidebar.get_first_child(), first)
+
     def test_el_contenido_es_uno_y_se_quita(self):
         a, b = Gtk.DrawingArea(), Gtk.DrawingArea()
         self.frame.set_content(a)

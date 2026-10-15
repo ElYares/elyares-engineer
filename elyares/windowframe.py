@@ -6,7 +6,7 @@ dentro, como un contenido más, hasta que cada vista se migre. Este módulo solo
 arma los widgets; qué hace cada botón lo decide quien lo crea con `on_view`.
 """
 
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, Gtk, Pango
 
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
@@ -56,8 +56,10 @@ def load_css():
 class Frame:
     """Barra de título con las vistas, barra lateral y el hueco del contenido."""
 
-    def __init__(self, on_view):
+    def __init__(self, on_view, on_session=None):
         self.on_view = on_view
+        self.on_session = on_session or (lambda sid: None)
+        self.session_rows = ()          # lo último que se armó: sin cambios no se reconstruye
         self.syncing = False            # sincronizar los botones no es un clic de Yared
         self.buttons = {}
         load_css()
@@ -78,8 +80,9 @@ class Frame:
         self.header.set_title_widget(nav)
         self.sidebar = Gtk.ListBox()
         self.sidebar.set_size_request(SIDEBAR_W, -1)
-        self.sidebar.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.sidebar.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.sidebar.add_css_class('elyares-side')
+        self.sidebar.connect('row-activated', self._picked)
         self.slot = Gtk.Box()           # donde va el contenido
         self.slot.set_hexpand(True)
         self.slot.set_vexpand(True)
@@ -109,6 +112,43 @@ class Frame:
             btn.set_active(True)
         finally:
             self.syncing = False
+
+    def set_sessions(self, rows, chosen):
+        """La barra lateral: una fila por sesión, `rows` = [(sid, nombre,
+        color del punto o None, texto de estado)]. El estado va también en
+        texto y en el nombre accesible: no depende solo del color."""
+        key = (tuple(rows), chosen)
+        if key == self.session_rows:
+            return
+        self.session_rows = key
+        while (row := self.sidebar.get_first_child()) is not None:
+            self.sidebar.remove(row)
+        picked = None
+        for sid, name, color, text in rows:
+            row = Gtk.ListBoxRow()
+            row.sid = sid
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+            dot = Gtk.Label()
+            dot.set_markup(f'<span foreground="{color or MUTED}">{"●" if color else "○"}</span>')
+            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            title = Gtk.Label(label=name, xalign=0)
+            title.set_ellipsize(Pango.EllipsizeMode.END)
+            sub = Gtk.Label(label=text, xalign=0)
+            sub.add_css_class('dim-label')
+            col.append(title)
+            col.append(sub)
+            box.append(dot)
+            box.append(col)
+            row.set_child(box)
+            row.update_property([Gtk.AccessibleProperty.LABEL], [f'{name}, {text}'])
+            self.sidebar.append(row)
+            if sid == chosen:
+                picked = row
+        if picked is not None:
+            self.sidebar.select_row(picked)     # no emite `row-activated`: no es un clic
+
+    def _picked(self, _box, row):
+        self.on_session(row.sid)
 
     def chrome_h(self):
         """Lo que la barra de título le quita al alto de la ventana."""
