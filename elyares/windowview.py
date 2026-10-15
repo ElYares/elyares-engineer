@@ -16,7 +16,8 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import hypr, settings, windowframe
+from . import hypr, mascot, settings, windowframe
+from .state import elapsed
 
 APP_ID = 'dev.elyares.Engineer'
 TITLE = 'Elyares Engineer'
@@ -115,7 +116,7 @@ class WindowView:
         # Cerrarla no es salir: solo vuelve la isla.
         win.connect('close-request', self.on_window_close)
         win.connect('notify::is-active', self.on_window_focus)
-        self.frame = windowframe.Frame(self.window_view)
+        self.frame = windowframe.Frame(self.window_view, self.window_pick)
         self.frame.attach(win)
         return win
 
@@ -141,6 +142,35 @@ class WindowView:
         elif key == 'flows' and not self.wf_open:
             self.open_workflows()
         # 'sources' aún no tiene vista propia (HU-006): se queda en el tablero.
+
+    def window_pick(self, sid):
+        """Una fila de la barra lateral: esa sesión pasa a ser la del tablero."""
+        if sid != self.tab:
+            self.tab, self.focus = sid, None
+            self.tab_manual = True
+
+    def window_rows(self):
+        """Las filas de la barra lateral: nombre, punto y estado en texto."""
+        labels, now = self.tab_labels(), time.time()
+        rows = []
+        for s in self.tabs():
+            color = self.tab_dot(s)
+            rows.append((s.sid, labels[s.sid], mascot.COLORS.get(color, color) if color else None,
+                         self.window_state(self.team(s), now)))
+        return rows
+
+    @staticmethod
+    def window_state(team, now):
+        """El estado de una sesión en palabras, el más urgente primero."""
+        states = {m.state for m in team}
+        if 'permission' in states:
+            return 'Pide permiso'
+        if 'working' in states:
+            since = min((m.since for m in team if m.state == 'working' and m.since), default=0)
+            return f'Trabaja · {elapsed(now - since)}' if since else 'Trabaja'
+        if 'waiting' in states:
+            return 'Espera respuesta'
+        return 'Terminó' if 'done' in states else 'En reposo'
 
     def window_current(self):
         if self.wf_open:
@@ -172,6 +202,7 @@ class WindowView:
         chrome = 0
         if self.frame is not None:
             self.frame.sync(self.window_current())
+            self.frame.set_sessions(self.window_rows(), self.tab)
             chrome = self.frame.chrome_h()      # la barra de título también es alto de ventana
         now = time.monotonic()
         height = self.app_win.get_height()
