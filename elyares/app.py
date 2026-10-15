@@ -1520,10 +1520,32 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.da.queue_draw()
         return GLib.SOURCE_CONTINUE
 
+    cursor_seen = None
+    cursor_thread = None
+
+    def watch_cursor(self):
+        """El cursor se pregunta a Hyprland en un hilo: si Hyprland tarda, la
+        interfaz no se congela esperándolo (el socket espera hasta 0.5 s)."""
+        if self.cursor_thread is not None:
+            return
+
+        def loop():
+            while True:
+                time.sleep(LOOK_EVERY)
+                if self.ticking or self.slow_id:
+                    try:
+                        self.cursor_seen = hypr.cursor_pos()
+                    except OSError:
+                        self.cursor_seen = None
+
+        self.cursor_thread = threading.Thread(target=loop, daemon=True, name='cursor')
+        self.cursor_thread.start()
+
     def update_look(self, now):
         if now - self.last_look >= LOOK_EVERY and self.monitor:
             self.last_look = now
-            pos = hypr.cursor_pos()
+            self.watch_cursor()
+            pos = self.cursor_seen
             if pos:
                 m = self.monitor
                 top = m['y'] + (m.get('reserved') or [0, 0])[1]
@@ -1791,13 +1813,13 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def face(self, cr, role, pet, x, y, size, alpha, now=None, age=0.0):
         """Uno de la familia, de `size` de alto y centrado en (x, y). Con
         `now` se mueve y mira al cursor; sin él, quieto."""
+        if now is None:
+            mascot.paint_static(cr, role, pet, x, y, size, alpha)    # quieta: ya dibujada una vez
+            return
         cr.push_group()
         cr.translate(x, y + size * .015)
         cr.scale(size / 253, size / 253)
-        if now is None:
-            mascot.draw(cr, pet, 0, 0, motion=0, role=role)
-        else:
-            mascot.draw(cr, pet, age, now, tuple(self.look), now < self.blink_until, role=role)
+        mascot.draw(cr, pet, age, now, tuple(self.look), now < self.blink_until, role=role)
         cr.pop_group_to_source()
         cr.paint_with_alpha(alpha)
 

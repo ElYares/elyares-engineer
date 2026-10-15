@@ -429,5 +429,29 @@ class Desglose(unittest.TestCase):
         self.assertEqual(len(panel.faces), 1)       # solo el que trabaja se anima
 
 
+class CaraQuieta(unittest.TestCase):
+    """La cara quieta se dibuja una vez y después solo se estampa."""
+
+    def test_se_reutiliza_la_misma_superficie(self):
+        import cairo
+        from elyares import mascot
+        mascot._STATIC.clear()
+        cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 100, 100))
+        mascot.paint_static(cr, 'auditor', 'idle', 50, 50, 40)
+        first = dict(mascot._STATIC)
+        mascot.paint_static(cr, 'auditor', 'idle', 20, 20, 40, .5)
+        self.assertEqual(len(mascot._STATIC), 1)
+        self.assertIs(list(mascot._STATIC.values())[0], list(first.values())[0])
+        mascot.paint_static(cr, 'auditor', 'working', 50, 50, 40)   # otro gesto: otra superficie
+        self.assertEqual(len(mascot._STATIC), 2)
+
+    def test_deja_pintura(self):
+        import cairo
+        from elyares import mascot
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 100, 100)
+        mascot.paint_static(cairo.Context(surf), 'engineer', 'idle', 50, 50, 60)
+        self.assertTrue(any(surf.get_data()))
+
+
 if __name__ == '__main__':
     unittest.main()
