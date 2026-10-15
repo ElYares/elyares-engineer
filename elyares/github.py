@@ -32,6 +32,13 @@ GREEN = ('SUCCESS',)
 RED = ('FAILURE', 'ERROR')
 RUNNING = ('PENDING', 'EXPECTED')
 # Cómo van los checks de un PR, para la burbuja: (estados, tono, lo que dice).
+WAKE = threading.Event()      # «Reintentar»: despierta al vigilante sin esperar su turno
+
+
+def retry():
+    WAKE.set()
+
+
 CHECKS_NOTE = ((GREEN, 'ok', 'en verde'), (RED, 'bad', 'en rojo'), (RUNNING, 'run', 'corriendo'))
 # Con estas conclusiones un check cuenta como caído. Uno cancelado o saltado no.
 FAILED = ('FAILURE', 'ERROR', 'TIMED_OUT', 'STARTUP_FAILURE')
@@ -326,6 +333,8 @@ def watch(emit, enabled=lambda: True, only=lambda: None):
             for _ in range(POLL_SECS // 5):
                 if not enabled():
                     break
-                time.sleep(5)
+                if WAKE.wait(5):
+                    WAKE.clear()
+                    break
 
     threading.Thread(target=loop, daemon=True, name='github').start()

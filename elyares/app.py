@@ -964,7 +964,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         """Alto del tablero bajo las pestañas: el de los cuatro o el de un
         desglose, que con su mini chat mide un poco más."""
         if not self.focused():
-            return BOARD_H
+            return max(BOARD_H, self.window_body) if self.windowed else BOARD_H
         return FOCUS_H + (chatview.MINI_H if self.briefing() else 0)
 
     def next_tab(self):
@@ -1206,6 +1206,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
 
     def pills_h(self, mode):
         """Alto de la franja de fuentes: solo cuando alguien abrió la isla a mano."""
+        if self.windowed and self.frame is not None:
+            return 0                    # en la ventana, Fuentes y la ayuda están en la barra de título
         by_hand = self.expanded or self.hover
         return PILLS_H if by_hand and mode in ('open', 'list', 'board') else 0
 
@@ -1248,7 +1250,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.hover = value
         if not value:
             self.pointer = None
-            self.collapse()
+            if not self.windowed:
+                self.collapse()         # la ventana ya es la isla abierta: salir con el ratón no suelta nada
         self.ensure_tick()
 
     def on_motion(self, _ctrl, x, y):
@@ -1474,6 +1477,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.last_frame = now
 
         tw, th = self.goal()
+        if self.windowed:
+            self.w, self.h, self.vw, self.vh = tw, th, 0.0, 0.0     # sin rebote: la ventana no es una isla que se asoma
         for pos, vel, goal in (('w', 'vw', tw), ('h', 'vh', th)):
             x, v = getattr(self, pos), getattr(self, vel)
             v += (SPRING_K * (goal - x) - SPRING_C * v) * dt
@@ -1549,7 +1554,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def island_rect(self, width):
         h = clamp(self.h, 0, WIN_H)
         if self.windowed:
-            return 0, width, h          # en la ventana, a lo ancho: no es una isla suelta
+            # En la ventana, a todo lo ancho y lo alto: no es una isla suelta, y lo
+            # que no ocupa el contenido es el mismo fondo, no un hueco sin pintar.
+            room = self.da.get_height()
+            return 0, width, max(h, room) if isinstance(room, (int, float)) else h
         w = clamp(self.w, 0, width)
         return (width - w) / 2, w, h
 
@@ -1568,18 +1576,25 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.line_to(x0 + r, h)
         cr.arc(x0 + r, h - r, r, math.pi / 2, math.pi)
         cr.close_path()
-        glass = self.settings['glass'] and not self.windowed
+        glass = self.settings['glass']
         cr.set_source_rgba(*ISLAND_BG[:3], GLASS_ALPHA if glass else ISLAND_BG[3])
         cr.fill_preserve()
-        return cr.copy_path() if glass else None
+        # Una ventana no lleva el filo claro: ya tiene su borde de Hyprland.
+        return cr.copy_path() if glass and not self.windowed else None
 
     def draw(self, _da, cr, width, _height):
         cr.set_operator(cairo.OPERATOR_SOURCE)
-        # En la ventana no hay capa que el compositor desenfoque ni nada detrás:
-        # el fondo es el de la isla, entero.
-        cr.set_source_rgba(*ISLAND_BG[:3], 1) if self.windowed else cr.set_source_rgba(0, 0, 0, 0)
+        # En la ventana sin vidrio no hay nada detrás que se vea: el fondo es el
+        # de la isla, entero. Con vidrio, transparente, y es Hyprland quien
+        # desenfoca lo de atrás (la ventana no es una capa: sin la regla de capa).
+        opaque = self.windowed and not self.settings['glass']
+        cr.set_source_rgba(*ISLAND_BG[:3], 1) if opaque else cr.set_source_rgba(0, 0, 0, 0)
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
+        if self.window_covered():
+            self.buttons, self.rows, self.pills, self.hits = {}, [], [], []
+            self.tip = self.card_span = self.chat_box = None
+            return                      # lo tapa un panel de widgets: nada de lo de debajo se ve
 
         x0, w, h = self.island_rect(width)
         if h < 0.5 or w < 1:
@@ -1620,7 +1635,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             full_h = h
             text_alpha = clamp((w - 420) / 120) * clamp((h - 110) / 60)
             body = self.body_h()
-            if text_alpha > 0:
+            if text_alpha > 0 and not (self.board_widgets() or self.focus_widgets()):     # en la ventana lo llevan los widgets
                 self.draw_board(cr, x0, w, body, text_alpha, now)
             head = TABS_H + body + BOARD_PAD
             listed = True
@@ -2426,45 +2441,46 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         lw, lh = layout.get_pixel_size()
         pw = lw + 16
         x = right - pw
-        chat = self._layout(cr, 'Chat', FONT_PILL)
-        cw, ch = chat.get_pixel_size()
-        cpw = cw + 20
-        cx = x - PILL_GAP - cpw
-        over_chat = cx <= px <= cx + cpw and y <= py <= y + PILL_H
-        mascot.rrect(cr, cx, y, cpw, PILL_H, PILL_H / 2)
-        accent = mascot.rgba(mascot.accent('engineer'))[:3]
-        cr.set_source_rgba(*accent, (.30 if over_chat else .18) * alpha)
-        cr.fill()
-        cr.move_to(cx + (cpw - cw) / 2, y + (PILL_H - ch) / 2)
-        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-        PangoCairo.show_layout(cr, chat)
-        # Y, antes, la de los proyectos, para empezar en cualquiera.
-        plus = self._layout(cr, '+', FONT_PILL)
-        qw, qh = plus.get_pixel_size()
-        qpw = qw + 16
-        qx = cx - PILL_GAP - qpw
-        over_plus = qx <= px <= qx + qpw and y <= py <= y + PILL_H
-        mascot.rrect(cr, qx, y, qpw, PILL_H, PILL_H / 2)
-        cr.set_source_rgba(1, 1, 1, (.13 if over_plus else .07) * alpha)
-        cr.fill()
-        cr.move_to(qx + (qpw - qw) / 2, y + (PILL_H - qh) / 2)
-        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-        PangoCairo.show_layout(cr, plus)
-        self.pills.append((projectview.PROJECTS_PILL, qx, y, qpw, PILL_H))
-        # Y la de los workflows: sus cadenas de agentes.
-        flows = self._layout(cr, 'Flujos', FONT_PILL)
-        fw, fh = flows.get_pixel_size()
-        fpw = fw + 16
-        fx = qx - PILL_GAP - fpw
-        over_flows = fx <= px <= fx + fpw and y <= py <= y + PILL_H
-        mascot.rrect(cr, fx, y, fpw, PILL_H, PILL_H / 2)
-        cr.set_source_rgba(1, 1, 1, (.13 if over_flows else .07) * alpha)
-        cr.fill()
-        cr.move_to(fx + (fpw - fw) / 2, y + (PILL_H - fh) / 2)
-        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-        PangoCairo.show_layout(cr, flows)
-        self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
-        self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
+        if not (self.frame is not None and self.windowed):     # en la ventana son las vistas de la barra de título
+            chat = self._layout(cr, 'Chat', FONT_PILL)
+            cw, ch = chat.get_pixel_size()
+            cpw = cw + 20
+            cx = x - PILL_GAP - cpw
+            over_chat = cx <= px <= cx + cpw and y <= py <= y + PILL_H
+            mascot.rrect(cr, cx, y, cpw, PILL_H, PILL_H / 2)
+            accent = mascot.rgba(mascot.accent('engineer'))[:3]
+            cr.set_source_rgba(*accent, (.30 if over_chat else .18) * alpha)
+            cr.fill()
+            cr.move_to(cx + (cpw - cw) / 2, y + (PILL_H - ch) / 2)
+            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, chat)
+            # Y, antes, la de los proyectos, para empezar en cualquiera.
+            plus = self._layout(cr, '+', FONT_PILL)
+            qw, qh = plus.get_pixel_size()
+            qpw = qw + 16
+            qx = cx - PILL_GAP - qpw
+            over_plus = qx <= px <= qx + qpw and y <= py <= y + PILL_H
+            mascot.rrect(cr, qx, y, qpw, PILL_H, PILL_H / 2)
+            cr.set_source_rgba(1, 1, 1, (.13 if over_plus else .07) * alpha)
+            cr.fill()
+            cr.move_to(qx + (qpw - qw) / 2, y + (PILL_H - qh) / 2)
+            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, plus)
+            self.pills.append((projectview.PROJECTS_PILL, qx, y, qpw, PILL_H))
+            # Y la de los workflows: sus cadenas de agentes.
+            flows = self._layout(cr, 'Flujos', FONT_PILL)
+            fw, fh = flows.get_pixel_size()
+            fpw = fw + 16
+            fx = qx - PILL_GAP - fpw
+            over_flows = fx <= px <= fx + fpw and y <= py <= y + PILL_H
+            mascot.rrect(cr, fx, y, fpw, PILL_H, PILL_H / 2)
+            cr.set_source_rgba(1, 1, 1, (.13 if over_flows else .07) * alpha)
+            cr.fill()
+            cr.move_to(fx + (fpw - fw) / 2, y + (PILL_H - fh) / 2)
+            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, flows)
+            self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
+            self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
         cr.set_source_rgba(1, 1, 1, (.13 if over else .07) * alpha)
@@ -2901,8 +2917,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.target() in ('board', 'chat', 'projects') or (self.rows and y > self.rows[0][1]):
-            return
+        if self.windowed or self.target() in ('board', 'chat', 'projects') or (self.rows and y > self.rows[0][1]):
+            return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
         elif self.view.session:

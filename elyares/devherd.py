@@ -28,6 +28,12 @@ import urllib.request
 BASE = 'http://127.0.0.1:9777'
 UNIT = 'devherd-observe.service'
 POLL_SECS = 10
+WAKE = threading.Event()      # «Reintentar»: consulta ya, sin esperar su turno
+
+
+def retry():
+    WAKE.set()
+
 DOWN_POLLS = 3            # consultas fallidas seguidas antes de dar al colector por caído
 LOOP_RESTARTS = 3         # reinicios en LOOP_SECS para llamarlo bucle
 LOOP_SECS = 300
@@ -253,6 +259,7 @@ def watch(emit, enabled=lambda: True):
             except Exception:
                 # Una respuesta con otra forma no debe matar al vigilante.
                 pass
-            time.sleep(POLL_SECS)
+            if WAKE.wait(POLL_SECS):
+                WAKE.clear()
 
     threading.Thread(target=loop, daemon=True, name='devherd').start()

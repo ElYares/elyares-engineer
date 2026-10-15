@@ -19,7 +19,7 @@ try:
 except (ImportError, ValueError):       # sin gi o sin gtk4-layer-shell
     app = None
 
-from elyares import state
+from elyares import state, windowview
 from elyares.state import Model
 
 T = 1000.0
@@ -3093,6 +3093,179 @@ class Ventana(Dibujo):
         isl.app_win.present.assert_called_once()
         self.assertTrue(isl.settings['window'])
 
+    def test_el_estado_de_la_sesion_va_en_palabras(self):
+        from elyares.state import Member
+        def team(*states):
+            return [Member('r', 'r', state=st, since=100.0 if st == 'working' else 0.0) for st in states]
+        state = self.isl.window_state
+        self.assertEqual(state(team('working', 'permission'), 400.0), 'Pide permiso')
+        self.assertEqual(state(team('working'), 280.0), 'Trabaja · 3 min 00 s')
+        self.assertEqual(state(team('waiting'), 0), 'Espera respuesta')
+        self.assertEqual(state(team('done', 'idle'), 0), 'Terminó')
+        self.assertEqual(state(team('idle'), 0), 'En reposo')
+
+    def test_el_tablero_va_en_widgets_solo_en_la_ventana_y_sin_desglose(self):
+        isl = self.isl
+        isl.frame, isl.windowed, isl.focus = mock.Mock(), True, None
+        isl.target, isl.tab_session = lambda: 'board', lambda: object()
+        isl.sources_open, isl.panel_open, isl.wf_open = False, '', False
+        isl.focused = lambda: None
+        self.assertTrue(isl.board_widgets())
+        isl.focused = lambda: (object(), object())  # con un desglose abierto, es el panel del desglose
+        self.assertFalse(isl.board_widgets())
+        self.assertTrue(isl.focus_widgets())
+        isl.windowed = False                        # la isla suelta no lleva widgets
+        self.assertFalse(isl.board_widgets() or isl.focus_widgets())
+
+    def test_el_tablero_en_widgets_reparte_los_que_trabajan_y_los_libres(self):
+        from elyares.state import Session
+        isl = self.isl
+        s = Session('s1', state='permission')
+        isl.frame, isl.windowed, isl.focus = mock.Mock(), True, None
+        isl.target, isl.tab_session = lambda: 'board', lambda: s
+        isl.asking, isl.seat, isl.body_h = lambda: s, lambda sess, role: s, lambda: 100
+        isl.team = lambda sess: sess.team()
+        isl.frame.board.natural_h.return_value = 300      # las tarjetas piden más que el alto de siempre
+        isl.window_board()
+        cards, free, _handlers = isl.frame.board.set_cards.call_args.args
+        self.assertTrue(cards and all(c['busy'] for c in cards))
+        self.assertTrue(any(c['ask'] and c['state'].startswith('Pide permiso') for c in cards))
+        self.assertTrue(all(not c['busy'] for c in free))
+        self.assertEqual(len(cards) + len(free), len(s.team()))
+        isl.frame.board.place.assert_called_with(app.TABS_H + 100)      # lo que dé body_h, que ya suma window_body
+        self.assertEqual(isl.window_body, 300 - app.TABS_H)
+
+    def test_en_el_chat_la_barra_lateral_lista_a_los_agentes(self):
+        from elyares import state
+        isl = self.isl
+        isl.chat, isl.chats = None, {}
+        rows, chosen, _face = isl.window_agents()
+        self.assertEqual([r[4] for r in rows], list(state.TEAM))
+        self.assertEqual(chosen, 'agent:')
+        self.assertTrue(rows[0][0] == 'agent:' and rows[1][0].startswith('agent:elyares-'))
+
+    def test_elegir_un_agente_en_la_barra_lateral_le_habla_a_ese(self):
+        isl = self.isl
+        isl.on_chat_hit = mock.Mock()
+        isl.window_pick('agent:elyares-auditor')
+        isl.on_chat_hit.assert_called_once_with('agent:elyares-auditor')
+
+    def test_la_vista_fuentes_lista_las_seis_y_su_estado_en_texto(self):
+        from elyares import sources
+        isl = self.isl
+        isl.frame, isl.sources_open = mock.Mock(), True
+        isl.chat_open = isl.projects_open = isl.wf_open = False
+        isl.source_state = lambda key: 'off' if key == 'coffe' else 'bad' if key == 'github' else 'on'
+        isl.source_note = lambda key: '2 PRs'
+        isl.sources = {'github': {'why': 'falta gh', 'fix': 'instala gh', 'since': 0}}
+        isl.window_sources()
+        rows, chosen, detail, _handlers = isl.frame.sources.set_data.call_args.args
+        self.assertEqual([r[0] for r in rows], [k for k, _ in sources.SOURCES])
+        self.assertEqual(dict((r[0], r[3]) for r in rows)['coffe'], 'Apagada')
+        self.assertEqual(chosen, 'claude')
+        self.assertFalse(detail['toggle'])              # a Claude no se le apaga
+
+    def test_la_bandeja_lista_las_alertas_y_la_campana_las_cuenta(self):
+        from elyares.state import Session
+        isl = self.isl
+        isl.frame, isl.panel_open = mock.Mock(), 'alerts'
+        isl.chat_open = isl.projects_open = isl.wf_open = False
+        alerts = [Session(f'a{i}', state='alert', name=f'alerta {i}', lines=['x'],
+                          actions=[{'label': 'Logs'}]) for i in range(4)]
+        isl.alerts = lambda: alerts
+        isl.window_panels()
+        isl.frame.set_bell.assert_called_with(4)
+        cards, _handlers = isl.frame.alerts.set_alerts.call_args.args
+        self.assertEqual(len(cards), 4)
+        self.assertEqual(cards[0]['buttons'], [('dismiss', 'Descartar'), (0, 'Logs')])
+
+    def test_descartar_una_alerta_la_quita_y_no_vuelve(self):
+        from elyares.state import Session
+        isl = self.isl
+        s = Session('a1', state='alert', name='x')
+        isl.model.sessions['a1'] = s
+        isl.refresh, isl.ensure_tick = mock.Mock(), mock.Mock()
+        isl.window_alert('a1', 'dismiss')
+        self.assertNotIn('a1', isl.model.sessions)
+        self.assertIn('a1', isl.model.dismissed)
+
+    def test_ajustes_cambia_la_clave_de_hoy(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        before = isl.settings['glass']
+        with mock.patch('elyares.settings.save'):
+            isl.window_setting('glass')
+        self.assertEqual(isl.settings['glass'], not before)
+
+    def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
+        isl = self.isl
+        isl.frame, isl.windowed, isl.focus = mock.Mock(), True, None
+        isl.sources_open, isl.panel_open, isl.wf_open = False, '', True
+        isl.target, isl.tab_session = lambda: 'board', lambda: object()
+        self.assertFalse(isl.board_widgets())
+        isl.target = lambda: 'chat'
+        self.assertFalse(isl.chat_head_widget())
+        isl.wf_open = False
+        self.assertTrue(isl.chat_head_widget())
+
+    def test_en_la_ventana_no_hay_franja_de_pastillas(self):
+        isl = self.isl
+        isl.expanded, isl.hover = True, False
+        isl.windowed, isl.frame = False, None
+        self.assertEqual(isl.pills_h('board'), app.PILLS_H)         # la isla suelta las conserva
+        isl.windowed, isl.frame = True, mock.Mock()
+        self.assertEqual(isl.pills_h('board'), 0)                   # la ventana tiene Fuentes y «?» arriba
+
+    def test_con_fuentes_o_ajustes_a_la_vista_la_isla_no_dibuja(self):
+        isl = self.isl
+        isl.frame, isl.windowed = mock.Mock(), True
+        isl.sources_open, isl.panel_open = True, ''
+        isl.chat_open = isl.projects_open = isl.wf_open = False
+        self.assertTrue(isl.window_covered())
+        isl.sources_open, isl.panel_open = False, 'settings'
+        self.assertTrue(isl.window_covered())
+        isl.chat_open = True                        # el chat tapa a esos paneles: se dibuja
+        self.assertFalse(isl.window_covered())
+        isl.chat_open, isl.sources_open, isl.panel_open = False, False, ''
+        self.assertFalse(isl.window_covered())      # sin panel que cubra, se dibuja el tablero
+
+    def test_en_la_ventana_la_isla_llega_a_su_tamano_sin_rebote(self):
+        isl = self.isl
+        isl.windowed, isl.w, isl.h, isl.vw, isl.vh = True, 10.0, 10.0, 5.0, 5.0
+        goal = isl.goal()
+        isl.da = mock.Mock()
+        isl.last_frame, isl.next_blink, isl.blink_until = None, 1e12, 0.0
+        isl.update_look = isl.update_region = isl.window_fit = isl.flows_follow = mock.Mock()
+        isl.hover = isl.override = False
+        isl.tip_pop, isl.slow_id, isl.ticking = 0.0, 0, True
+        isl.on_tick(isl.da, None)
+        self.assertEqual((isl.w, isl.h), goal)
+        self.assertEqual((isl.vw, isl.vh), (0.0, 0.0))
+
+    def test_la_ventana_no_encoge_por_un_contenido_un_poco_mas_corto(self):
+        isl = self.isl
+        isl.frame = None
+        isl.app_win = mock.Mock(get_height=lambda: 600, get_width=lambda: 700)
+        isl.window_resize = mock.Mock()
+        isl.fit_h, isl.fit_at, isl.fit_manual = 600, -100.0, False
+        isl.window_fit(content_h=500 - windowview.FIT_PAD, room=0)      # 100 px menos: se queda
+        isl.window_resize.assert_not_called()
+        isl.window_fit(content_h=300 - windowview.FIT_PAD, room=0)      # 300 menos: encoge
+        isl.window_resize.assert_called_once()
+
+    def test_otra_vista_tapa_a_fuentes(self):
+        isl = self.isl
+        isl.frame, isl.sources_open = mock.Mock(), True
+        isl.chat_open, isl.projects_open, isl.wf_open = True, False, False
+        isl.window_sources()
+        self.assertFalse(isl.sources_open)
+
+    def test_una_fila_de_la_barra_lateral_cambia_de_pestana(self):
+        self.isl.tab = 'a'
+        self.isl.window_pick('b')
+        self.assertEqual(self.isl.tab, 'b')
+        self.assertTrue(self.isl.tab_manual)
+
     def test_cerrar_devuelve_la_isla_con_su_tamano(self):
         isl = self.isl
         isl.open_window()
@@ -3124,6 +3297,46 @@ class Ventana(Dibujo):
         isl.collapse = mock.Mock()
         self.assertTrue(isl.on_window_close(isl.app_win))        # True: GTK no la destruye
         self.assertFalse(isl.windowed)
+
+    def test_al_volver_a_la_ventana_el_chat_retoma_el_teclado_sin_un_clic(self):
+        isl = self.isl
+        isl.open_window()
+        isl.chat_open, isl.chat_typing = True, True
+        isl.chat_type = mock.Mock(side_effect=lambda on: setattr(isl, 'chat_typing', on))
+        isl.on_window_focus(mock.Mock(is_active=lambda: False), None)       # otra ventana toma el foco
+        isl.chat_type.assert_called_with(False)
+        isl.on_window_focus(mock.Mock(is_active=lambda: True), None)        # vuelve
+        isl.chat_type.assert_called_with(True)
+        # Si no estaba escribiendo al irse, tampoco se pone a escribir sola.
+        isl.chat_typing = False
+        isl.on_window_focus(mock.Mock(is_active=lambda: False), None)
+        isl.chat_type.reset_mock()
+        isl.on_window_focus(mock.Mock(is_active=lambda: True), None)
+        isl.chat_type.assert_not_called()
+
+    def test_en_ventana_un_clic_en_el_vacio_no_hace_nada(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.w, isl.h = 600, 250
+        isl.da = mock.Mock(get_width=lambda: 800)
+        isl.go, isl.poke = mock.Mock(), mock.Mock()
+        isl.target = lambda: 'open'
+        isl.view = mock.Mock(session=mock.Mock())
+        isl.on_click(None, 1, 300, 120)
+        isl.go.assert_not_called()
+        isl.poke.assert_not_called()
+        isl.windowed = False                            # la isla de siempre sí salta al pane
+        isl.on_click(None, 1, 300, 120)
+        isl.go.assert_called_once()
+
+    def test_en_ventana_salir_con_el_raton_no_suelta_la_ficha_elegida(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.pin = 'a'
+        isl.set_hover(True)
+        isl.set_hover(False)
+        self.assertEqual(isl.pin, 'a')
+        self.assertTrue(isl.expanded or isl.windowed)
 
     def test_en_ventana_no_se_esconde_ni_se_cierra_sola(self):
         isl = self.isl
@@ -3163,6 +3376,27 @@ class Ventana(Dibujo):
         self.assertTrue(isl.windowed)
         isl.on_control('window', {'control': 'window', 'how': 'toggle'})
         self.assertFalse(isl.windowed)
+
+    def test_con_vidrio_el_fondo_de_la_ventana_es_translucido_y_sin_filo(self):
+        isl = self.isl
+        isl.windowed = True
+        isl.expanded = True
+        isl.settings['glass'] = True
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 700, 500)
+        self.cr = cairo.Context(surface)
+        isl.da = mock.Mock(get_width=lambda: 700)
+        isl.w, isl.h = isl.goal()
+        isl.draw(None, self.cr, 700, 500)
+        surface.flush()
+        data = surface.get_data()
+        corner = bytes(data[0:4])
+        self.assertEqual(corner[3], round(app.GLASS_ALPHA * 255))   # deja ver (y desenfocar) lo de atrás
+        self.assertLess(corner[3], 255)
+        self.assertIsNone(isl.island_fill(self.cr, 0, 700, 400))     # sin el filo claro de la isla suelta
+        isl.settings['glass'] = False                                # sin vidrio, entero como siempre
+        isl.draw(None, self.cr, 700, 500)
+        surface.flush()
+        self.assertEqual(bytes(surface.get_data()[0:4])[3], 255)
 
     def test_el_fondo_de_la_ventana_es_opaco(self):
         isl = self.isl
@@ -3239,6 +3473,23 @@ class Ventana(Dibujo):
             clock[0] += 5
             isl.window_fit(660, 0)                       # y un contenido casi igual de alto no la mueve
             self.assertEqual(ask.call_count, 2)
+
+    def test_una_ventana_mas_corta_que_el_chat_se_sube_y_no_se_guarda_asi(self):
+        isl = self.isl
+        isl.settings['window_size'] = [660, 618]
+        with mock.patch.object(app.windowview.GLib, 'timeout_add'):
+            isl.open_window()
+        isl.app_win.get_width.return_value = 660
+        isl.app_win.get_height.return_value = 489       # Hyprland la dejó corta: el chat pierde su caja
+        clock = [100.0]
+        with mock.patch.object(app.windowview.hypr, 'request') as ask, \
+                mock.patch.object(app.windowview.time, 'monotonic', lambda: clock[0]):
+            isl.window_fit(620, 0)
+            self.assertIn('exact 660 632,', ask.call_args[0][0])        # lo menos que mide el chat
+            clock[0] += 5
+            isl.window_fit(620, 0)                                      # sigue corta: se vuelve a pedir
+            self.assertEqual(ask.call_count, 2)
+            self.assertEqual(isl.settings['window_size'], [660, 618])  # y esa medida corta no se toma por suya
 
     def test_recien_pedido_el_alto_no_se_toma_por_estirado(self):
         isl = self.fit_win()
