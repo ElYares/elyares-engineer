@@ -246,6 +246,10 @@ class BoardPanel(Gtk.ScrolledWindow):
         self.faces = []
         self.set_visible(False)
 
+    def natural_h(self, width):
+        """Lo que mide el contenido a ese ancho: el tablero pide ese alto."""
+        return self.page.measure(Gtk.Orientation.VERTICAL, max(1, int(width)))[1]
+
     def place(self, height):
         """Visible con ese alto, o escondido (`height` 0)."""
         self.set_visible(height > 0)
@@ -274,7 +278,7 @@ class BoardPanel(Gtk.ScrolledWindow):
                 continue
             flow = Gtk.FlowBox()
             flow.set_selection_mode(Gtk.SelectionMode.NONE)
-            flow.set_homogeneous(True)
+            flow.set_homogeneous(False)
             flow.set_min_children_per_line(1)
             flow.set_max_children_per_line(4)
             flow.set_column_spacing(SPACE[1])
@@ -287,7 +291,7 @@ class BoardPanel(Gtk.ScrolledWindow):
     def _card(self, card, handlers, small=False):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
         box.add_css_class('elyares-card')
-        size = 36 if small else 56
+        size = 28 if small else 48
         face = Gtk.DrawingArea()
         face.set_content_width(size)
         face.set_content_height(size)
@@ -305,10 +309,16 @@ class BoardPanel(Gtk.ScrolledWindow):
         state = Gtk.Label(label=card['state'], xalign=0)
         state.add_css_class('dim-label')
         text.append(name)
-        text.append(state)
-        for line in card['steps'][-2:]:
+        if small:
+            box.set_tooltip_text(f'{card["role"]}: {card["state"]}')    # el libre va en una línea, sin su estado
+            box.update_property([Gtk.AccessibleProperty.LABEL], [f'{card["role"]}, {card["state"]}'])
+        else:
+            text.append(state)
+        for line in card['steps'][-(2 if card['ask'] else 1):]:
             step = Gtk.Label(label=line, xalign=0, wrap=True)
-            step.set_lines(3)
+            step.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            step.set_max_width_chars(20)    # sin esto una línea larga ensancha la tarjeta y caben menos por fila
+            step.set_lines(3 if card['ask'] else 2)
             step.set_ellipsize(Pango.EllipsizeMode.END)
             text.append(step)
         box.append(text)
@@ -574,7 +584,7 @@ class SettingsPanel(Gtk.ScrolledWindow):
         super().__init__()
         self.add_css_class('elyares-sources')
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        self.page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[2])
         for side in ('top', 'bottom', 'start', 'end'):
             getattr(self.page, f'set_margin_{side}')(SPACE[2])
         self.set_child(self.page)
@@ -728,14 +738,14 @@ class FocusPanel(Gtk.ScrolledWindow):
             return
         self.signature = sig
         self.faces = []
-        root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[3])
+        root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[2])
         for side in ('top', 'bottom', 'start', 'end'):
             getattr(root, f'set_margin_{side}')(SPACE[2])
-        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
-        left.set_size_request(170, -1)
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
+        left.set_size_request(150, -1)
         face = Gtk.DrawingArea()
-        face.set_content_width(84)
-        face.set_content_height(84)
+        face.set_content_width(64)
+        face.set_content_height(64)
         face.set_halign(Gtk.Align.CENTER)
         face.set_draw_func(lambda _da, cr, w, h: handlers['face'](cr, d['role'], d['pet'], w, h, d['busy']))
         if d['busy']:
@@ -752,11 +762,13 @@ class FocusPanel(Gtk.ScrolledWindow):
         for kind, key, text in d['links']:
             btn = Gtk.Button(label=text)
             btn.add_css_class('elyares-btn')
+            btn.add_css_class('compact')
             btn.connect('clicked', lambda _b, k=kind, v=key: handlers['link'](k, v))
             left.append(btn)
         root.append(left)
         mid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
         mid.set_hexpand(True)
+        mid.set_size_request(0, -1)
         if d['empty']:
             mid.append(Gtk.Label(label=d['empty'], xalign=0, wrap=True))
         if d['hidden']:
@@ -768,8 +780,11 @@ class FocusPanel(Gtk.ScrolledWindow):
             row.add_css_class('elyares-card')
             m = Gtk.Label()
             m.set_markup(f'<span foreground="{color}">{GLib.markup_escape_text(mark)}</span>')
-            t = Gtk.Label(label=text, xalign=0)
+            t = Gtk.Label(label=text, xalign=0, wrap=True)
+            t.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            t.set_lines(2)
             t.set_hexpand(True)
+            t.set_max_width_chars(1)        # el mínimo es una letra: se envuelve al ancho que haya
             t.set_ellipsize(Pango.EllipsizeMode.END)
             when = Gtk.Label(label=spent)
             when.add_css_class('dim-label')
@@ -777,7 +792,12 @@ class FocusPanel(Gtk.ScrolledWindow):
             row.append(t)
             row.append(when)
             mid.append(row)
-        others = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+        others = Gtk.FlowBox()              # envuelve: en una fila no cabrían en una ventana angosta
+        others.set_selection_mode(Gtk.SelectionMode.NONE)
+        others.set_max_children_per_line(8)
+        others.set_column_spacing(SPACE[0])
+        others.set_row_spacing(SPACE[0])
+        others.set_halign(Gtk.Align.START)
         for role, pet, busy in d['others']:
             btn = Gtk.Button()
             btn.add_css_class('flat')

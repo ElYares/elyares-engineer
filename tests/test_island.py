@@ -3125,13 +3125,15 @@ class Ventana(Dibujo):
         isl.target, isl.tab_session = lambda: 'board', lambda: s
         isl.asking, isl.seat, isl.body_h = lambda: s, lambda sess, role: s, lambda: 100
         isl.team = lambda sess: sess.team()
+        isl.frame.board.natural_h.return_value = 300      # las tarjetas piden más que el alto de siempre
         isl.window_board()
         cards, free, _handlers = isl.frame.board.set_cards.call_args.args
         self.assertTrue(cards and all(c['busy'] for c in cards))
         self.assertTrue(any(c['ask'] and c['state'].startswith('Pide permiso') for c in cards))
         self.assertTrue(all(not c['busy'] for c in free))
         self.assertEqual(len(cards) + len(free), len(s.team()))
-        isl.frame.board.place.assert_called_with(app.TABS_H + 100)
+        isl.frame.board.place.assert_called_with(app.TABS_H + 100)      # lo que dé body_h, que ya suma window_body
+        self.assertEqual(isl.window_body, 300 - app.TABS_H)
 
     def test_en_el_chat_la_barra_lateral_lista_a_los_agentes(self):
         from elyares import state
@@ -3205,6 +3207,14 @@ class Ventana(Dibujo):
         self.assertFalse(isl.chat_head_widget())
         isl.wf_open = False
         self.assertTrue(isl.chat_head_widget())
+
+    def test_en_la_ventana_no_hay_franja_de_pastillas(self):
+        isl = self.isl
+        isl.expanded, isl.hover = True, False
+        isl.windowed, isl.frame = False, None
+        self.assertEqual(isl.pills_h('board'), app.PILLS_H)         # la isla suelta las conserva
+        isl.windowed, isl.frame = True, mock.Mock()
+        self.assertEqual(isl.pills_h('board'), 0)                   # la ventana tiene Fuentes y «?» arriba
 
     def test_otra_vista_tapa_a_fuentes(self):
         isl = self.isl
