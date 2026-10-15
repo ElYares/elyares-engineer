@@ -16,7 +16,7 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import hypr, settings
+from . import hypr, settings, windowframe
 
 APP_ID = 'dev.elyares.Engineer'
 TITLE = 'Elyares Engineer'
@@ -42,10 +42,12 @@ class WindowView:
     fit_saved = (0, 0, 0.0)         # el último tamaño guardado: ancho, alto y cuándo
     windowed = False                # la isla, que se arma sin __init__ en las pruebas, la mira siempre
     app_win = None
+    frame = None                    # el marco de widgets (windowframe.Frame); None sin ventana real
 
     def window_init(self):
         self.windowed = False
         self.app_win = None
+        self.frame = None
 
     # ── abrir y cerrar ──────────────────────────────────────────────────────
 
@@ -58,7 +60,7 @@ class WindowView:
             self.app_win = self.window_make()
         # Un widget solo puede tener un padre: primero se suelta de la capa.
         self.win.set_child(None)
-        self.app_win.set_child(self.overlay)
+        self.window_content(self.overlay)
         self.da.set_content_width(MIN_W)
         self.da.set_content_height(MIN_H)
         self.windowed = True
@@ -83,7 +85,7 @@ class WindowView:
             return
         if self.fit_manual:
             self.window_remember(force=True)
-        self.app_win.set_child(None)
+        self.window_content(None)
         self.app_win.set_visible(False)
         self.windowed = False
         self.flows_dock()
@@ -113,7 +115,41 @@ class WindowView:
         # Cerrarla no es salir: solo vuelve la isla.
         win.connect('close-request', self.on_window_close)
         win.connect('notify::is-active', self.on_window_focus)
+        self.frame = windowframe.Frame(self.window_view)
+        self.frame.attach(win)
         return win
+
+    def window_content(self, child):
+        """El contenido de la ventana: en el marco de widgets si lo hay."""
+        if self.frame is not None:
+            self.frame.set_content(child)
+        else:
+            self.app_win.set_child(child)
+
+    def window_view(self, key):
+        """Un botón de la barra de título: deja a la vista esa vista."""
+        if key != 'chat' and self.chat_open:
+            self.close_chat()
+        if key != 'projects' and self.projects_open:
+            self.toggle_projects()
+        if key != 'flows' and self.wf_open:
+            self.close_workflows()
+        if key == 'chat' and not self.chat_open:
+            self.open_chat()
+        elif key == 'projects' and not self.projects_open:
+            self.toggle_projects()
+        elif key == 'flows' and not self.wf_open:
+            self.open_workflows()
+        # 'sources' aún no tiene vista propia (HU-006): se queda en el tablero.
+
+    def window_current(self):
+        if self.wf_open:
+            return 'flows'
+        if self.chat_open:
+            return 'chat'
+        if self.projects_open:
+            return 'projects'
+        return 'board'
 
     def window_size(self):
         """Con el tamaño con el que la isla abierta cabe entera, sin pasarse de la pantalla."""
@@ -133,9 +169,13 @@ class WindowView:
         volver lo alto recupera la suya."""
         if self.app_win is None:
             return
+        chrome = 0
+        if self.frame is not None:
+            self.frame.sync(self.window_current())
+            chrome = self.frame.chrome_h()      # la barra de título también es alto de ventana
         now = time.monotonic()
         height = self.app_win.get_height()
-        want = max(MIN_H, int(content_h) + int(room) + FIT_PAD)
+        want = max(MIN_H, int(content_h) + int(room) + FIT_PAD + chrome)
         floor = want                    # lo que mide el contenido: más corta, la ventana le corta lo de abajo
         if self.fit_h and height and abs(height - self.fit_h) >= FIT_STEP and now - self.fit_at > FIT_SETTLE \
                 and height >= floor - FIT_STEP:
