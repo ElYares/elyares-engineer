@@ -1179,7 +1179,8 @@ class ChatView:
         de la caja (`chat_box`) para que el Gtk.TextView se ponga ahí."""
         pad = CHAT_PAD
         left, width = x0 + pad, w - 2 * pad
-        self.draw_chat_head(cr, left, width, alpha, now)
+        if not self.chat_head_widget():             # en la ventana la cabecera es un widget
+            self.draw_chat_head(cr, left, width, alpha, now)
         status_y = h - pad - CHAT_STATUS_H + 4
         text_w = width - CHAT_INPUT_INSET - 12
         ih = self.chat_input_h(cr, text_w)
