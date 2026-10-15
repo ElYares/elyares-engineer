@@ -480,7 +480,7 @@ class WorkflowView:
                 win.set_child(None)
                 self.overlay.add_overlay(panel)
             win.set_visible(False)
-            panel.set_visible(self.wf_open)
+            panel.set_visible(self.wf_open and not self.flows_widgets())
         elif panel.get_parent() is self.overlay:
             self.overlay.remove_overlay(panel)
             win.set_child(panel)

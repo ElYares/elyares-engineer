@@ -12,6 +12,7 @@ modos está; la isla lo mira para no tocar el layer-shell mientras no se ve y pa
 quedarse siempre abierta, sin esconderse ni asomarse.
 """
 
+import threading
 import time
 
 from gi.repository import GLib, Gtk
@@ -28,6 +29,7 @@ FIT_PAD = 12                     # aire bajo la isla
 FIT_STEP = 6                     # cambios de alto menores no mueven la ventana
 REMEMBER_SECS = 2                # cada cuánto se guarda el tamaño que Yared va dejando
 FIT_SETTLE = 0.6                 # lo que tarda Hyprland en dejarla del alto pedido
+PANELS_EVERY = 0.1               # cada cuánto se ponen al día los paneles de widgets
 FIT_HOLD = 160                   # un contenido más corto que esto no encoge la ventana: no «respira»
 FIT_VOID = 120                   # con su medida guardada, el vacío bajo el contenido que se tolera antes de ajustarla
 OPEN_H = 780                     # alto con el que abre: el tablero y el chat caben; el resto, con scroll de la pantalla
@@ -45,6 +47,9 @@ class WindowView:
     windowed = False                # la isla, que se arma sin __init__ en las pruebas, la mira siempre
     app_win = None
     sources_open = False            # la vista Fuentes está a la vista
+    panels_key = None
+    panels_at = 0.0
+    hypr_async = True               # las pruebas lo apagan: el pedido sale en el acto
     window_body = 0                 # alto extra que piden las tarjetas del tablero (lo usa body_h)
     sources_pick = 'claude'         # la fuente que muestra
     panel_open = ''                 # 'alerts' o 'settings' cuando una de esas vistas está a la vista
@@ -126,6 +131,7 @@ class WindowView:
         win.connect('notify::is-active', self.on_window_focus)
         self.frame = windowframe.Frame(self.window_view, self.window_pick)
         self.frame.attach(win)
+        self.overlay.add_overlay(self.frame.flows)     # y la lista de Flujos, con el estilo de la app
         self.overlay.add_overlay(self.frame.focus)     # el desglose de un agente, igual
         self.overlay.add_overlay(self.frame.board)     # encima del dibujo, solo con el tablero a la vista
         self.overlay.add_overlay(self.frame.chat_head)     # y la cabecera del chat, solo con el chat
@@ -158,6 +164,17 @@ class WindowView:
             self.toggle_projects()
         elif key == 'flows' and not self.wf_open:
             self.open_workflows()
+
+    def window_panels_due(self, now):
+        """Los paneles se ponen al día a lo más cada PANELS_EVERY: a 60 cuadros
+        por segundo el texto no cambia más rápido. Si cambió de vista o de
+        agente, de inmediato, para que un clic responda en el acto."""
+        key = (self.window_current(), self.focus, self.tab, self.chat_open, self.wf_open, self.wf_screen,
+               self.wf_confirm is not None, self.wf_error is not None)
+        if key == self.panels_key and now - self.panels_at < PANELS_EVERY:
+            return False
+        self.panels_key, self.panels_at = key, now
+        return True
 
     def window_covered(self):
         """¿Un panel de widgets lo cubre todo (Fuentes, Alertas, Ajustes)?
@@ -272,9 +289,12 @@ class WindowView:
 
     def window_face(self, cr, role, pet, w, h, moving):
         side = min(w, h)
+        if not moving:
+            mascot.paint_static(cr, role, pet, w / 2, h / 2, side)     # quieta: ya dibujada una vez
+            return
         cr.translate(w / 2, h / 2)
         cr.scale(side / 253, side / 253)
-        mascot.draw(cr, pet, 1.0, time.monotonic() if moving else 0, motion=1 if moving else 0, role=role)
+        mascot.draw(cr, pet, 1.0, time.monotonic(), motion=1, role=role)
 
     def window_card(self, role, busy):
         """Un clic en una tarjeta: su desglose; en uno libre, a encargarle algo."""
@@ -366,6 +386,38 @@ class WindowView:
                       toggle=key != 'claude', on=state != 'off', cmds=cmds)
         panel.set_data(rows, key, detail, dict(pick=self.window_source_pick, toggle=self.toggle_source,
                                                       retry=self.window_retry, open=self.window_open_url))
+
+    def flows_widgets(self):
+        """¿La lista de workflows la llevan los widgets? En la ventana y en su
+        pantalla de lista; el editor, la corrida y sus preguntas son del dibujo."""
+        return (self.frame is not None and self.windowed and self.wf_open and self.wf_screen == 'list'
+                and self.wf_confirm is None and self.wf_error is None)
+
+    def window_flows(self):
+        panel, on = self.frame.flows, self.flows_widgets()
+        panel.set_visible(on)
+        if self.flows_overlay is not None:
+            self.flows_overlay.set_visible(self.wf_open and not on)     # el dibujo, solo cuando las tarjetas no
+        if not on:
+            return
+        run = self.wf_run
+        busy = run is not None and run.running
+        here = self.wf_here()
+        rows = []
+        for w in self.workflows:
+            mine = run is not None and run.w.name == w.name
+            place = (self.project_label(w.project) if w.project
+                     else f'donde estés (ahora {self.project_label(here)})' if here else 'donde estés')
+            steps = '1 paso' if len(w.steps) == 1 else f'{len(w.steps)} pasos'
+            rows.append(dict(name=w.name, place=f'{steps} · {place}', mine=mine, busy=mine and busy,
+                             status=run.status().rstrip('.…').lower() if mine else '',
+                             launch=bool(w.steps) and not busy, delete=not (mine and busy)))
+        panel.set_flows(rows, dict(act=self.window_flow_act))
+
+    def window_flow_act(self, key):
+        self.on_wf_hit(key)
+        self.wf_redraw()
+        self.ensure_tick()
 
     def window_panels(self):
         """La campana (con su contador), la bandeja de alertas y los ajustes."""
@@ -526,14 +578,16 @@ class WindowView:
             self.frame.sync(self.window_current())
             self.frame.fold(self.app_win.get_width())
             self.frame.set_glass(bool(self.settings['glass']))
-            if self.chat_head_widget():
-                self.frame.set_sessions(*self.window_agents())
-            else:
-                self.frame.set_sessions(self.window_rows(), self.tab, self.window_row_face)
-            self.window_board()
-            self.window_chat_head()
-            self.window_sources()
-            self.window_panels()
+            if self.window_panels_due(time.monotonic()):
+                if self.chat_head_widget():
+                    self.frame.set_sessions(*self.window_agents())
+                else:
+                    self.frame.set_sessions(self.window_rows(), self.tab, self.window_row_face)
+                self.window_board()
+                self.window_chat_head()
+                self.window_sources()
+                self.window_panels()
+                self.window_flows()
             chrome = self.frame.chrome_h()      # la barra de título también es alto de ventana
         now = time.monotonic()
         height = self.app_win.get_height()
@@ -569,10 +623,21 @@ class WindowView:
     def window_resize(self, width, height):
         # GTK no encoge una ventana flotante cambiándole el tamaño por defecto:
         # se lo pedimos a Hyprland, que es quien la dimensiona.
-        try:
-            hypr.request(f'dispatch resizewindowpixel exact {width} {height},class:{CLASS_RE}')
-        except OSError:
-            self.app_win.set_default_size(width, height)
+        cmd = f'dispatch resizewindowpixel exact {width} {height},class:{CLASS_RE}'
+
+        def ask():
+            try:
+                hypr.request(cmd)
+            except OSError:
+                if self.hypr_async:
+                    GLib.idle_add(self.app_win.set_default_size, width, height)     # desde un hilo, por el bucle de GTK
+                else:
+                    self.app_win.set_default_size(width, height)
+
+        if self.hypr_async:
+            threading.Thread(target=ask, daemon=True, name='resize').start()   # no frena la interfaz
+        else:
+            ask()
 
     # ── el tamaño que Yared le deja ─────────────────────────────────────────
 
