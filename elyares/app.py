@@ -1477,6 +1477,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.last_frame = now
 
         tw, th = self.goal()
+        if self.windowed:
+            self.w, self.h, self.vw, self.vh = tw, th, 0.0, 0.0     # sin rebote: la ventana no es una isla que se asoma
         for pos, vel, goal in (('w', 'vw', tw), ('h', 'vh', th)):
             x, v = getattr(self, pos), getattr(self, vel)
             v += (SPRING_K * (goal - x) - SPRING_C * v) * dt
@@ -1552,7 +1554,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def island_rect(self, width):
         h = clamp(self.h, 0, WIN_H)
         if self.windowed:
-            return 0, width, h          # en la ventana, a lo ancho: no es una isla suelta
+            # En la ventana, a todo lo ancho y lo alto: no es una isla suelta, y lo
+            # que no ocupa el contenido es el mismo fondo, no un hueco sin pintar.
+            room = self.da.get_height()
+            return 0, width, max(h, room) if isinstance(room, (int, float)) else h
         w = clamp(self.w, 0, width)
         return (width - w) / 2, w, h
 
@@ -1586,6 +1591,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.set_source_rgba(*ISLAND_BG[:3], 1) if opaque else cr.set_source_rgba(0, 0, 0, 0)
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
+        if self.window_covered():
+            self.buttons, self.rows, self.pills, self.hits = {}, [], [], []
+            self.tip = self.card_span = self.chat_box = None
+            return                      # lo tapa un panel de widgets: nada de lo de debajo se ve
 
         x0, w, h = self.island_rect(width)
         if h < 0.5 or w < 1:

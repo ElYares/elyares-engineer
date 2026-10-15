@@ -28,6 +28,7 @@ FIT_PAD = 12                     # aire bajo la isla
 FIT_STEP = 6                     # cambios de alto menores no mueven la ventana
 REMEMBER_SECS = 2                # cada cuánto se guarda el tamaño que Yared va dejando
 FIT_SETTLE = 0.6                 # lo que tarda Hyprland en dejarla del alto pedido
+FIT_HOLD = 160                   # un contenido más corto que esto no encoge la ventana: no «respira»
 FIT_VOID = 120                   # con su medida guardada, el vacío bajo el contenido que se tolera antes de ajustarla
 OPEN_H = 780                     # alto con el que abre: el tablero y el chat caben; el resto, con scroll de la pantalla
 
@@ -157,6 +158,13 @@ class WindowView:
             self.toggle_projects()
         elif key == 'flows' and not self.wf_open:
             self.open_workflows()
+
+    def window_covered(self):
+        """¿Un panel de widgets lo cubre todo (Fuentes, Alertas, Ajustes)?
+        Entonces la isla no dibuja nada que se vea."""
+        return (self.frame is not None and self.windowed
+                and (self.sources_open or bool(self.panel_open))
+                and not (self.chat_open or self.projects_open or self.wf_open))
 
     def board_widgets(self):
         """¿El tablero lo dibujan los widgets? En la ventana y sin un desglose
@@ -550,6 +558,9 @@ class WindowView:
                 want = floor if self.fit_shrunk else max(floor, kept[1])
                 if tall:
                     self.window_remember()
+        if self.fit_h and want < self.fit_h and self.fit_h - want < FIT_HOLD \
+                and not (height and height < floor - FIT_STEP):
+            return                      # lo que sobra es poco: mejor un poco de aire que una ventana que salta
         if abs(want - self.fit_h) < FIT_STEP and not (height and height < floor - FIT_STEP):
             return
         self.fit_h, self.fit_at = want, now
