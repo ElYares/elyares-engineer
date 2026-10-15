@@ -382,5 +382,27 @@ class Ayuda(unittest.TestCase):
         self.assertEqual(focused, [True])
 
 
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
+class Desglose(unittest.TestCase):
+
+    def test_pasos_enlaces_y_los_demas_avisan(self):
+        panel = windowframe.FocusPanel()
+        log = []
+        d = dict(role='auditor', name='auditor', color='#9a6bff', pet='working', busy=True,
+                 label='api · chat', summary='2 pasos · 13 s',
+                 steps=[('✓', '#34d399', 'git status', '3 s'), ('›', '#f2f5ff', 'git add -A', 'ahora')],
+                 links=[('talk', 'elyares-auditor', 'Ver su chat'), ('back', None, '‹ Volver')],
+                 others=[('reviewer', 'idle', False)], hidden=0, empty='')
+        panel.set_focus(d, dict(face=lambda *a: None, link=lambda k, v: log.append((k, v)),
+                                other=lambda r, b: log.append(('other', r, b))))
+        buttons = _buttons(panel)
+        self.assertEqual([b.get_label() for b in buttons[:2]], ['Ver su chat', '‹ Volver'])
+        buttons[0].emit('clicked')
+        buttons[1].emit('clicked')
+        buttons[2].emit('clicked')
+        self.assertEqual(log, [('talk', 'elyares-auditor'), ('back', None), ('other', 'reviewer', False)])
+        self.assertEqual(len(panel.faces), 1)       # solo el que trabaja se anima
+
+
 if __name__ == '__main__':
     unittest.main()

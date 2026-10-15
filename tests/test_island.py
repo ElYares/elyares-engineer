@@ -3108,11 +3108,14 @@ class Ventana(Dibujo):
         isl = self.isl
         isl.frame, isl.windowed, isl.focus = mock.Mock(), True, None
         isl.target, isl.tab_session = lambda: 'board', lambda: object()
+        isl.sources_open, isl.panel_open, isl.wf_open = False, '', False
+        isl.focused = lambda: None
         self.assertTrue(isl.board_widgets())
-        isl.focus = ('s', 'auditor')                # un desglose abierto sigue en Cairo
+        isl.focused = lambda: (object(), object())  # con un desglose abierto, es el panel del desglose
         self.assertFalse(isl.board_widgets())
-        isl.focus, isl.windowed = None, False       # la isla suelta no lleva widgets
-        self.assertFalse(isl.board_widgets())
+        self.assertTrue(isl.focus_widgets())
+        isl.windowed = False                        # la isla suelta no lleva widgets
+        self.assertFalse(isl.board_widgets() or isl.focus_widgets())
 
     def test_el_tablero_en_widgets_reparte_los_que_trabajan_y_los_libres(self):
         from elyares.state import Session

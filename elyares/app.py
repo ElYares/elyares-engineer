@@ -1624,7 +1624,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             full_h = h
             text_alpha = clamp((w - 420) / 120) * clamp((h - 110) / 60)
             body = self.body_h()
-            if text_alpha > 0 and not self.board_widgets():     # en la ventana lo llevan los widgets
+            if text_alpha > 0 and not (self.board_widgets() or self.focus_widgets()):     # en la ventana lo llevan los widgets
                 self.draw_board(cr, x0, w, body, text_alpha, now)
             head = TABS_H + body + BOARD_PAD
             listed = True
