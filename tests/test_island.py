@@ -3145,6 +3145,71 @@ class Ventana(Dibujo):
         isl.window_pick('agent:elyares-auditor')
         isl.on_chat_hit.assert_called_once_with('agent:elyares-auditor')
 
+    def test_la_vista_fuentes_lista_las_seis_y_su_estado_en_texto(self):
+        from elyares import sources
+        isl = self.isl
+        isl.frame, isl.sources_open = mock.Mock(), True
+        isl.chat_open = isl.projects_open = isl.wf_open = False
+        isl.source_state = lambda key: 'off' if key == 'coffe' else 'bad' if key == 'github' else 'on'
+        isl.source_note = lambda key: '2 PRs'
+        isl.sources = {'github': {'why': 'falta gh', 'fix': 'instala gh', 'since': 0}}
+        isl.window_sources()
+        rows, chosen, detail, _handlers = isl.frame.sources.set_data.call_args.args
+        self.assertEqual([r[0] for r in rows], [k for k, _ in sources.SOURCES])
+        self.assertEqual(dict((r[0], r[3]) for r in rows)['coffe'], 'Apagada')
+        self.assertEqual(chosen, 'claude')
+        self.assertFalse(detail['toggle'])              # a Claude no se le apaga
+
+    def test_la_bandeja_lista_las_alertas_y_la_campana_las_cuenta(self):
+        from elyares.state import Session
+        isl = self.isl
+        isl.frame, isl.panel_open = mock.Mock(), 'alerts'
+        isl.chat_open = isl.projects_open = isl.wf_open = False
+        alerts = [Session(f'a{i}', state='alert', name=f'alerta {i}', lines=['x'],
+                          actions=[{'label': 'Logs'}]) for i in range(4)]
+        isl.alerts = lambda: alerts
+        isl.window_panels()
+        isl.frame.set_bell.assert_called_with(4)
+        cards, _handlers = isl.frame.alerts.set_alerts.call_args.args
+        self.assertEqual(len(cards), 4)
+        self.assertEqual(cards[0]['buttons'], [('dismiss', 'Descartar'), (0, 'Logs')])
+
+    def test_descartar_una_alerta_la_quita_y_no_vuelve(self):
+        from elyares.state import Session
+        isl = self.isl
+        s = Session('a1', state='alert', name='x')
+        isl.model.sessions['a1'] = s
+        isl.refresh, isl.ensure_tick = mock.Mock(), mock.Mock()
+        isl.window_alert('a1', 'dismiss')
+        self.assertNotIn('a1', isl.model.sessions)
+        self.assertIn('a1', isl.model.dismissed)
+
+    def test_ajustes_cambia_la_clave_de_hoy(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        before = isl.settings['glass']
+        with mock.patch('elyares.settings.save'):
+            isl.window_setting('glass')
+        self.assertEqual(isl.settings['glass'], not before)
+
+    def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
+        isl = self.isl
+        isl.frame, isl.windowed, isl.focus = mock.Mock(), True, None
+        isl.sources_open, isl.panel_open, isl.wf_open = False, '', True
+        isl.target, isl.tab_session = lambda: 'board', lambda: object()
+        self.assertFalse(isl.board_widgets())
+        isl.target = lambda: 'chat'
+        self.assertFalse(isl.chat_head_widget())
+        isl.wf_open = False
+        self.assertTrue(isl.chat_head_widget())
+
+    def test_otra_vista_tapa_a_fuentes(self):
+        isl = self.isl
+        isl.frame, isl.sources_open = mock.Mock(), True
+        isl.chat_open, isl.projects_open, isl.wf_open = True, False, False
+        isl.window_sources()
+        self.assertFalse(isl.sources_open)
+
     def test_una_fila_de_la_barra_lateral_cambia_de_pestana(self):
         self.isl.tab = 'a'
         self.isl.window_pick('b')

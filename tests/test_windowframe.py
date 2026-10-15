@@ -41,7 +41,7 @@ class Marco(unittest.TestCase):
                 self.assertGreaterEqual((hi + .05) / (lo + .05), 4.5, (ink, surface))
 
     def test_una_vista_por_boton_en_el_orden_de_la_barra(self):
-        self.assertEqual(list(self.frame.buttons), [key for key, _ in windowframe.VIEWS])
+        self.assertEqual(list(self.frame.buttons), [key for key, _ in windowframe.VIEWS] + ['alerts'])
 
     def test_un_clic_avisa_de_su_vista(self):
         self.frame.buttons['chat'].set_active(True)
@@ -96,6 +96,21 @@ class Marco(unittest.TestCase):
         self.assertIs(self.frame.sidebar.get_next_sibling(), self.frame.slot)
         self.assertTrue(all(b.get_focusable() for b in self.frame.buttons.values()))
         self.assertTrue(order)
+
+    def test_al_volver_la_isla_los_paneles_se_esconden(self):
+        self.frame.board.place(200)
+        self.frame.chat_head.place(52)
+        self.frame.sources.set_visible(True)
+        self.frame.hide_panels()
+        self.assertFalse(any(w.get_visible() for w in (self.frame.board, self.frame.chat_head,
+                                                       self.frame.sources, self.frame.alerts,
+                                                       self.frame.settings)))
+
+    def test_el_contenido_llena_el_hueco(self):
+        area = Gtk.DrawingArea()
+        self.frame.set_content(area)
+        self.assertTrue(area.get_hexpand() and area.get_vexpand())
+        self.assertEqual(area.get_halign(), Gtk.Align.FILL)
 
     def test_el_contenido_es_uno_y_se_quita(self):
         a, b = Gtk.DrawingArea(), Gtk.DrawingArea()
@@ -205,6 +220,166 @@ class CabeceraDelChat(unittest.TestCase):
         self.assertEqual(frame.sidebar.get_selected_row().sid, 'agent:')
         frame.sidebar.emit('row-activated', frame.sidebar.get_row_at_index(1))
         self.assertEqual(picked, ['agent:elyares-auditor'])
+
+
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
+class Fuentes(unittest.TestCase):
+
+    ROWS = [('claude', 'Claude', '#34d399', 'Conectada · 1 sesión'),
+            ('github', 'GitHub', '#ff6b6b', 'Con problemas'),
+            ('coffe', 'coffe', None, 'Apagada')]
+
+    def setUp(self):
+        self.log = []
+        self.panel = windowframe.SourcesPanel()
+        self.handlers = dict(pick=lambda k: self.log.append(('pick', k)),
+                             toggle=lambda k: self.log.append(('toggle', k)))
+
+    @staticmethod
+    def detail(**kw):
+        base = dict(key='github', title='GitHub', status='Con problemas desde hace 3 min',
+                    about='Checks de tus PRs', lines=[], why='falta gh', fix='instala gh',
+                    toggle=True, on=True, cmds=[('gh auth login', 'inicia sesión')])
+        return {**base, **kw}
+
+    def test_una_fila_por_fuente_con_su_estado_en_texto(self):
+        self.panel.set_data(self.ROWS, 'github', self.detail(), self.handlers)
+        keys = []
+        row = self.panel.list.get_first_child()
+        while row is not None:
+            keys.append(row.key)
+            row = row.get_next_sibling()
+        self.assertEqual(keys, ['claude', 'github', 'coffe'])
+        self.assertEqual(self.panel.list.get_selected_row().key, 'github')
+
+    def test_elegir_una_fila_avisa(self):
+        self.panel.set_data(self.ROWS, 'claude', self.detail(), self.handlers)
+        self.panel.list.emit('row-activated', self.panel.list.get_row_at_index(2))
+        self.assertEqual(self.log, [('pick', 'coffe')])
+
+    def test_el_interruptor_prende_o_apaga_y_la_sincronizacion_no(self):
+        self.panel.set_data(self.ROWS, 'github', self.detail(on=True), self.handlers)
+        switches = []
+
+        def walk(w):
+            if isinstance(w, Gtk.Switch):
+                switches.append(w)
+            c = w.get_first_child()
+            while c is not None:
+                walk(c)
+                c = c.get_next_sibling()
+        walk(self.panel.detail)
+        self.assertEqual(len(switches), 1)
+        self.assertTrue(switches[0].get_active())
+        self.assertEqual(self.log, [])                  # armarlo no es un clic
+        switches[0].set_active(False)
+        self.assertEqual(self.log, [('toggle', 'github')])
+
+    def test_reintentar_y_abrir_pr_avisan(self):
+        self.handlers.update(retry=lambda k: self.log.append(('retry', k)),
+                             open=lambda u: self.log.append(('open', u)))
+        d = self.detail(retry=True, items=[dict(label='api#7 arregla', note='en rojo', url='https://x/7')])
+        self.panel.set_data(self.ROWS, 'github', d, self.handlers)
+        buttons = {b.get_label(): b for b in _buttons(self.panel)}
+        buttons['Reintentar'].emit('clicked')
+        buttons['Abrir PR'].emit('clicked')
+        self.assertEqual(self.log, [('retry', 'github'), ('open', 'https://x/7')])
+
+    def test_claude_no_trae_interruptor(self):
+        self.panel.set_data(self.ROWS, 'claude', self.detail(key='claude', toggle=False), self.handlers)
+        found = []
+
+        def walk(w):
+            if isinstance(w, Gtk.Switch):
+                found.append(w)
+            c = w.get_first_child()
+            while c is not None:
+                walk(c)
+                c = c.get_next_sibling()
+        walk(self.panel.detail)
+        self.assertEqual(found, [])
+
+
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
+class Bandeja(unittest.TestCase):
+
+    def setUp(self):
+        self.log = []
+        self.handlers = dict(act=lambda sid, key: self.log.append((sid, key)),
+                             toggle=lambda k: self.log.append(('toggle', k)),
+                             move=lambda v: self.log.append(('move', v)),
+                             theme=lambda: self.log.append('theme'))
+
+    def test_cuatro_alertas_cuatro_tarjetas_con_sus_botones(self):
+        panel = windowframe.AlertsPanel()
+        alerts = [dict(sid=f'a{i}', title=f'alerta {i}', color='#ff6b6b', lines=['detalle'], where='', note='',
+                       buttons=[('dismiss', 'Descartar'), (0, 'Logs')]) for i in range(4)]
+        panel.set_alerts(alerts, self.handlers)
+        labels = [b.get_label() for b in _buttons(panel)]
+        self.assertEqual(labels, ['Descartar', 'Logs'] * 4)
+        _buttons(panel)[0].emit('clicked')
+        _buttons(panel)[1].emit('clicked')
+        self.assertEqual(self.log, [('a0', 'dismiss'), ('a0', 0)])
+
+    def test_sin_alertas_lo_dice(self):
+        panel = windowframe.AlertsPanel()
+        panel.set_alerts([], self.handlers)
+        self.assertEqual(_buttons(panel), [])
+
+    def test_la_campana_cuenta_y_no_dispara_al_sincronizar(self):
+        clicks = []
+        frame = windowframe.Frame(clicks.append)
+        frame.set_bell(4)
+        self.assertEqual(frame.bell.get_label(), 'Alertas · 4')
+        frame.sync('alerts')
+        self.assertTrue(frame.bell.get_active())
+        self.assertEqual(clicks, [])
+        frame.sync('board')
+        self.assertFalse(frame.bell.get_active())
+        self.assertTrue(frame.buttons['board'].get_active())
+
+    def test_ajustes_cada_interruptor_cambia_su_clave(self):
+        panel = windowframe.SettingsPanel()
+        rows = [('glass', 'Vidrio', False, ''), ('github', 'Fuente: GitHub', True, '')]
+        panel.set_rows(rows, 50, self.handlers)
+        switches = []
+
+        def walk(w):
+            if isinstance(w, Gtk.Switch):
+                switches.append(w)
+            c = w.get_first_child()
+            while c is not None:
+                walk(c)
+                c = c.get_next_sibling()
+        walk(panel.page)
+        self.assertEqual(len(switches), 2)
+        self.assertEqual(self.log, [])
+        switches[0].set_active(True)
+        switches[1].set_active(False)
+        self.assertEqual(self.log, [('toggle', 'glass'), ('toggle', 'github')])
+
+
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
+class Ayuda(unittest.TestCase):
+
+    def setUp(self):
+        self.dialog = windowframe.HelpDialog(None, None)
+        self.dialog.set_items([('Teclado', 'SUPER ALT + C', 'abre el chat'),
+                               ('coffe', 'coffe start', 'arranca un pomodoro'),
+                               ('Ratón', 'botón del medio', 'arrastra la isla')])
+
+    def test_escribir_coffe_deja_solo_lo_que_lo_contiene(self):
+        self.assertEqual(len(self.dialog.shown()), 3)
+        self.dialog.search.set_text('coffe')
+        self.assertEqual(len(self.dialog.shown()), 1)
+
+    def test_esc_cierra_y_devuelve_el_foco_al_icono(self):
+        opener = Gtk.Button(label='?')
+        dialog = windowframe.HelpDialog(None, opener)
+        focused = []
+        opener.grab_focus = lambda: focused.append(True) or True
+        self.assertTrue(dialog._key(None, windowframe.Gdk.KEY_Escape, 0, 0))
+        self.assertEqual(focused, [True])
 
 
 if __name__ == '__main__':
