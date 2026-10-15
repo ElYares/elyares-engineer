@@ -10,7 +10,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango
 
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
-         ('projects', 'Proyectos'), ('sources', 'Fuentes'))
+         ('projects', 'Proyectos'), ('sources', 'Fuentes'), ('settings', 'Ajustes'))
 SIDEBAR_W = 180
 FOLD_W = 640                    # más angosta que esto, la barra lateral se pliega y el texto conserva su tamaño
 
@@ -25,6 +25,8 @@ ACCENT = '#6ea8ff'                              # foco y botón primario
 DANGER = '#ff6b6b'                              # el aviso rojo, no del tema
 
 CSS = f"""
+.elyares-slot {{ background: rgba(5, 6, 8, 0.98); }}
+.elyares-slot.glass, .elyares-side.glass, .elyares-bar.glass {{ background: rgba(5, 6, 8, 0.5); }}
 .elyares-bar {{ background: {SURFACE[0]}; color: {INK}; border: none; box-shadow: none; }}
 .elyares-bar button {{ background: {SURFACE[1]}; color: {MUTED}; border: none; box-shadow: none;
   padding: {SPACE[0]}px {SPACE[2]}px; border-radius: {RADIUS[0]}px; }}
@@ -36,8 +38,10 @@ CSS = f"""
 .elyares-card.raised {{ background: {SURFACE[2]}; }}
 .elyares-btn {{ background: {SURFACE[2]}; color: {INK}; border-radius: {RADIUS[0]}px;
   padding: {SPACE[1]}px {SPACE[3]}px; border: none; box-shadow: none; }}
+.elyares-btn.compact {{ padding: {SPACE[0]}px {SPACE[1]}px; min-height: 0; }}
 .elyares-btn.primary {{ background: {ACCENT}; color: {SURFACE[0]}; }}
 .elyares-btn.danger {{ background: {DANGER}; color: {SURFACE[0]}; }}
+.elyares-sources, .elyares-sources viewport {{ background: {SURFACE[0]}; color: {INK}; }}
 .elyares-chathead {{ background: {SURFACE[0]}; color: {INK}; padding: {SPACE[1]}px {SPACE[2]}px;
   border-bottom: 1px solid {SURFACE[2]}; }}
 .elyares-bar button:focus-visible, .elyares-side row:focus-visible, .elyares-btn:focus-visible {{
@@ -70,7 +74,7 @@ class Frame:
         self.header = Gtk.HeaderBar()
         self.header.add_css_class('elyares-bar')
         nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        nav.add_css_class('linked')
+        nav.set_spacing(SPACE[1])
         first = None
         for key, text in VIEWS:
             btn = Gtk.ToggleButton(label=text)
@@ -81,15 +85,31 @@ class Frame:
             btn.connect('toggled', self._toggled, key)
             nav.append(btn)
             self.buttons[key] = btn
+        self.none = Gtk.ToggleButton()      # nadie del grupo marcado: la bandeja no es una de las vistas
+        self.none.set_group(first)
         self.header.set_title_widget(nav)
+        # La campana abre la bandeja y «?» la ayuda; van fuera del grupo de vistas.
+        self.bell = Gtk.ToggleButton(label='Alertas')
+        self.bell.update_property([Gtk.AccessibleProperty.LABEL], ['Alertas'])
+        self.bell.connect('toggled', self._toggled, 'alerts')
+        self.buttons['alerts'] = self.bell
+        self.help = Gtk.Button(label='?')
+        self.help.update_property([Gtk.AccessibleProperty.LABEL], ['Ayuda: atajos y comandos'])
+        self.help.set_margin_start(SPACE[1])
+        self.header.pack_end(self.help)
+        self.header.pack_end(self.bell)
         self.board = BoardPanel()
         self.chat_head = ChatHead()
+        self.sources = SourcesPanel()
+        self.alerts = AlertsPanel()
+        self.settings = SettingsPanel()
         self.sidebar = Gtk.ListBox()
         self.sidebar.set_size_request(SIDEBAR_W, -1)
         self.sidebar.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.sidebar.add_css_class('elyares-side')
         self.sidebar.connect('row-activated', self._picked)
         self.slot = Gtk.Box()           # donde va el contenido
+        self.slot.add_css_class('elyares-slot')
         self.slot.set_hexpand(True)
         self.slot.set_vexpand(True)
         self.body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -106,16 +126,22 @@ class Frame:
         if old is not None:
             self.slot.remove(old)
         if child is not None:
+            for set_expand in (child.set_hexpand, child.set_vexpand):
+                set_expand(True)            # un Box solo da lo natural: sin esto quedan franjas grises
+            child.set_halign(Gtk.Align.FILL)
+            child.set_valign(Gtk.Align.FILL)
             self.slot.append(child)
 
     def sync(self, view):
         """Marca la vista que está a la vista, sin disparar `on_view`."""
-        btn = self.buttons.get(view)
-        if btn is None or btn.get_active():
-            return
         self.syncing = True
         try:
-            btn.set_active(True)
+            bell = view == 'alerts'
+            if self.bell.get_active() != bell:
+                self.bell.set_active(bell)
+            btn = self.none if bell else self.buttons.get(view)
+            if btn is not None and not btn.get_active():
+                btn.set_active(True)
         finally:
             self.syncing = False
 
@@ -164,6 +190,22 @@ class Frame:
     def _picked(self, _box, row):
         self.on_session(row.sid)
 
+    def hide_panels(self):
+        """Los paneles que van encima del dibujo solo valen en la ventana: al
+        volver la isla suelta se esconden, o se verían sobre ella."""
+        self.board.place(0)
+        self.chat_head.place(0)
+        for panel in (self.sources, self.alerts, self.settings):
+            panel.set_visible(False)
+
+    def set_glass(self, on):
+        """Con vidrio, el fondo del marco es translúcido; sin él, opaco."""
+        for widget in (self.slot, self.sidebar, self.header):
+            (widget.add_css_class if on else widget.remove_css_class)('glass')
+
+    def set_bell(self, count):
+        self.bell.set_label(f'Alertas · {count}' if count else 'Alertas')
+
     def fold(self, width):
         """Plegada, la barra lateral no achica el contenido: con la ventana
         angosta (hasta 480) el dibujo conserva todo su ancho."""
@@ -174,8 +216,12 @@ class Frame:
         return self.header.get_height()
 
     def _toggled(self, btn, key):
-        if btn.get_active() and not self.syncing:
+        if self.syncing:
+            return
+        if btn.get_active():
             self.on_view(key)
+        elif key == 'alerts':
+            self.on_view('board')           # la campana otra vez la cierra
 
 
 class BoardPanel(Gtk.ScrolledWindow):
@@ -221,16 +267,20 @@ class BoardPanel(Gtk.ScrolledWindow):
         self.faces = []
         while (child := self.page.get_first_child()) is not None:
             self.page.remove(child)
-        if cards:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[2], homogeneous=True)
-            for card in cards:
-                row.append(self._card(card, handlers))
-            self.page.append(row)
-        if free:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1], homogeneous=True)
-            for card in free:
-                row.append(self._card(card, handlers, small=True))
-            self.page.append(row)
+        for group, small in ((cards, False), (free, True)):
+            if not group:
+                continue
+            flow = Gtk.FlowBox()
+            flow.set_selection_mode(Gtk.SelectionMode.NONE)
+            flow.set_homogeneous(True)
+            flow.set_min_children_per_line(1)
+            flow.set_max_children_per_line(4)
+            flow.set_column_spacing(SPACE[1])
+            flow.set_row_spacing(SPACE[1])
+            flow.set_activate_on_single_click(False)
+            for card in group:
+                flow.append(self._card(card, handlers, small=small))
+            self.page.append(flow)
 
     def _card(self, card, handlers, small=False):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
@@ -315,7 +365,6 @@ class ChatHead(Gtk.Box):
         title = Gtk.Label(xalign=0)
         title.set_markup(f'<span foreground="{info["color"]}" weight="bold">{GLib.markup_escape_text(info["name"])}</span>'
                          f' | {GLib.markup_escape_text(info["project"])}')
-        title.set_ellipsize(Pango.EllipsizeMode.END)
         where = f' · {info["where"]}' if info['where'] else ''
         status = Gtk.Label(label=info['status'] + where, xalign=0)
         status.add_css_class('dim-label')
@@ -329,7 +378,322 @@ class ChatHead(Gtk.Box):
         for key, label in links:
             btn = Gtk.Button(label=label)
             btn.add_css_class('elyares-btn')
+            btn.add_css_class('compact')
             if key == 'stop':
                 btn.add_css_class('danger')
             btn.connect('clicked', lambda _b, k=key: handlers['act'](k))
             self.append(btn)
+
+
+class SourcesPanel(Gtk.Box):
+    """La vista *Fuentes*: a la izquierda una fila por fuente, con su punto y
+    su estado en texto; a la derecha el detalle de la elegida, su interruptor
+    y sus comandos. Sin estado propio: la llena la isla con `set_data`."""
+
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[2])
+        self.add_css_class('elyares-sources')
+        self.set_valign(Gtk.Align.FILL)
+        self.set_halign(Gtk.Align.FILL)
+        self.signature = None
+        self.list = Gtk.ListBox()
+        self.list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.list.set_size_request(220, -1)
+        self.list.add_css_class('elyares-side')
+        self.list.connect('row-activated', self._picked)
+        self.detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(self.detail, f'set_margin_{side}')(SPACE[2])
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_hexpand(True)
+        scroll.set_child(self.detail)
+        self.append(self.list)
+        self.append(scroll)
+        self.handlers = {}
+        self.set_visible(False)
+
+    def set_data(self, rows, chosen, detail, handlers):
+        """`rows`: [(key, nombre, color o None, estado en texto)]; `detail`:
+        dict (title, status, about, lines, why, fix, toggle, on, cmds).
+        `handlers`: pick(key), toggle(key)."""
+        sig = repr((rows, chosen, detail))
+        if sig == self.signature:
+            return
+        self.signature = sig
+        self.handlers = handlers
+        while (row := self.list.get_first_child()) is not None:
+            self.list.remove(row)
+        picked = None
+        for key, name, color, text in rows:
+            row = Gtk.ListBoxRow()
+            row.key = key
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+            dot = Gtk.Label()
+            dot.set_markup(f'<span foreground="{color or MUTED}">{"●" if color else "○"}</span>')
+            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            col.append(Gtk.Label(label=name, xalign=0))
+            sub = Gtk.Label(label=text, xalign=0)
+            sub.add_css_class('dim-label')
+            sub.set_ellipsize(Pango.EllipsizeMode.END)
+            col.append(sub)
+            box.append(dot)
+            box.append(col)
+            row.set_child(box)
+            row.update_property([Gtk.AccessibleProperty.LABEL], [f'{name}, {text}'])
+            self.list.append(row)
+            if key == chosen:
+                picked = row
+        if picked is not None:
+            self.list.select_row(picked)
+        self._fill_detail(detail)
+
+    def _fill_detail(self, d):
+        while (child := self.detail.get_first_child()) is not None:
+            self.detail.remove(child)
+        title = Gtk.Label(xalign=0)
+        title.set_markup(f'<span size="x-large" weight="bold">{GLib.markup_escape_text(d["title"])}</span>')
+        self.detail.append(title)
+        status = Gtk.Label(label=d['status'], xalign=0)
+        self.detail.append(status)
+        about = Gtk.Label(label=d['about'], xalign=0, wrap=True)
+        about.add_css_class('dim-label')
+        self.detail.append(about)
+        for line in d['lines']:
+            self.detail.append(Gtk.Label(label=line, xalign=0, wrap=True))
+        for text in (d['why'], d['fix']):
+            if text:
+                self.detail.append(Gtk.Label(label=text, xalign=0, wrap=True))
+        if d.get('retry'):
+            btn = Gtk.Button(label='Reintentar')
+            btn.add_css_class('elyares-btn')
+            btn.set_halign(Gtk.Align.START)
+            btn.connect('clicked', lambda _b, k=d['key']: self.handlers['retry'](k))
+            self.detail.append(btn)
+        for item in d.get('items', ()):
+            card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+            card.add_css_class('elyares-card')
+            text = Gtk.Label(label=f'{item["label"]} · {item["note"]}', xalign=0, wrap=True)
+            text.set_hexpand(True)
+            card.append(text)
+            btn = Gtk.Button(label='Abrir PR')
+            btn.add_css_class('elyares-btn')
+            btn.connect('clicked', lambda _b, u=item['url']: self.handlers['open'](u))
+            card.append(btn)
+            self.detail.append(card)
+        if d['toggle']:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+            label = Gtk.Label(label='Prendida', xalign=0)
+            label.set_hexpand(True)
+            switch = Gtk.Switch()
+            switch.set_active(d['on'])
+            switch.set_valign(Gtk.Align.CENTER)
+            switch.update_property([Gtk.AccessibleProperty.LABEL], [f'Prendida: {d["title"]}'])
+            key = d['key']
+            switch.connect('notify::active', lambda sw, _p: sw.get_active() != d['on']
+                           and self.handlers['toggle'](key))
+            row.append(label)
+            row.append(switch)
+            self.detail.append(row)
+        if d['cmds']:
+            head = Gtk.Label(xalign=0)
+            head.set_markup('<b>Comandos</b>')
+            self.detail.append(head)
+            grid = Gtk.Grid(column_spacing=SPACE[2], row_spacing=SPACE[0])
+            for i, (cmd, text) in enumerate(d['cmds']):
+                grid.attach(Gtk.Label(label=cmd, xalign=0, selectable=True), 0, i, 1, 1)
+                what = Gtk.Label(label=text, xalign=0, wrap=True)
+                what.add_css_class('dim-label')
+                grid.attach(what, 1, i, 1, 1)
+            self.detail.append(grid)
+
+    def _picked(self, _box, row):
+        self.handlers['pick'](row.key)
+
+
+class AlertsPanel(Gtk.ScrolledWindow):
+    """La bandeja: las alertas activas, cada una con su punto, su título, su
+    detalle y sus botones. Es otra vista de lo mismo que la isla muestra en su
+    ficha, no otra fuente. Sin estado propio: la llena la isla."""
+
+    def __init__(self):
+        super().__init__()
+        self.add_css_class('elyares-sources')
+        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(self.page, f'set_margin_{side}')(SPACE[2])
+        self.set_child(self.page)
+        self.signature = None
+        self.set_visible(False)
+
+    def set_alerts(self, alerts, handlers):
+        """`alerts`: [dict(sid, title, color, lines, where, note, buttons)] con
+        `buttons` = [(clave, texto)]. `handlers`: act(sid, clave)."""
+        sig = repr(alerts)
+        if sig == self.signature:
+            return
+        self.signature = sig
+        while (child := self.page.get_first_child()) is not None:
+            self.page.remove(child)
+        if not alerts:
+            empty = Gtk.Label(label='Sin alertas. Todo en orden.', xalign=0)
+            empty.add_css_class('dim-label')
+            self.page.append(empty)
+        for a in alerts:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
+            card.add_css_class('elyares-card')
+            title = Gtk.Label(xalign=0)
+            title.set_markup(f'<span foreground="{a["color"]}">●</span> '
+                             f'<b>{GLib.markup_escape_text(a["title"])}</b>')
+            card.append(title)
+            for line in a['lines']:
+                card.append(Gtk.Label(label=line, xalign=0, wrap=True))
+            where = ' · '.join(x for x in (a['where'], a['note']) if x)
+            if where:
+                dim = Gtk.Label(label=where, xalign=0)
+                dim.add_css_class('dim-label')
+                card.append(dim)
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+            for key, label in a['buttons']:
+                btn = Gtk.Button(label=label)
+                btn.add_css_class('elyares-btn')
+                btn.connect('clicked', lambda _b, sid=a['sid'], k=key: handlers['act'](sid, k))
+                row.append(btn)
+            card.append(row)
+            self.page.append(card)
+
+
+class SettingsPanel(Gtk.ScrolledWindow):
+    """Ajustes: un interruptor por cada clave que hoy se cambia con una orden
+    o un clic. Cada fila es (clave, texto, activo, nota)."""
+
+    def __init__(self):
+        super().__init__()
+        self.add_css_class('elyares-sources')
+        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(self.page, f'set_margin_{side}')(SPACE[2])
+        self.set_child(self.page)
+        self.signature = None
+        self.position = None
+        self.set_visible(False)
+
+    def set_rows(self, rows, position, handlers):
+        """`rows`: [(clave, texto, activo, nota)]; `position`: 0..100 o None.
+        `handlers`: toggle(clave), move(valor), theme()."""
+        sig = repr((rows, position))
+        if sig == self.signature:
+            return
+        self.signature = sig
+        while (child := self.page.get_first_child()) is not None:
+            self.page.remove(child)
+        for key, text, on, note in rows:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            col.set_hexpand(True)
+            col.append(Gtk.Label(label=text, xalign=0))
+            if note:
+                dim = Gtk.Label(label=note, xalign=0, wrap=True)
+                dim.add_css_class('dim-label')
+                col.append(dim)
+            switch = Gtk.Switch()
+            switch.set_active(on)
+            switch.set_valign(Gtk.Align.CENTER)
+            switch.update_property([Gtk.AccessibleProperty.LABEL], [text])
+            switch.connect('notify::active', lambda sw, _p, k=key, was=on: sw.get_active() != was
+                           and handlers['toggle'](k))
+            row.append(col)
+            row.append(switch)
+            self.page.append(row)
+        if position is not None:
+            self.page.append(Gtk.Label(label='Posición de la isla', xalign=0))
+            scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
+            scale.set_value(position)
+            scale.update_property([Gtk.AccessibleProperty.LABEL], ['Posición de la isla, de 0 a 100'])
+            scale.connect('value-changed', lambda sc: sc.get_value() != position and handlers['move'](sc.get_value()))
+            self.page.append(scale)
+        theme = Gtk.Button(label='Releer el color de acento del tema')
+        theme.add_css_class('elyares-btn')
+        theme.set_halign(Gtk.Align.START)
+        theme.connect('clicked', lambda _b: handlers['theme']())
+        self.page.append(theme)
+
+
+class HelpDialog(Gtk.Window):
+    """La ayuda: buscador, atajos del teclado, del ratón y comandos. Solo se
+    consulta; nada de aquí se ejecuta. El foco queda dentro, Esc la cierra y
+    devuelve el foco al icono."""
+
+    def __init__(self, parent, opener):
+        super().__init__(title='Ayuda de elyares-engineer', transient_for=parent, modal=True)
+        self.opener = opener
+        self.returned = False
+        self.items = []                 # [(bloque, atajo o comando, qué hace)]
+        self.set_default_size(520, 480)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(box, f'set_margin_{side}')(SPACE[2])
+        self.search = Gtk.SearchEntry()
+        self.search.set_placeholder_text('Buscar un atajo o un comando')
+        self.search.connect('search-changed', lambda _e: self._filter())
+        self.list = Gtk.ListBox()
+        self.list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.list.set_filter_func(self._visible)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        scroll.set_child(self.list)
+        box.append(self.search)
+        box.append(scroll)
+        self.set_child(box)
+        keys = Gtk.EventControllerKey()
+        keys.connect('key-pressed', self._key)
+        self.add_controller(keys)
+        self.connect('close-request', self._closing)
+
+    def set_items(self, items):
+        self.items = list(items)
+        while (row := self.list.get_first_child()) is not None:
+            self.list.remove(row)
+        for block, what, text in self.items:
+            row = Gtk.ListBoxRow()
+            row.haystack = f'{block} {what} {text}'.lower()
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[2])
+            cmd = Gtk.Label(label=what, xalign=0, selectable=True)
+            cmd.set_size_request(200, -1)
+            hint = Gtk.Label(label=text, xalign=0, wrap=True)
+            hint.add_css_class('dim-label')
+            line.append(cmd)
+            line.append(hint)
+            row.set_child(line)
+            self.list.append(row)
+
+    def shown(self):
+        """Los textos que pasan el buscador, en orden."""
+        rows, row = [], self.list.get_first_child()
+        while row is not None:
+            if self._visible(row):
+                rows.append(row.haystack)
+            row = row.get_next_sibling()
+        return rows
+
+    def _visible(self, row):
+        return self.search.get_text().strip().lower() in row.haystack
+
+    def _filter(self):
+        self.list.invalidate_filter()
+
+    def _key(self, _ctl, keyval, _code, _state):
+        if keyval == Gdk.KEY_Escape:
+            self._closing(self)
+            self.close()
+            return True
+        return False
+
+    def _closing(self, _win):
+        """Devuelve el foco al icono que la abrió, una sola vez por cierre."""
+        if self.opener is not None and not self.returned:
+            self.returned = True
+            self.opener.grab_focus()
+        return False

@@ -43,6 +43,10 @@ class WindowView:
     fit_saved = (0, 0, 0.0)         # el último tamaño guardado: ancho, alto y cuándo
     windowed = False                # la isla, que se arma sin __init__ en las pruebas, la mira siempre
     app_win = None
+    sources_open = False            # la vista Fuentes está a la vista
+    sources_pick = 'claude'         # la fuente que muestra
+    panel_open = ''                 # 'alerts' o 'settings' cuando una de esas vistas está a la vista
+    help_win = None
     frame = None                    # el marco de widgets (windowframe.Frame); None sin ventana real
 
     def window_init(self):
@@ -86,6 +90,8 @@ class WindowView:
             return
         if self.fit_manual:
             self.window_remember(force=True)
+        if self.frame is not None:
+            self.frame.hide_panels()
         self.window_content(None)
         self.app_win.set_visible(False)
         self.windowed = False
@@ -120,6 +126,10 @@ class WindowView:
         self.frame.attach(win)
         self.overlay.add_overlay(self.frame.board)     # encima del dibujo, solo con el tablero a la vista
         self.overlay.add_overlay(self.frame.chat_head)     # y la cabecera del chat, solo con el chat
+        self.overlay.add_overlay(self.frame.sources)       # y la vista Fuentes, que lo cubre todo
+        self.overlay.add_overlay(self.frame.alerts)        # y la bandeja y los ajustes, igual
+        self.overlay.add_overlay(self.frame.settings)
+        self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
 
     def window_content(self, child):
@@ -131,6 +141,8 @@ class WindowView:
 
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
+        self.sources_open = key == 'sources'
+        self.panel_open = key if key in ('alerts', 'settings') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -143,12 +155,12 @@ class WindowView:
             self.toggle_projects()
         elif key == 'flows' and not self.wf_open:
             self.open_workflows()
-        # 'sources' aún no tiene vista propia (HU-006): se queda en el tablero.
 
     def board_widgets(self):
         """¿El tablero lo dibujan los widgets? En la ventana y sin un desglose
         abierto (ese, con su mini chat, sigue en Cairo)."""
-        return (self.frame is not None and self.windowed and self.focus is None
+        return (self.frame is not None and self.windowed and self.focus is None and not self.sources_open
+                and not self.panel_open and not self.wf_open
                 and self.target() == 'board' and self.tab_session() is not None)
 
     def window_board(self):
@@ -170,11 +182,11 @@ class WindowView:
                 state = {'permission': 'Pide permiso', 'working': 'Trabaja', 'waiting': 'Espera respuesta',
                          'done': 'Terminó'}.get(m.state, m.state) + took
                 steps = [m.detail] if m.state == 'permission' else [t for t, _at in m.steps[-3:]] or ['Arrancando…']
-                cards.append(dict(role=m.role, name=m.name, color=color, state=state, steps=steps, busy=True,
+                cards.append(dict(role=m.role, name=m.role, color=color, state=state, steps=steps, busy=True,
                                   ask=m.state == 'permission' and self.seat(s, m.role) is asking, pet=pet))
             else:
                 note = ('esperando' if s.delegating else 'en reposo') if m.role == MAIN_ROLE else 'libre'
-                free.append(dict(role=m.role, name=m.name, color=color, state=note, steps=[], busy=False,
+                free.append(dict(role=m.role, name=m.role, color=color, state=note, steps=[], busy=False,
                                  ask=False, pet=pet))
         board.set_cards(cards, free, dict(face=self.window_face, pick=self.window_card, decide=self.window_decide))
         board.animate()
@@ -203,7 +215,7 @@ class WindowView:
 
     def chat_head_widget(self):
         """¿La cabecera y los agentes del chat los llevan los widgets?"""
-        return self.frame is not None and self.windowed and self.target() == 'chat'
+        return self.frame is not None and self.windowed and self.target() == 'chat' and not self.wf_open
 
     def window_agents(self):
         """La barra lateral en el chat: un agente por fila, con su cara, y el
@@ -238,6 +250,129 @@ class WindowView:
                     busy=bool(c is not None and c.busy), can_split=self.chat_can_split())
         head.set_info(info, dict(face=self.window_face, act=self.window_chat_act))
         head.place(chatview.CHAT_HEAD + 2)
+
+    def window_sources(self):
+        """La vista Fuentes: una fila por fuente y el detalle de la elegida."""
+        from . import app, commands, sources
+        panel = self.frame.sources
+        if self.chat_open or self.projects_open or self.wf_open:
+            self.sources_open = False           # otra vista la tapó: ya no es la de Fuentes
+        panel.set_visible(self.sources_open)
+        if not self.sources_open:
+            return
+        now = time.monotonic()
+        dots = {'on': 'green', 'bad': 'red', 'unknown': 'yellow'}
+        rows = []
+        for key, label in sources.SOURCES:
+            state = self.source_state(key)
+            note = self.source_note(key) if state != 'off' else ''
+            text = sources.STATE_TEXT[state].capitalize() + (f' · {note}' if note else '')
+            color = dots.get(state)
+            rows.append((key, label, mascot.COLORS.get(color, color) if color else None, text))
+        key = self.sources_pick if self.sources_pick in sources.LABELS else 'claude'
+        state, src = self.source_state(key), self.sources.get(key) or {}
+        status = sources.STATE_TEXT[state].capitalize()
+        if state == 'bad' and src.get('since'):
+            status += f' desde {app.ago(now - src["since"])}'
+        cmds = [(r[1], r[2]) for r in commands.reference(key, commands.load()) if r[0] == 'cmd']
+        items = sorted(src.get('items') or [], key=lambda it: it.get('tone') != 'bad') if key == 'github' else []
+        items = [dict(label=f'{it["where"]}#{it["number"]} {it["title"]}', note=it['note'], url=it['url'])
+                 for it in items if state == 'on']
+        detail = dict(key=key, title=sources.LABELS[key], retry=key in ('github', 'devherd') and state != 'off',
+                      items=items, status=status, about=sources.ABOUT[key],
+                      lines=[] if state != 'on' else list(src.get('tip') or []),
+                      why=(src.get('why') or src.get('note') or sources.MISSING.get(key, '')) if state == 'bad' else '',
+                      fix=src.get('fix', '') if state == 'bad' else '',
+                      toggle=key != 'claude', on=state != 'off', cmds=cmds)
+        panel.set_data(rows, key, detail, dict(pick=self.window_source_pick, toggle=self.toggle_source,
+                                                      retry=self.window_retry, open=self.window_open_url))
+
+    def window_panels(self):
+        """La campana (con su contador), la bandeja de alertas y los ajustes."""
+        from . import sources
+        frame = self.frame
+        pending = self.alerts()
+        frame.set_bell(len(pending))
+        if self.chat_open or self.projects_open or self.wf_open:
+            self.panel_open = ''
+        frame.alerts.set_visible(self.panel_open == 'alerts')
+        frame.settings.set_visible(self.panel_open == 'settings')
+        if self.panel_open == 'alerts':
+            tones = {'': 'red', 'ok': 'green', 'info': 'yellow', 'run': 'metal'}
+            cards = []
+            for s in pending:
+                color = tones.get(s.tone, 'red')
+                buttons = [('dismiss', 'Descartar')] + [(i, a['label']) for i, a in enumerate(s.actions)]
+                cards.append(dict(sid=s.sid, title=s.name or s.proj or s.sid, buttons=buttons,
+                                  color=mascot.COLORS.get(color, color), lines=list(s.lines),
+                                  where=s.where, note=s.note))
+            frame.alerts.set_alerts(cards, dict(act=self.window_alert))
+        elif self.panel_open == 'settings':
+            st = self.settings
+            rows = [('glass', 'Vidrio', bool(st['glass']), 'La ventana translúcida, desenfocada por Hyprland.'),
+                    ('compact', 'Modo compacto', bool(st['compact']), 'De la isla suelta; la ventana no lo usa.'),
+                    ('pinned', 'Isla fijada', bool(st['pinned']), 'De la isla suelta; la ventana ya está abierta.')]
+            rows += [(key, f'Fuente: {label}', bool(st[key]), '') for key, label in sources.SOURCES if key != 'claude']
+            frame.settings.set_rows(rows, st['position'], dict(toggle=self.window_setting, move=self.move,
+                                                               theme=self.window_theme))
+
+    def window_alert(self, sid, key):
+        s = self.model.sessions.get(sid)
+        if s is None:
+            return
+        if key == 'dismiss':
+            self.model.dismiss(s)       # sin ficha tampoco: se va y no vuelve en 15 min
+            self.refresh()
+            self.ensure_tick()
+        else:
+            self.act(s, key)
+
+    def window_setting(self, key):
+        if key == 'glass':
+            self.settings['glass'] = not self.settings['glass']
+            settings.save(self.settings)
+            self.ensure_tick()
+        elif key == 'compact':
+            self.settings['compact'] = not self.settings['compact']
+            settings.save(self.settings)         # la ventana no usa el compacto: vale al volver la isla
+        elif key == 'pinned':
+            self.settings['pinned'] = not self.settings['pinned']
+            settings.save(self.settings)
+        else:
+            self.toggle_source(key)
+
+    def window_theme(self):
+        self.load_theme()
+        self.ensure_tick()
+
+    def window_help(self):
+        """El diálogo de ayuda: atajos del teclado, del ratón y comandos."""
+        from . import commands
+        if self.help_win is None or not self.help_win.get_visible():
+            self.help_win = windowframe.HelpDialog(self.app_win, self.frame.help)
+        sections = commands.load()
+        blocks = [('Teclado', commands.shortcuts(hypr.binds())), ('Ratón', sections.get('raton') or []),
+                  ('Terminal', sections.get('engineer') or [])]
+        blocks += [(name, sections.get(name) or []) for name in ('devherd', 'coffe', 'github', 'terminal', 'usage')]
+        self.help_win.set_items([(title, what, text) for title, items in blocks for what, text in items])
+        self.help_win.present()
+        self.help_win.search.grab_focus()
+
+    @staticmethod
+    def window_retry(key):
+        """Reintentar: la fuente consulta ya, sin esperar su turno."""
+        from . import devherd, github
+        {'github': github, 'devherd': devherd}[key].retry()
+
+    @staticmethod
+    def window_open_url(url):
+        import threading
+        from . import actions
+        threading.Thread(target=actions.run, args=({'cmd': ['xdg-open', url], 'label': 'PR'},),
+                         daemon=True).start()
+
+    def window_source_pick(self, key):
+        self.sources_pick = key
 
     def window_chat_act(self, key):
         self.on_chat_hit(key)
@@ -276,6 +411,10 @@ class WindowView:
         return 'Terminó' if 'done' in states else 'En reposo'
 
     def window_current(self):
+        if self.panel_open:
+            return self.panel_open
+        if self.sources_open:
+            return 'sources'
         if self.wf_open:
             return 'flows'
         if self.chat_open:
@@ -306,12 +445,15 @@ class WindowView:
         if self.frame is not None:
             self.frame.sync(self.window_current())
             self.frame.fold(self.app_win.get_width())
+            self.frame.set_glass(bool(self.settings['glass']))
             if self.chat_head_widget():
                 self.frame.set_sessions(*self.window_agents())
             else:
                 self.frame.set_sessions(self.window_rows(), self.tab, self.window_row_face)
             self.window_board()
             self.window_chat_head()
+            self.window_sources()
+            self.window_panels()
             chrome = self.frame.chrome_h()      # la barra de título también es alto de ventana
         now = time.monotonic()
         height = self.app_win.get_height()
