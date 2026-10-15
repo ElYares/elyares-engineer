@@ -17,7 +17,7 @@ import time
 from gi.repository import GLib, Gtk
 
 from . import hypr, mascot, settings, windowframe
-from .state import elapsed
+from .state import MAIN_ROLE, elapsed
 
 APP_ID = 'dev.elyares.Engineer'
 TITLE = 'Elyares Engineer'
@@ -118,6 +118,8 @@ class WindowView:
         win.connect('notify::is-active', self.on_window_focus)
         self.frame = windowframe.Frame(self.window_view, self.window_pick)
         self.frame.attach(win)
+        self.overlay.add_overlay(self.frame.board)     # encima del dibujo, solo con el tablero a la vista
+        self.overlay.add_overlay(self.frame.chat_head)     # y la cabecera del chat, solo con el chat
         return win
 
     def window_content(self, child):
@@ -143,15 +145,116 @@ class WindowView:
             self.open_workflows()
         # 'sources' aún no tiene vista propia (HU-006): se queda en el tablero.
 
+    def board_widgets(self):
+        """¿El tablero lo dibujan los widgets? En la ventana y sin un desglose
+        abierto (ese, con su mini chat, sigue en Cairo)."""
+        return (self.frame is not None and self.windowed and self.focus is None
+                and self.target() == 'board' and self.tab_session() is not None)
+
+    def window_board(self):
+        from . import app           # hasta aquí: app importa este módulo
+        board = self.frame.board
+        if not self.board_widgets():
+            board.place(0)
+            return
+        s = self.tab_session()
+        asking = self.asking()
+        now, cards, free = time.monotonic(), [], []
+        for m in self.team(s):
+            busy = m.busy
+            color = mascot.COLORS.get(mascot.accent(m.role), mascot.accent(m.role))
+            asleep = m.role == MAIN_ROLE and not busy and not s.delegating
+            pet = app.MEMBER_PET.get(m.state, 'sleep' if asleep else 'idle')
+            if busy:
+                took = f' · {elapsed(now - m.since)}' if m.state == 'working' and m.since else ''
+                state = {'permission': 'Pide permiso', 'working': 'Trabaja', 'waiting': 'Espera respuesta',
+                         'done': 'Terminó'}.get(m.state, m.state) + took
+                steps = [m.detail] if m.state == 'permission' else [t for t, _at in m.steps[-3:]] or ['Arrancando…']
+                cards.append(dict(role=m.role, name=m.name, color=color, state=state, steps=steps, busy=True,
+                                  ask=m.state == 'permission' and self.seat(s, m.role) is asking, pet=pet))
+            else:
+                note = ('esperando' if s.delegating else 'en reposo') if m.role == MAIN_ROLE else 'libre'
+                free.append(dict(role=m.role, name=m.name, color=color, state=note, steps=[], busy=False,
+                                 ask=False, pet=pet))
+        board.set_cards(cards, free, dict(face=self.window_face, pick=self.window_card, decide=self.window_decide))
+        board.animate()
+        board.place(app.TABS_H + self.body_h())
+
+    def window_face(self, cr, role, pet, w, h, moving):
+        side = min(w, h)
+        cr.translate(w / 2, h / 2)
+        cr.scale(side / 253, side / 253)
+        mascot.draw(cr, pet, 1.0, time.monotonic() if moving else 0, motion=1 if moving else 0, role=role)
+
+    def window_card(self, role, busy):
+        """Un clic en una tarjeta: su desglose; en uno libre, a encargarle algo."""
+        s = self.tab_session()
+        if s is None or (not busy and role == MAIN_ROLE):
+            return
+        self.focus = (s.sid, role)
+        if not busy:
+            self.brief()
+
+    def window_decide(self, allow):
+        asking = self.asking()
+        if asking is not None:
+            self.model.decide(asking, allow)
+            self.refresh()
+
+    def chat_head_widget(self):
+        """¿La cabecera y los agentes del chat los llevan los widgets?"""
+        return self.frame is not None and self.windowed and self.target() == 'chat'
+
+    def window_agents(self):
+        """La barra lateral en el chat: un agente por fila, con su cara, y el
+        que habla elegido; si trabaja o pregunta, también en texto."""
+        from . import state
+        cwd = self.chat.cwd if self.chat is not None else ''
+        rows = []
+        for role in state.TEAM:
+            agent = '' if role == state.MAIN_ROLE else state.ROLE_AGENTS[role]
+            other = self.chats.get(self.chat_key(agent, cwd))
+            text = 'Pide permiso' if other is not None and other.asking else \
+                'Trabaja' if other is not None and other.busy else ''
+            rows.append((f'agent:{agent}', state.ROLE_AGENTS[role], None, text, role))
+        chosen = f'agent:{self.chat.agent}' if self.chat is not None else 'agent:'
+        return rows, chosen, self.window_row_face
+
+    def window_row_face(self, cr, role, w, h):
+        self.window_face(cr, role, 'idle', w, h, False)
+
+    def window_chat_head(self):
+        head = self.frame.chat_head
+        if not self.chat_head_widget():
+            head.place(0)
+            return
+        from . import chatview, state
+        c = self.chat
+        role = self.chat_role()
+        status, _tone = self.chat_status()
+        info = dict(role=role, pet=self.chat_pet(), name=c.name if c is not None else state.MAIN_AGENT,
+                    color=mascot.accent(role), project=c.project if c is not None else '',
+                    status=status, where=state.tilde(c.cwd) if c is not None else '',
+                    busy=bool(c is not None and c.busy), can_split=self.chat_can_split())
+        head.set_info(info, dict(face=self.window_face, act=self.window_chat_act))
+        head.place(chatview.CHAT_HEAD + 2)
+
+    def window_chat_act(self, key):
+        self.on_chat_hit(key)
+
     def window_pick(self, sid):
-        """Una fila de la barra lateral: esa sesión pasa a ser la del tablero."""
+        """Una fila de la barra lateral: esa sesión pasa a ser la del tablero
+        o, en el chat, ese agente el que habla."""
+        if sid.startswith('agent:'):
+            self.on_chat_hit(sid)
+            return
         if sid != self.tab:
             self.tab, self.focus = sid, None
             self.tab_manual = True
 
     def window_rows(self):
         """Las filas de la barra lateral: nombre, punto y estado en texto."""
-        labels, now = self.tab_labels(), time.time()
+        labels, now = self.tab_labels(), time.monotonic()
         rows = []
         for s in self.tabs():
             color = self.tab_dot(s)
@@ -202,7 +305,13 @@ class WindowView:
         chrome = 0
         if self.frame is not None:
             self.frame.sync(self.window_current())
-            self.frame.set_sessions(self.window_rows(), self.tab)
+            self.frame.fold(self.app_win.get_width())
+            if self.chat_head_widget():
+                self.frame.set_sessions(*self.window_agents())
+            else:
+                self.frame.set_sessions(self.window_rows(), self.tab, self.window_row_face)
+            self.window_board()
+            self.window_chat_head()
             chrome = self.frame.chrome_h()      # la barra de título también es alto de ventana
         now = time.monotonic()
         height = self.app_win.get_height()

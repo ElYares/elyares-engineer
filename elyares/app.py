@@ -1624,7 +1624,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             full_h = h
             text_alpha = clamp((w - 420) / 120) * clamp((h - 110) / 60)
             body = self.body_h()
-            if text_alpha > 0:
+            if text_alpha > 0 and not self.board_widgets():     # en la ventana lo llevan los widgets
                 self.draw_board(cr, x0, w, body, text_alpha, now)
             head = TABS_H + body + BOARD_PAD
             listed = True
@@ -2430,45 +2430,46 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         lw, lh = layout.get_pixel_size()
         pw = lw + 16
         x = right - pw
-        chat = self._layout(cr, 'Chat', FONT_PILL)
-        cw, ch = chat.get_pixel_size()
-        cpw = cw + 20
-        cx = x - PILL_GAP - cpw
-        over_chat = cx <= px <= cx + cpw and y <= py <= y + PILL_H
-        mascot.rrect(cr, cx, y, cpw, PILL_H, PILL_H / 2)
-        accent = mascot.rgba(mascot.accent('engineer'))[:3]
-        cr.set_source_rgba(*accent, (.30 if over_chat else .18) * alpha)
-        cr.fill()
-        cr.move_to(cx + (cpw - cw) / 2, y + (PILL_H - ch) / 2)
-        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-        PangoCairo.show_layout(cr, chat)
-        # Y, antes, la de los proyectos, para empezar en cualquiera.
-        plus = self._layout(cr, '+', FONT_PILL)
-        qw, qh = plus.get_pixel_size()
-        qpw = qw + 16
-        qx = cx - PILL_GAP - qpw
-        over_plus = qx <= px <= qx + qpw and y <= py <= y + PILL_H
-        mascot.rrect(cr, qx, y, qpw, PILL_H, PILL_H / 2)
-        cr.set_source_rgba(1, 1, 1, (.13 if over_plus else .07) * alpha)
-        cr.fill()
-        cr.move_to(qx + (qpw - qw) / 2, y + (PILL_H - qh) / 2)
-        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-        PangoCairo.show_layout(cr, plus)
-        self.pills.append((projectview.PROJECTS_PILL, qx, y, qpw, PILL_H))
-        # Y la de los workflows: sus cadenas de agentes.
-        flows = self._layout(cr, 'Flujos', FONT_PILL)
-        fw, fh = flows.get_pixel_size()
-        fpw = fw + 16
-        fx = qx - PILL_GAP - fpw
-        over_flows = fx <= px <= fx + fpw and y <= py <= y + PILL_H
-        mascot.rrect(cr, fx, y, fpw, PILL_H, PILL_H / 2)
-        cr.set_source_rgba(1, 1, 1, (.13 if over_flows else .07) * alpha)
-        cr.fill()
-        cr.move_to(fx + (fpw - fw) / 2, y + (PILL_H - fh) / 2)
-        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-        PangoCairo.show_layout(cr, flows)
-        self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
-        self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
+        if not (self.frame is not None and self.windowed):     # en la ventana son las vistas de la barra de título
+            chat = self._layout(cr, 'Chat', FONT_PILL)
+            cw, ch = chat.get_pixel_size()
+            cpw = cw + 20
+            cx = x - PILL_GAP - cpw
+            over_chat = cx <= px <= cx + cpw and y <= py <= y + PILL_H
+            mascot.rrect(cr, cx, y, cpw, PILL_H, PILL_H / 2)
+            accent = mascot.rgba(mascot.accent('engineer'))[:3]
+            cr.set_source_rgba(*accent, (.30 if over_chat else .18) * alpha)
+            cr.fill()
+            cr.move_to(cx + (cpw - cw) / 2, y + (PILL_H - ch) / 2)
+            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, chat)
+            # Y, antes, la de los proyectos, para empezar en cualquiera.
+            plus = self._layout(cr, '+', FONT_PILL)
+            qw, qh = plus.get_pixel_size()
+            qpw = qw + 16
+            qx = cx - PILL_GAP - qpw
+            over_plus = qx <= px <= qx + qpw and y <= py <= y + PILL_H
+            mascot.rrect(cr, qx, y, qpw, PILL_H, PILL_H / 2)
+            cr.set_source_rgba(1, 1, 1, (.13 if over_plus else .07) * alpha)
+            cr.fill()
+            cr.move_to(qx + (qpw - qw) / 2, y + (PILL_H - qh) / 2)
+            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, plus)
+            self.pills.append((projectview.PROJECTS_PILL, qx, y, qpw, PILL_H))
+            # Y la de los workflows: sus cadenas de agentes.
+            flows = self._layout(cr, 'Flujos', FONT_PILL)
+            fw, fh = flows.get_pixel_size()
+            fpw = fw + 16
+            fx = qx - PILL_GAP - fpw
+            over_flows = fx <= px <= fx + fpw and y <= py <= y + PILL_H
+            mascot.rrect(cr, fx, y, fpw, PILL_H, PILL_H / 2)
+            cr.set_source_rgba(1, 1, 1, (.13 if over_flows else .07) * alpha)
+            cr.fill()
+            cr.move_to(fx + (fpw - fw) / 2, y + (PILL_H - fh) / 2)
+            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, flows)
+            self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
+            self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
         cr.set_source_rgba(1, 1, 1, (.13 if over else .07) * alpha)

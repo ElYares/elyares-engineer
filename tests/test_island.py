@@ -3104,6 +3104,47 @@ class Ventana(Dibujo):
         self.assertEqual(state(team('done', 'idle'), 0), 'Terminó')
         self.assertEqual(state(team('idle'), 0), 'En reposo')
 
+    def test_el_tablero_va_en_widgets_solo_en_la_ventana_y_sin_desglose(self):
+        isl = self.isl
+        isl.frame, isl.windowed, isl.focus = mock.Mock(), True, None
+        isl.target, isl.tab_session = lambda: 'board', lambda: object()
+        self.assertTrue(isl.board_widgets())
+        isl.focus = ('s', 'auditor')                # un desglose abierto sigue en Cairo
+        self.assertFalse(isl.board_widgets())
+        isl.focus, isl.windowed = None, False       # la isla suelta no lleva widgets
+        self.assertFalse(isl.board_widgets())
+
+    def test_el_tablero_en_widgets_reparte_los_que_trabajan_y_los_libres(self):
+        from elyares.state import Session
+        isl = self.isl
+        s = Session('s1', state='permission')
+        isl.frame, isl.windowed, isl.focus = mock.Mock(), True, None
+        isl.target, isl.tab_session = lambda: 'board', lambda: s
+        isl.asking, isl.seat, isl.body_h = lambda: s, lambda sess, role: s, lambda: 100
+        isl.team = lambda sess: sess.team()
+        isl.window_board()
+        cards, free, _handlers = isl.frame.board.set_cards.call_args.args
+        self.assertTrue(cards and all(c['busy'] for c in cards))
+        self.assertTrue(any(c['ask'] and c['state'].startswith('Pide permiso') for c in cards))
+        self.assertTrue(all(not c['busy'] for c in free))
+        self.assertEqual(len(cards) + len(free), len(s.team()))
+        isl.frame.board.place.assert_called_with(app.TABS_H + 100)
+
+    def test_en_el_chat_la_barra_lateral_lista_a_los_agentes(self):
+        from elyares import state
+        isl = self.isl
+        isl.chat, isl.chats = None, {}
+        rows, chosen, _face = isl.window_agents()
+        self.assertEqual([r[4] for r in rows], list(state.TEAM))
+        self.assertEqual(chosen, 'agent:')
+        self.assertTrue(rows[0][0] == 'agent:' and rows[1][0].startswith('agent:elyares-'))
+
+    def test_elegir_un_agente_en_la_barra_lateral_le_habla_a_ese(self):
+        isl = self.isl
+        isl.on_chat_hit = mock.Mock()
+        isl.window_pick('agent:elyares-auditor')
+        isl.on_chat_hit.assert_called_once_with('agent:elyares-auditor')
+
     def test_una_fila_de_la_barra_lateral_cambia_de_pestana(self):
         self.isl.tab = 'a'
         self.isl.window_pick('b')
