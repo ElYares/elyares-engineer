@@ -100,6 +100,7 @@ class Frame:
         self.header.pack_end(self.bell)
         self.board = BoardPanel()
         self.chat_head = ChatHead()
+        self.focus = FocusPanel()
         self.sources = SourcesPanel()
         self.alerts = AlertsPanel()
         self.settings = SettingsPanel()
@@ -194,6 +195,7 @@ class Frame:
         """Los paneles que van encima del dibujo solo valen en la ventana: al
         volver la isla suelta se esconden, o se verían sobre ella."""
         self.board.place(0)
+        self.focus.place(0)
         self.chat_head.place(0)
         for panel in (self.sources, self.alerts, self.settings):
             panel.set_visible(False)
@@ -697,3 +699,97 @@ class HelpDialog(Gtk.Window):
             self.returned = True
             self.opener.grab_focus()
         return False
+
+
+class FocusPanel(Gtk.ScrolledWindow):
+    """El desglose de un agente en la ventana: a la izquierda quién es, cuánto
+    lleva y sus enlaces; en medio todos sus pasos; abajo, los demás en
+    miniatura. Sin estado propio: lo llena la isla con `set_focus`."""
+
+    def __init__(self):
+        super().__init__()
+        self.add_css_class('elyares-board')
+        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.set_valign(Gtk.Align.START)
+        self.set_halign(Gtk.Align.FILL)
+        self.signature = None
+        self.faces = []
+        self.set_visible(False)
+
+    place = BoardPanel.place
+    animate = BoardPanel.animate
+
+    def set_focus(self, d, handlers):
+        """`d`: role, name, color, pet, busy, label, summary, steps
+        [(marca, color, texto, tiempo)], links [(tipo, clave, texto)], others
+        [(rol, pet, activo)], hidden, empty. `handlers`: face, link, other."""
+        sig = repr(d)
+        if sig == self.signature:
+            return
+        self.signature = sig
+        self.faces = []
+        root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[3])
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(root, f'set_margin_{side}')(SPACE[2])
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        left.set_size_request(170, -1)
+        face = Gtk.DrawingArea()
+        face.set_content_width(84)
+        face.set_content_height(84)
+        face.set_halign(Gtk.Align.CENTER)
+        face.set_draw_func(lambda _da, cr, w, h: handlers['face'](cr, d['role'], d['pet'], w, h, d['busy']))
+        if d['busy']:
+            self.faces.append(face)
+        left.append(face)
+        name = Gtk.Label()
+        name.set_markup(f'<span foreground="{d["color"]}" weight="bold">{GLib.markup_escape_text(d["name"])}</span>')
+        left.append(name)
+        for text in (d['label'], d['summary']):
+            lab = Gtk.Label(label=text)
+            lab.add_css_class('dim-label')
+            lab.set_ellipsize(Pango.EllipsizeMode.END)
+            left.append(lab)
+        for kind, key, text in d['links']:
+            btn = Gtk.Button(label=text)
+            btn.add_css_class('elyares-btn')
+            btn.connect('clicked', lambda _b, k=kind, v=key: handlers['link'](k, v))
+            left.append(btn)
+        root.append(left)
+        mid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
+        mid.set_hexpand(True)
+        if d['empty']:
+            mid.append(Gtk.Label(label=d['empty'], xalign=0, wrap=True))
+        if d['hidden']:
+            more = Gtk.Label(label=f'⋯ {d["hidden"]} paso{"" if d["hidden"] == 1 else "s"} antes', xalign=0)
+            more.add_css_class('dim-label')
+            mid.append(more)
+        for mark, color, text, spent in d['steps']:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+            row.add_css_class('elyares-card')
+            m = Gtk.Label()
+            m.set_markup(f'<span foreground="{color}">{GLib.markup_escape_text(mark)}</span>')
+            t = Gtk.Label(label=text, xalign=0)
+            t.set_hexpand(True)
+            t.set_ellipsize(Pango.EllipsizeMode.END)
+            when = Gtk.Label(label=spent)
+            when.add_css_class('dim-label')
+            row.append(m)
+            row.append(t)
+            row.append(when)
+            mid.append(row)
+        others = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+        for role, pet, busy in d['others']:
+            btn = Gtk.Button()
+            btn.add_css_class('flat')
+            btn.update_property([Gtk.AccessibleProperty.LABEL], [role])
+            btn.set_tooltip_text(role)
+            da = Gtk.DrawingArea()
+            da.set_content_width(32)
+            da.set_content_height(32)
+            da.set_draw_func(lambda _da, cr, w, h, r=role, p=pet, b=busy: handlers['face'](cr, r, p, w, h, False))
+            btn.set_child(da)
+            btn.connect('clicked', lambda _b, r=role, b=busy: handlers['other'](r, b))
+            others.append(btn)
+        mid.append(others)
+        root.append(mid)
+        self.set_child(root)

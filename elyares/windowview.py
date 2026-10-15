@@ -124,6 +124,7 @@ class WindowView:
         win.connect('notify::is-active', self.on_window_focus)
         self.frame = windowframe.Frame(self.window_view, self.window_pick)
         self.frame.attach(win)
+        self.overlay.add_overlay(self.frame.focus)     # el desglose de un agente, igual
         self.overlay.add_overlay(self.frame.board)     # encima del dibujo, solo con el tablero a la vista
         self.overlay.add_overlay(self.frame.chat_head)     # y la cabecera del chat, solo con el chat
         self.overlay.add_overlay(self.frame.sources)       # y la vista Fuentes, que lo cubre todo
@@ -159,13 +160,25 @@ class WindowView:
     def board_widgets(self):
         """¿El tablero lo dibujan los widgets? En la ventana y sin un desglose
         abierto (ese, con su mini chat, sigue en Cairo)."""
-        return (self.frame is not None and self.windowed and self.focus is None and not self.sources_open
+        return self.window_board_view() and self.focused() is None
+
+    def focus_widgets(self):
+        """¿El desglose de un agente lo llevan los widgets? Con uno abierto."""
+        return self.window_board_view() and self.focused() is not None
+
+    def window_board_view(self):
+        return (self.frame is not None and self.windowed and not self.sources_open
                 and not self.panel_open and not self.wf_open
                 and self.target() == 'board' and self.tab_session() is not None)
 
     def window_board(self):
         from . import app           # hasta aquí: app importa este módulo
         board = self.frame.board
+        if self.focus_widgets():
+            board.place(0)
+            self.window_focus(app)
+            return
+        self.frame.focus.place(0)
         if not self.board_widgets():
             board.place(0)
             return
@@ -192,6 +205,56 @@ class WindowView:
         board.animate()
         board.place(app.TABS_H + self.body_h())
 
+    def window_focus(self, app):
+        """El desglose de un agente: sus pasos, quién es y sus enlaces."""
+        from . import state
+        s, m = self.focused()
+        now = time.monotonic()
+        color = mascot.accent(m.role)
+        pet = app.MEMBER_PET.get(m.state, 'idle')
+        n = len(m.steps)
+        took = f' · {elapsed(now - m.since)}' if m.busy and m.since else ''
+        agent = '' if m.role == MAIN_ROLE else state.ROLE_AGENTS[m.role]
+        links = ([('jump', s.sid, 'Ir al pane' if s.pane else 'Ir a su tmux')]
+                 if s.pane or s.sid in self.chat_sessions else [])
+        links += [('talk', agent, 'Ver su chat' if agent else 'Hablarle'), ('back', None, '‹ Volver')]
+        shown = m.steps[-8:]
+        marks = {'done': ('✓', 'green'), 'waiting': ('?', 'yellow'), 'permission': ('›', 'red')}
+        steps = []
+        for i, (text, at) in enumerate(shown):
+            if i == len(shown) - 1:
+                mark, tone = marks.get(m.state, ('›', None))
+                spent = 'ahora' if m.busy else ''
+            else:
+                mark, tone, spent = '✓', 'green', elapsed(shown[i + 1][1] - at)
+            steps.append((mark, mascot.COLORS.get(tone, tone) if tone else '#f2f5ff', text, spent))
+        others = [(o.role, app.MEMBER_PET.get(o.state, 'idle'), o.busy) for o in self.team(s) if o.role != m.role]
+        empty = '' if n else (f'{agent or m.role} está libre. Ábrele su chat para encargarle algo: '
+                              'trabajará en esta carpeta, al lado de los demás.')
+        d = dict(role=m.role, name=m.role, color=color, pet=pet, busy=m.busy, label=self.tab_labels()[s.sid],
+                 summary=(f'{n} paso{"" if n == 1 else "s"}{took}' if n or m.busy else 'libre'),
+                 steps=steps, links=links, others=others, hidden=n - len(shown), empty=empty)
+        panel = self.frame.focus
+        panel.set_focus(d, dict(face=self.window_face, link=self.window_link, other=self.window_card))
+        panel.animate()
+        panel.place(app.TABS_H + self.body_h())
+
+    def window_link(self, kind, key):
+        """Un enlace del desglose: al pane, a su chat o de vuelta al tablero."""
+        s = self.tab_session()
+        if kind == 'back':
+            self.focus = None
+        elif kind == 'jump' and s is not None:
+            sess = self.model.sessions.get(key)
+            if sess is not None:
+                self.go(sess)
+        elif kind == 'talk' and s is not None:
+            c = self.chat_of(s, key)
+            if c is not None:
+                self.show_chat(c, typing=True)
+            else:
+                self.open_chat(typing=True, agent=key, cwd=self.tab_place(s))
+
     def window_face(self, cr, role, pet, w, h, moving):
         side = min(w, h)
         cr.translate(w / 2, h / 2)
@@ -203,9 +266,11 @@ class WindowView:
         s = self.tab_session()
         if s is None or (not busy and role == MAIN_ROLE):
             return
-        self.focus = (s.sid, role)
-        if not busy:
-            self.brief()
+        if busy:
+            self.focus = (s.sid, role)
+        else:
+            from . import state
+            self.open_chat(typing=True, agent=state.ROLE_AGENTS[role], cwd=self.tab_place(s))
 
     def window_decide(self, allow):
         asking = self.asking()
