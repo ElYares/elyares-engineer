@@ -26,25 +26,43 @@ DANGER = '#ff6b6b'                              # el aviso rojo, no del tema
 
 CSS = f"""
 .elyares-slot {{ background: rgba(5, 6, 8, 0.98); }}
-.elyares-slot.glass, .elyares-side.glass, .elyares-bar.glass {{ background: rgba(5, 6, 8, 0.5); }}
-.elyares-bar {{ background: {SURFACE[0]}; color: {INK}; border: none; box-shadow: none; }}
-.elyares-bar button {{ background: {SURFACE[1]}; color: {MUTED}; border: none; box-shadow: none;
-  padding: {SPACE[0]}px {SPACE[2]}px; border-radius: {RADIUS[0]}px; }}
-.elyares-bar button:checked {{ background: {SURFACE[2]}; color: {INK}; }}
-.elyares-side {{ background: {SURFACE[0]}; color: {INK}; padding: {SPACE[1]}px; }}
-.elyares-side row:selected {{ background: {SURFACE[2]}; color: {INK}; }}
-.elyares-side row {{ border-radius: {RADIUS[0]}px; padding: {SPACE[1]}px {SPACE[2]}px; }}
-.elyares-card {{ background: {SURFACE[1]}; color: {INK}; border-radius: {RADIUS[1]}px; padding: {SPACE[1]}px {SPACE[2]}px; }}
+.elyares-slot.glass, .elyares-side.glass, .elyares-bar.glass, .elyares-sidebox.glass {{ background: rgba(5, 6, 8, 0.5); }}
+.elyares-bar {{ background: {SURFACE[0]}; color: {INK}; border: none; box-shadow: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06); }}
+/* Las vistas, como el control segmentado de macOS: una pastilla con la activa elevada. */
+.elyares-segments {{ background: {SURFACE[1]}; border-radius: {RADIUS[0]}px; padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.06); }}
+.elyares-segments button {{ background: transparent; color: {MUTED}; border: none; box-shadow: none;
+  padding: {SPACE[0]}px {SPACE[2]}px; border-radius: 6px; min-height: 0; }}
+.elyares-segments button:hover {{ background: rgba(255, 255, 255, 0.05); }}
+.elyares-segments button:checked {{ background: {SURFACE[2]}; color: {INK};
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }}
+.elyares-pill {{ background: {SURFACE[1]}; color: {MUTED}; border: none;
+  box-shadow: none; padding: {SPACE[0]}px {SPACE[2]}px; border-radius: {RADIUS[0]}px; min-height: 0; }}
+.elyares-pill:checked {{ background: {SURFACE[2]}; color: {INK}; }}
+.elyares-pill:hover {{ background: {SURFACE[2]}; }}
+/* La barra lateral: sección en versalitas y la fila elegida con el acento, como en macOS. */
+.elyares-sidebox {{ background: {SURFACE[0]}; border-right: 1px solid rgba(255, 255, 255, 0.06); }}
+.elyares-section {{ color: {MUTED}; font-size: 11px; font-weight: 700; letter-spacing: 1px;
+  padding: {SPACE[2]}px {SPACE[2]}px {SPACE[0]}px; }}
+.elyares-side {{ background: transparent; color: {INK}; padding: {SPACE[0]}px {SPACE[1]}px; }}
+.elyares-side row {{ border-radius: {RADIUS[0]}px; padding: {SPACE[1]}px {SPACE[1]}px; margin: 1px 0; }}
+.elyares-side row:hover {{ background: rgba(255, 255, 255, 0.05); }}
+.elyares-side row:selected {{ background: rgba(110, 168, 255, 0.22); color: {INK}; }}
+.elyares-card {{ background: {SURFACE[1]}; color: {INK}; border-radius: {RADIUS[1]}px;
+  padding: {SPACE[1]}px {SPACE[2]}px; border: 1px solid rgba(255, 255, 255, 0.06); }}
+.elyares-card:hover {{ background: {SURFACE[2]}; }}
 .elyares-card.raised {{ background: {SURFACE[2]}; }}
-.elyares-btn {{ background: {SURFACE[2]}; color: {INK}; border-radius: {RADIUS[0]}px;
-  padding: {SPACE[1]}px {SPACE[3]}px; border: none; box-shadow: none; }}
+.elyares-btn {{ background: {SURFACE[2]}; color: {INK}; border-radius: 6px;
+  padding: {SPACE[1]}px {SPACE[3]}px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: none; }}
+.elyares-btn:hover {{ background: rgba(255, 255, 255, 0.14); }}
 .elyares-btn.compact {{ padding: {SPACE[0]}px {SPACE[1]}px; min-height: 0; }}
-.elyares-btn.primary {{ background: {ACCENT}; color: {SURFACE[0]}; }}
-.elyares-btn.danger {{ background: {DANGER}; color: {SURFACE[0]}; }}
+.elyares-btn.primary {{ background: {ACCENT}; color: {SURFACE[0]}; border: none; }}
+.elyares-btn.danger {{ background: {DANGER}; color: {SURFACE[0]}; border: none; }}
 .elyares-sources, .elyares-sources viewport {{ background: {SURFACE[0]}; color: {INK}; }}
 .elyares-chathead {{ background: {SURFACE[0]}; color: {INK}; padding: {SPACE[1]}px {SPACE[2]}px;
-  border-bottom: 1px solid {SURFACE[2]}; }}
-.elyares-bar button:focus-visible, .elyares-side row:focus-visible, .elyares-btn:focus-visible {{
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06); }}
+.elyares-segments button:focus-visible, .elyares-side row:focus-visible, .elyares-btn:focus-visible {{
   outline: 2px solid {ACCENT}; outline-offset: 2px; }}
 """
 
@@ -67,14 +85,17 @@ class Frame:
     def __init__(self, on_view, on_session=None):
         self.on_view = on_view
         self.on_session = on_session or (lambda sid: None)
-        self.session_rows = ()          # lo último que se armó: sin cambios no se reconstruye
+        self.session_shape = None       # qué filas hay: sin cambios no se reconstruye, solo se retocan los textos
+        self.session_chosen = None
+        self.session_refs = {}
         self.syncing = False            # sincronizar los botones no es un clic de Yared
         self.buttons = {}
         load_css()
         self.header = Gtk.HeaderBar()
         self.header.add_css_class('elyares-bar')
         nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        nav.set_spacing(SPACE[1])
+        nav.set_spacing(2)
+        nav.add_css_class('elyares-segments')
         first = None
         for key, text in VIEWS:
             btn = Gtk.ToggleButton(label=text)
@@ -90,10 +111,12 @@ class Frame:
         self.header.set_title_widget(nav)
         # La campana abre la bandeja y «?» la ayuda; van fuera del grupo de vistas.
         self.bell = Gtk.ToggleButton(label='Alertas')
+        self.bell.add_css_class('elyares-pill')
         self.bell.update_property([Gtk.AccessibleProperty.LABEL], ['Alertas'])
         self.bell.connect('toggled', self._toggled, 'alerts')
         self.buttons['alerts'] = self.bell
         self.help = Gtk.Button(label='?')
+        self.help.add_css_class('elyares-pill')
         self.help.update_property([Gtk.AccessibleProperty.LABEL], ['Ayuda: atajos y comandos'])
         self.help.set_margin_start(SPACE[1])
         self.header.pack_end(self.help)
@@ -113,8 +136,14 @@ class Frame:
         self.slot.add_css_class('elyares-slot')
         self.slot.set_hexpand(True)
         self.slot.set_vexpand(True)
+        self.section = Gtk.Label(label='SESIONES', xalign=0)
+        self.section.add_css_class('elyares-section')
+        self.side_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.side_box.add_css_class('elyares-sidebox')
+        self.side_box.append(self.section)
+        self.side_box.append(self.sidebar)
         self.body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        self.body.append(self.sidebar)
+        self.body.append(self.side_box)
         self.body.append(self.slot)
 
     def attach(self, win):
@@ -152,10 +181,13 @@ class Frame:
         Con rol y `face(cr, rol, w, h)`, la fila lleva la cara en vez del
         punto. El estado va también en texto y en el nombre accesible: no
         depende solo del color."""
-        key = (tuple(rows), chosen)
-        if key == self.session_rows:
+        self.section.set_label('AGENTES' if face is not None else 'SESIONES')
+        shape = tuple((r[0], len(r) > 4) for r in rows)
+        if shape == self.session_shape:
+            self._refresh_sessions(rows, chosen)        # las mismas filas: solo cambian los textos
             return
-        self.session_rows = key
+        self.session_shape, self.session_chosen = shape, chosen
+        self.session_refs = {}
         while (row := self.sidebar.get_first_child()) is not None:
             self.sidebar.remove(row)
         picked = None
@@ -182,11 +214,30 @@ class Frame:
             box.append(col)
             row.set_child(box)
             row.update_property([Gtk.AccessibleProperty.LABEL], [f'{name}, {text}'])
+            self.session_refs[sid] = dict(row=row, dot=dot if not role or face is None else None,
+                                          title=title, sub=sub, last=(name, color, text))
             self.sidebar.append(row)
             if sid == chosen:
                 picked = row
         if picked is not None:
             self.sidebar.select_row(picked)     # no emite `row-activated`: no es un clic
+
+    def _refresh_sessions(self, rows, chosen):
+        for sid, name, color, text, *_role in rows:
+            ref = self.session_refs.get(sid)
+            if ref is None or ref['last'] == (name, color, text):
+                continue
+            ref['last'] = (name, color, text)
+            ref['title'].set_label(name)
+            ref['sub'].set_label(text)
+            if ref['dot'] is not None:
+                ref['dot'].set_markup(f'<span foreground="{color or MUTED}">{"●" if color else "○"}</span>')
+            ref['row'].update_property([Gtk.AccessibleProperty.LABEL], [f'{name}, {text}'])
+        if chosen != self.session_chosen:
+            self.session_chosen = chosen
+            row = (self.session_refs.get(chosen) or {}).get('row')
+            if row is not None:
+                self.sidebar.select_row(row)
 
     def _picked(self, _box, row):
         self.on_session(row.sid)
@@ -202,7 +253,7 @@ class Frame:
 
     def set_glass(self, on):
         """Con vidrio, el fondo del marco es translúcido; sin él, opaco."""
-        for widget in (self.slot, self.sidebar, self.header):
+        for widget in (self.slot, self.side_box, self.header):
             (widget.add_css_class if on else widget.remove_css_class)('glass')
 
     def set_bell(self, count):
@@ -211,7 +262,7 @@ class Frame:
     def fold(self, width):
         """Plegada, la barra lateral no achica el contenido: con la ventana
         angosta (hasta 480) el dibujo conserva todo su ancho."""
-        self.sidebar.set_visible(not width or width >= FOLD_W)
+        self.side_box.set_visible(not width or width >= FOLD_W)
 
     def chrome_h(self):
         """Lo que la barra de título le quita al alto de la ventana."""
@@ -244,6 +295,7 @@ class BoardPanel(Gtk.ScrolledWindow):
         self.set_child(self.page)
         self.signature = None
         self.faces = []
+        self.refs = {}
         self.set_visible(False)
 
     def natural_h(self, width):
@@ -266,11 +318,15 @@ class BoardPanel(Gtk.ScrolledWindow):
         """`cards`: lo que trabaja; `free`: lo que descansa. Cada uno es un
         dict (role, name, color, state, steps, ask, busy, pet). `handlers`:
         face(cr, role, pet, size, moving), pick(role, busy), decide(allow)."""
-        sig = repr((cards, free))
-        if sig == self.signature:
+        def shape(group):
+            return tuple((c['role'], c['busy'], c['ask'], c['pet'], len(self._lines(c))) for c in group)
+        structure = (shape(cards), shape(free))
+        if structure == self.signature:
+            self._refresh_texts(list(cards) + list(free))   # mismo tablero: solo cambian los textos
             return
-        self.signature = sig
+        self.signature = structure
         self.faces = []
+        self.refs = {}
         while (child := self.page.get_first_child()) is not None:
             self.page.remove(child)
         for group, small in ((cards, False), (free, True)):
@@ -278,8 +334,8 @@ class BoardPanel(Gtk.ScrolledWindow):
                 continue
             flow = Gtk.FlowBox()
             flow.set_selection_mode(Gtk.SelectionMode.NONE)
-            flow.set_homogeneous(False)
-            flow.set_min_children_per_line(1)
+            flow.set_homogeneous(small)          # los libres, en mosaico parejo que llena el ancho
+            flow.set_min_children_per_line(2 if small else 1)
             flow.set_max_children_per_line(4)
             flow.set_column_spacing(SPACE[1])
             flow.set_row_spacing(SPACE[1])
@@ -288,10 +344,30 @@ class BoardPanel(Gtk.ScrolledWindow):
                 flow.append(self._card(card, handlers, small=small))
             self.page.append(flow)
 
+    @staticmethod
+    def _lines(card):
+        return card['steps'][-(2 if card['ask'] else 1):]
+
+    def _refresh_texts(self, cards):
+        """Cambia el texto de las etiquetas que ya están, sin tocar nada más:
+        reconstruir cada segundo pierde el foco y el hover y hace parpadear."""
+        for card in cards:
+            ref = self.refs.get(card['role'])
+            if ref is None:
+                continue
+            if ref['state'] is not None and ref['state'].get_label() != card['state']:
+                ref['state'].set_label(card['state'])
+            for label, line in zip(ref['steps'], self._lines(card)):
+                if label.get_label() != line:
+                    label.set_label(line)
+
     def _card(self, card, handlers, small=False):
+        ref = {'state': None, 'steps': [], 'small': small}
+        self.refs[card['role']] = ref
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+        ref['box'] = box
         box.add_css_class('elyares-card')
-        size = 28 if small else 48
+        size = 40 if small else 48
         face = Gtk.DrawingArea()
         face.set_content_width(size)
         face.set_content_height(size)
@@ -309,18 +385,18 @@ class BoardPanel(Gtk.ScrolledWindow):
         state = Gtk.Label(label=card['state'], xalign=0)
         state.add_css_class('dim-label')
         text.append(name)
+        text.append(state)
+        ref['state'] = state
         if small:
-            box.set_tooltip_text(f'{card["role"]}: {card["state"]}')    # el libre va en una línea, sin su estado
             box.update_property([Gtk.AccessibleProperty.LABEL], [f'{card["role"]}, {card["state"]}'])
-        else:
-            text.append(state)
-        for line in card['steps'][-(2 if card['ask'] else 1):]:
+        for line in self._lines(card):
             step = Gtk.Label(label=line, xalign=0, wrap=True)
             step.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             step.set_max_width_chars(20)    # sin esto una línea larga ensancha la tarjeta y caben menos por fila
             step.set_lines(3 if card['ask'] else 2)
             step.set_ellipsize(Pango.EllipsizeMode.END)
             text.append(step)
+            ref['steps'].append(step)
         box.append(text)
         if card['ask']:
             buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
@@ -352,6 +428,7 @@ class ChatHead(Gtk.Box):
         self.set_valign(Gtk.Align.START)
         self.set_halign(Gtk.Align.FILL)
         self.signature = None
+        self.info = None
         self.set_visible(False)
 
     def place(self, height):
@@ -359,19 +436,34 @@ class ChatHead(Gtk.Box):
         if height > 0:
             self.set_size_request(-1, int(height))
 
+    def _refresh(self, info):
+        where = f' · {info["where"]}' if info['where'] else ''
+        now = (info['name'], info['project'], info['status'], where)
+        if now != self.last:
+            self.last = now
+            self.title.set_markup(f'<span foreground="{info["color"]}" weight="bold">'
+                                  f'{GLib.markup_escape_text(info["name"])}</span>'
+                                  f' | {GLib.markup_escape_text(info["project"])}')
+            self.status.set_label(info['status'] + where)
+        self.face.queue_draw()
+
     def set_info(self, info, handlers):
         """`info`: role, pet, name, color, project, status, where, busy,
         can_split. `handlers`: face(cr, role, pet, w, h, moving), act(key)."""
-        sig = repr(info)
-        if sig == self.signature:
+        self.info = info                # la cara lee siempre lo último
+        shape = (info['role'], info['busy'], info['can_split'])
+        if shape == self.signature:
+            self._refresh(info)         # mismos botones: solo cambian los textos
             return
-        self.signature = sig
+        self.signature = shape
         while (child := self.get_first_child()) is not None:
             self.remove(child)
         face = Gtk.DrawingArea()
         face.set_content_width(40)
         face.set_content_height(40)
-        face.set_draw_func(lambda _da, cr, w, h: handlers['face'](cr, info['role'], info['pet'], w, h, info['busy']))
+        face.set_draw_func(lambda _da, cr, w, h: handlers['face'](
+            cr, self.info['role'], self.info['pet'], w, h, self.info['busy']))
+        self.face = face
         self.append(face)
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         title = Gtk.Label(xalign=0)
@@ -385,6 +477,7 @@ class ChatHead(Gtk.Box):
         text.append(status)
         text.set_hexpand(True)
         self.append(text)
+        self.title, self.status, self.last = title, status, (info['name'], info['project'], info['status'], where)
         links = [('split', 'Otra')] if info['can_split'] else []
         links += [('new', 'Nuevo')] + ([('stop', 'Detener')] if info['busy'] else []) + [('close', 'Cerrar')]
         for key, label in links:
@@ -724,20 +817,35 @@ class FocusPanel(Gtk.ScrolledWindow):
         self.set_halign(Gtk.Align.FILL)
         self.signature = None
         self.faces = []
+        self.refs = {'steps': []}
         self.set_visible(False)
 
     place = BoardPanel.place
     animate = BoardPanel.animate
 
+    def _refresh(self, d):
+        for key in ('label', 'summary'):
+            lab = self.refs.get(key)
+            if lab is not None and lab.get_label() != d[key]:
+                lab.set_label(d[key])
+        for (m, t, when), (mark, color, text, spent) in zip(self.refs['steps'], d['steps']):
+            if t.get_label() != text:
+                t.set_label(text)
+            if when.get_label() != spent:
+                when.set_label(spent)
+
     def set_focus(self, d, handlers):
         """`d`: role, name, color, pet, busy, label, summary, steps
         [(marca, color, texto, tiempo)], links [(tipo, clave, texto)], others
         [(rol, pet, activo)], hidden, empty. `handlers`: face, link, other."""
-        sig = repr(d)
-        if sig == self.signature:
+        shape = (d['role'], d['busy'], d['pet'], tuple(d['links']), tuple(d['others']),
+                 d['hidden'], d['empty'], len(d['steps']), tuple(s[0] for s in d['steps']))
+        if shape == self.signature:
+            self._refresh(d)            # el mismo desglose: solo cambian los textos
             return
-        self.signature = sig
+        self.signature = shape
         self.faces = []
+        self.refs = {'steps': []}
         root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[2])
         for side in ('top', 'bottom', 'start', 'end'):
             getattr(root, f'set_margin_{side}')(SPACE[2])
@@ -754,11 +862,12 @@ class FocusPanel(Gtk.ScrolledWindow):
         name = Gtk.Label()
         name.set_markup(f'<span foreground="{d["color"]}" weight="bold">{GLib.markup_escape_text(d["name"])}</span>')
         left.append(name)
-        for text in (d['label'], d['summary']):
+        for key, text in (('label', d['label']), ('summary', d['summary'])):
             lab = Gtk.Label(label=text)
             lab.add_css_class('dim-label')
             lab.set_ellipsize(Pango.EllipsizeMode.END)
             left.append(lab)
+            self.refs[key] = lab
         for kind, key, text in d['links']:
             btn = Gtk.Button(label=text)
             btn.add_css_class('elyares-btn')
@@ -792,6 +901,7 @@ class FocusPanel(Gtk.ScrolledWindow):
             row.append(t)
             row.append(when)
             mid.append(row)
+            self.refs['steps'].append((m, t, when))
         others = Gtk.FlowBox()              # envuelve: en una fila no cabrían en una ventana angosta
         others.set_selection_mode(Gtk.SelectionMode.NONE)
         others.set_max_children_per_line(8)

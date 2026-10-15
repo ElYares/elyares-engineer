@@ -19,7 +19,7 @@ try:
 except (ImportError, ValueError):       # sin gi o sin gtk4-layer-shell
     app = None
 
-from elyares import state
+from elyares import state, windowview
 from elyares.state import Model
 
 T = 1000.0
@@ -3215,6 +3215,43 @@ class Ventana(Dibujo):
         self.assertEqual(isl.pills_h('board'), app.PILLS_H)         # la isla suelta las conserva
         isl.windowed, isl.frame = True, mock.Mock()
         self.assertEqual(isl.pills_h('board'), 0)                   # la ventana tiene Fuentes y «?» arriba
+
+    def test_con_fuentes_o_ajustes_a_la_vista_la_isla_no_dibuja(self):
+        isl = self.isl
+        isl.frame, isl.windowed = mock.Mock(), True
+        isl.sources_open, isl.panel_open = True, ''
+        isl.chat_open = isl.projects_open = isl.wf_open = False
+        self.assertTrue(isl.window_covered())
+        isl.sources_open, isl.panel_open = False, 'settings'
+        self.assertTrue(isl.window_covered())
+        isl.chat_open = True                        # el chat tapa a esos paneles: se dibuja
+        self.assertFalse(isl.window_covered())
+        isl.chat_open, isl.sources_open, isl.panel_open = False, False, ''
+        self.assertFalse(isl.window_covered())      # sin panel que cubra, se dibuja el tablero
+
+    def test_en_la_ventana_la_isla_llega_a_su_tamano_sin_rebote(self):
+        isl = self.isl
+        isl.windowed, isl.w, isl.h, isl.vw, isl.vh = True, 10.0, 10.0, 5.0, 5.0
+        goal = isl.goal()
+        isl.da = mock.Mock()
+        isl.last_frame, isl.next_blink, isl.blink_until = None, 1e12, 0.0
+        isl.update_look = isl.update_region = isl.window_fit = isl.flows_follow = mock.Mock()
+        isl.hover = isl.override = False
+        isl.tip_pop, isl.slow_id, isl.ticking = 0.0, 0, True
+        isl.on_tick(isl.da, None)
+        self.assertEqual((isl.w, isl.h), goal)
+        self.assertEqual((isl.vw, isl.vh), (0.0, 0.0))
+
+    def test_la_ventana_no_encoge_por_un_contenido_un_poco_mas_corto(self):
+        isl = self.isl
+        isl.frame = None
+        isl.app_win = mock.Mock(get_height=lambda: 600, get_width=lambda: 700)
+        isl.window_resize = mock.Mock()
+        isl.fit_h, isl.fit_at, isl.fit_manual = 600, -100.0, False
+        isl.window_fit(content_h=500 - windowview.FIT_PAD, room=0)      # 100 px menos: se queda
+        isl.window_resize.assert_not_called()
+        isl.window_fit(content_h=300 - windowview.FIT_PAD, room=0)      # 300 menos: encoge
+        isl.window_resize.assert_called_once()
 
     def test_otra_vista_tapa_a_fuentes(self):
         isl = self.isl

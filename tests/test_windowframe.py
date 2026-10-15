@@ -84,16 +84,25 @@ class Marco(unittest.TestCase):
         self.frame.set_sessions(list(self.ROWS), 'a')
         self.assertIs(self.frame.sidebar.get_first_child(), first)
 
+    def test_cambiar_el_tiempo_retoca_el_texto_y_conserva_la_fila(self):
+        self.frame.set_sessions(self.ROWS, 'a')
+        first = self.frame.sidebar.get_first_child()
+        rows = [(self.ROWS[0][0], self.ROWS[0][1], self.ROWS[0][2], 'Trabaja · 9 min')] + self.ROWS[1:]
+        self.frame.set_sessions(rows, 'b')
+        self.assertIs(self.frame.sidebar.get_first_child(), first)
+        self.assertEqual(self.frame.session_refs['a']['sub'].get_label(), 'Trabaja · 9 min')
+        self.assertEqual(self.frame.sidebar.get_selected_row().sid, 'b')
+
     def test_a_480_la_barra_lateral_se_pliega_y_a_lo_ancho_vuelve(self):
         self.frame.fold(windowframe.FOLD_W - 1)
-        self.assertFalse(self.frame.sidebar.get_visible())
+        self.assertFalse(self.frame.side_box.get_visible())
         self.frame.fold(windowframe.FOLD_W)
-        self.assertTrue(self.frame.sidebar.get_visible())
+        self.assertTrue(self.frame.side_box.get_visible())
 
     def test_el_orden_de_tab_es_el_de_lectura_barra_lateral_y_contenido(self):
         order = [self.frame.header, self.frame.body]
-        self.assertIs(self.frame.body.get_first_child(), self.frame.sidebar)
-        self.assertIs(self.frame.sidebar.get_next_sibling(), self.frame.slot)
+        self.assertIs(self.frame.body.get_first_child(), self.frame.side_box)
+        self.assertIs(self.frame.side_box.get_next_sibling(), self.frame.slot)
         self.assertTrue(all(b.get_focusable() for b in self.frame.buttons.values()))
         self.assertTrue(order)
 
@@ -160,6 +169,22 @@ class Tablero(unittest.TestCase):
         buttons['Permitir'].emit('clicked')
         buttons['Denegar'].emit('clicked')
         self.assertEqual(self.log, [('decide', True), ('decide', False)])
+
+    def test_cambiar_solo_el_texto_no_reconstruye_ni_pierde_el_foco(self):
+        cards = [self.card('architect')]
+        self.board.set_cards(cards, [], self.handlers)
+        first = self.board.page.get_first_child()
+        again = [dict(cards[0], state='Trabaja · 1 min 06 s', steps=['otro paso'])]
+        self.board.set_cards(again, [], self.handlers)
+        self.assertIs(self.board.page.get_first_child(), first)
+        self.assertEqual(self.board.refs['architect']['state'].get_label(), 'Trabaja · 1 min 06 s')
+        self.assertEqual(self.board.refs['architect']['steps'][0].get_label(), 'otro paso')
+
+    def test_cambiar_quien_pide_permiso_si_reconstruye(self):
+        self.board.set_cards([self.card('architect')], [], self.handlers)
+        first = self.board.page.get_first_child()
+        self.board.set_cards([self.card('architect', ask=True)], [], self.handlers)
+        self.assertIsNot(self.board.page.get_first_child(), first)
 
     def test_sin_cambios_no_se_reconstruye(self):
         cards = [self.card('architect')]
