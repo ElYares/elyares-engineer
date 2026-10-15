@@ -44,6 +44,7 @@ class WindowView:
     windowed = False                # la isla, que se arma sin __init__ en las pruebas, la mira siempre
     app_win = None
     sources_open = False            # la vista Fuentes está a la vista
+    window_body = 0                 # alto extra que piden las tarjetas del tablero (lo usa body_h)
     sources_pick = 'claude'         # la fuente que muestra
     panel_open = ''                 # 'alerts' o 'settings' cuando una de esas vistas está a la vista
     help_win = None
@@ -181,6 +182,7 @@ class WindowView:
         self.frame.focus.place(0)
         if not self.board_widgets():
             board.place(0)
+            self.window_body = 0
             return
         s = self.tab_session()
         asking = self.asking()
@@ -203,6 +205,10 @@ class WindowView:
                                  ask=False, pet=pet))
         board.set_cards(cards, free, dict(face=self.window_face, pick=self.window_card, decide=self.window_decide))
         board.animate()
+        # Las tarjetas piden lo que miden: si no caben en el alto de siempre,
+        # el tablero crece y empuja lo de abajo en vez de esconder un botón.
+        width = board.get_width() or self.app_win.get_width() or MIN_W
+        self.window_body = max(0, board.natural_h(width) - app.TABS_H)
         board.place(app.TABS_H + self.body_h())
 
     def window_focus(self, app):
@@ -237,6 +243,7 @@ class WindowView:
         panel = self.frame.focus
         panel.set_focus(d, dict(face=self.window_face, link=self.window_link, other=self.window_card))
         panel.animate()
+        self.window_body = 0
         panel.place(app.TABS_H + self.body_h())
 
     def window_link(self, kind, key):

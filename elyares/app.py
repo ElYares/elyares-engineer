@@ -964,7 +964,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         """Alto del tablero bajo las pestañas: el de los cuatro o el de un
         desglose, que con su mini chat mide un poco más."""
         if not self.focused():
-            return BOARD_H
+            return max(BOARD_H, self.window_body) if self.windowed else BOARD_H
         return FOCUS_H + (chatview.MINI_H if self.briefing() else 0)
 
     def next_tab(self):
@@ -1206,6 +1206,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
 
     def pills_h(self, mode):
         """Alto de la franja de fuentes: solo cuando alguien abrió la isla a mano."""
+        if self.windowed and self.frame is not None:
+            return 0                    # en la ventana, Fuentes y la ayuda están en la barra de título
         by_hand = self.expanded or self.hover
         return PILLS_H if by_hand and mode in ('open', 'list', 'board') else 0
 
