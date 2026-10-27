@@ -1221,7 +1221,7 @@ class ChatView:
         su borde derecho, y ahí mismo su barra, más fuerte si se está escribiendo."""
         r, g, b = color
         mascot.rrect(cr, left, y, width, ih, 10)
-        cr.set_source_rgba(1, 1, 1, (.09 if typing else .05) * alpha)
+        cr.set_source_rgba(*themes.glow(), (.09 if typing else .05) * alpha)
         cr.fill_preserve()
         cr.save()
         cr.clip()
@@ -1310,14 +1310,14 @@ class ChatView:
         mascot.rrect(cr, x - 8, y, width, hh, 10)
         cr.set_source_rgba(*themes.get()['popup'], .97 * alpha)
         cr.fill_preserve()
-        cr.set_source_rgba(1, 1, 1, .12 * alpha)
+        cr.set_source_rgba(*themes.glow(), .12 * alpha)
         cr.set_line_width(1)
         cr.stroke()
         for i, (key, text, chosen) in enumerate(items):
             ry = y + 4 + i * CHAT_SUGGEST_H
             if self.over(x - 4, ry, width - 8, CHAT_SUGGEST_H):
                 mascot.rrect(cr, x - 4, ry, width - 8, CHAT_SUGGEST_H, 7)
-                cr.set_source_rgba(1, 1, 1, .08 * alpha)
+                cr.set_source_rgba(*themes.glow(), .08 * alpha)
                 cr.fill()
             color = self.chat_color() if chosen else mascot.rgba(self.ink('arg'))[:3]
             tx = x + 4
@@ -1449,7 +1449,7 @@ class ChatView:
             self.tip_text(cr, layout, x, mid - lh / 2, color, alpha, False)
             self.hits.append(('chat', key, x - 4, mid - lh / 2 - 3, lw + 8, lh + 6))
             x -= CHAT_LINK_GAP
-        cr.set_source_rgba(1, 1, 1, .07 * alpha)
+        cr.set_source_rgba(*themes.glow(), .07 * alpha)
         cr.rectangle(left, CHAT_HEAD + 2, width, 1)
         cr.fill()
 
@@ -1560,7 +1560,7 @@ class ChatView:
         shade = paint.mix(paint.ISLAND, agent, .16)
         ink = {role: self.ink(role) for role in ('cmd', 'str', 'flag', 'num', 'dim', 'arg', 'path', 'var')}
         ink['cmd'] = tone          # el comando de un bloque y el código en línea, del color del agente
-        return paint.markdown(text, tone, self.ink('head'), bold='#ffffff',
+        return paint.markdown(text, tone, self.ink('head'), bold=themes.strong(),
                               dim=self.colors['text'], accent=agent,
                               ink=ink, shade=shade, blocks=blocks, tables=tables, caps=self.chat_tech())
 
@@ -1657,7 +1657,7 @@ class ChatView:
             if entry.kind in ('you', 'flow', 'plan'):
                 # Tu bloque: a todo lo ancho, teñido, con la barra del color del agente.
                 cr.rectangle(left, y, width, hh)
-                cr.set_source_rgba(1, 1, 1, .055 * alpha)
+                cr.set_source_rgba(*themes.glow(), .055 * alpha)
                 cr.fill()
                 cr.rectangle(left, y, CHAT_BAR, hh)
                 cr.set_source_rgba(*color, alpha)
@@ -1790,7 +1790,7 @@ class ChatView:
                     continue                # una fila que el scroll deja fuera
                 if n > int(headed):         # bajo la cabecera no: ahí ya cambia el fondo
                     cr.rectangle(left, row_y, width, 1)
-                    cr.set_source_rgba(1, 1, 1, .08 * alpha)
+                    cr.set_source_rgba(*themes.glow(), .08 * alpha)
                     cr.fill()
                 cell_x = left
                 for cell, cell_w in zip(row, widths):
@@ -1980,7 +1980,7 @@ class ChatView:
         mascot.rrect(cr, left, y, width, hh, 12)
         cr.set_source_rgba(*themes.get()['popup'], .97 * alpha)
         cr.fill_preserve()
-        cr.set_source_rgba(1, 1, 1, .12 * alpha)
+        cr.set_source_rgba(*themes.glow(), .12 * alpha)
         cr.set_line_width(1)
         cr.stroke()
         cmd, soft = mascot.rgba(self.ink('cmd'))[:3], mascot.rgba(self.ink('text', .66))[:3]
@@ -1988,7 +1988,7 @@ class ChatView:
             ry = y + 4 + i * CHAT_SUGGEST_H
             if first + i == pick:
                 mascot.rrect(cr, left + 4, ry, width - 8, CHAT_SUGGEST_H, 8)
-                cr.set_source_rgba(1, 1, 1, .09 * alpha)
+                cr.set_source_rgba(*themes.glow(), .09 * alpha)
                 cr.fill()
             layout = self._layout(cr, f'{sigil}{name}', FONT_YOU, width - 24)
             nw, nh = layout.get_pixel_size()

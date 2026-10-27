@@ -15,6 +15,8 @@ import colorsys
 import html
 import re
 
+from . import themes
+
 ISLAND = '#050608'
 AMBER, RED, GREEN = '#e0a02e', '#e05252', '#35d07f'
 
@@ -52,7 +54,7 @@ def vivid(color, sat, light):
     de claro: para que un tema apagado no se pierda sobre un fondo translúcido."""
     r, g, b = (int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
     h, l, s = colorsys.rgb_to_hls(r, g, b)
-    rgb = colorsys.hls_to_rgb(h, max(l, light), min(1.0, s * sat))
+    rgb = colorsys.hls_to_rgb(h, min(l, 1 - light) if themes.is_light() else max(l, light), min(1.0, s * sat))
     return '#' + ''.join(f'{round(c * 255):02x}' for c in rgb)
 
 
@@ -62,16 +64,16 @@ def colors(palette=None):
     out = {role: _hex(palette.get(key)) or fallback for role, (key, fallback) in ROLES.items()}
     fg = out['arg']
     # Los temas apagados se pierden sobre la isla negra: se aclaran un poco.
-    out = {role: mix(c, '#ffffff', .12) for role, c in out.items()}
+    out = {role: mix(c, themes.strong(), .12) for role, c in out.items()}
     out.update({
         'text': mix(ISLAND, fg, .78),      # un detalle que no es código
         'dim': mix(ISLAND, fg, .48),       # verbos, operadores, la carpeta de una ruta
-        'ok': mix(_hex(palette.get('color10')) or '#35d07f', '#ffffff', .12),
+        'ok': mix(_hex(palette.get('color10')) or '#35d07f', themes.strong(), .12),
         'bad': RED,
         'pass': GREEN,
         # Contexto usado: verde, arena, ámbar, rojo.
-        'pct0': mix(_hex(palette.get('color10')) or '#35d07f', '#ffffff', .12),
-        'pct1': mix(_hex(palette.get('color11')) or '#e0af68', '#ffffff', .12),
+        'pct0': mix(_hex(palette.get('color10')) or '#35d07f', themes.strong(), .12),
+        'pct1': mix(_hex(palette.get('color11')) or '#e0af68', themes.strong(), .12),
         'pct2': AMBER,
         'pct3': RED,
     })
