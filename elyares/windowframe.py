@@ -45,11 +45,11 @@ ROLE_ROWS = _role_rows()
 def build_css():
     return f"""
 .elyares-slot {{ background: rgba({GLASS[0]}, 0.98); }}
-.elyares-slot.glass, .elyares-side.glass, .elyares-bar.glass, .elyares-sidebox.glass {{ background: rgba({GLASS[0]}, 0.5); }}
+.elyares-slot.glass, .elyares-side.glass, .elyares-bar.glass, .elyares-sidebox.glass {{ background: rgba({GLASS[0]}, {fonts.glass(.5)}); }}
 /* Con vidrio, también las tarjetas, pastillas y fuentes dejan pasar el fondo. */
-.glass .elyares-card, .glass .elyares-segments, .glass .elyares-pill {{ background: rgba({GLASS[1]}, 0.45); }}
+.glass .elyares-card, .glass .elyares-segments, .glass .elyares-pill {{ background: rgba({GLASS[1]}, {fonts.glass(.45)}); }}
 .glass .elyares-card:hover, .glass .elyares-card.raised, .glass .elyares-pill:hover, .glass .elyares-pill:checked,
-.glass .elyares-segments button:checked {{ background: rgba({GLASS[2]}, 0.6); }}
+.glass .elyares-segments button:checked {{ background: rgba({GLASS[2]}, {fonts.glass(.6)}); }}
 .glass .elyares-sources, .glass .elyares-sources viewport, .glass .elyares-chathead {{ background: transparent; }}
 .elyares-bar {{ background: {SURFACE[0]}; color: {INK}; border: none; box-shadow: none;
   border-bottom: 1px solid rgba({GLOW}, 0.06); }}
@@ -57,12 +57,12 @@ def build_css():
 .elyares-segments {{ background: {SURFACE[1]}; border-radius: {RADIUS[0]}px; padding: 2px;
   border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-segments button {{ background: transparent; color: {MUTED}; border: none; box-shadow: none;
-  padding: {SPACE[0]}px {SPACE[2]}px; border-radius: 6px; min-height: 0; }}
+  padding: {SPACE[0]}px {SPACE[2]}px; border-radius: 6px; min-height: 24px; min-width: 24px; }}
 .elyares-segments button:hover {{ background: rgba({GLOW}, 0.05); }}
 .elyares-segments button:checked {{ background: {SURFACE[2]}; color: {INK};
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }}
 .elyares-pill {{ background: {SURFACE[1]}; color: {MUTED}; border: none;
-  box-shadow: none; padding: {SPACE[0]}px {SPACE[2]}px; border-radius: {RADIUS[0]}px; min-height: 0; }}
+  box-shadow: none; padding: {SPACE[0]}px {SPACE[2]}px; border-radius: {RADIUS[0]}px; min-height: 24px; min-width: 24px; }}
 .elyares-pill:checked {{ background: {SURFACE[2]}; color: {INK}; }}
 .elyares-pill:hover {{ background: {SURFACE[2]}; }}
 /* La barra lateral: sección en versalitas y la fila elegida con el acento, como en macOS. */
@@ -81,13 +81,15 @@ def build_css():
   padding: {SPACE[1]}px {SPACE[3]}px; border: 1px solid rgba({GLOW}, 0.08); box-shadow: none; }}
 .elyares-btn:disabled {{ opacity: 0.4; }}
 .elyares-btn:hover {{ background: rgba({GLOW}, 0.14); }}
-.elyares-btn.compact {{ padding: {SPACE[0]}px {SPACE[1]}px; min-height: 0; }}
+.elyares-btn.compact {{ padding: {SPACE[0]}px {SPACE[1]}px; min-height: 24px; min-width: 24px; }}
 .elyares-btn.primary {{ background: {ACCENT}; color: {SURFACE[0]}; border: none; }}
 .elyares-btn.danger {{ background: {DANGER}; color: {SURFACE[0]}; border: none; }}
 .elyares-sources, .elyares-sources viewport {{ background: {SURFACE[0]}; color: {INK}; }}
 .elyares-chathead {{ background: {SURFACE[0]}; color: {INK}; padding: {SPACE[1]}px {SPACE[2]}px;
   border-bottom: 1px solid rgba({GLOW}, 0.06); }}
-.elyares-segments button:focus-visible, .elyares-side row:focus-visible, .elyares-btn:focus-visible {{
+.elyares-segments button:focus-visible, .elyares-side row:focus-visible, .elyares-btn:focus-visible,
+.elyares-pill:focus-visible, .elyares-card:focus-visible, entry:focus-within, textview:focus-within,
+dropdown:focus-within, switch:focus-visible, checkbutton:focus-visible, button:focus-visible {{
   outline: 2px solid {ACCENT}; outline-offset: 2px; }}
 """
 
@@ -813,10 +815,10 @@ class SettingsPanel(Gtk.ScrolledWindow):
         self.position = None
         self.set_visible(False)
 
-    def set_rows(self, rows, position, handlers, family=fonts.SYSTEM, theme_key=themes.DEFAULT):
+    def set_rows(self, rows, position, handlers, family=fonts.SYSTEM, theme_key=themes.DEFAULT, tired_scale=125):
         """`rows`: [(clave, texto, activo, nota)]; `position`: 0..100 o None.
-        `handlers`: toggle(clave), move(valor), theme(), font(familia), pick_theme(clave)."""
-        sig = repr((rows, position, family, theme_key))
+        `handlers`: toggle(clave), move(valor), theme(), font(familia), pick_theme(clave), tired_scale(%)."""
+        sig = repr((rows, position, family, theme_key, tired_scale))
         if sig == self.signature:
             return
         self.signature = sig
@@ -847,6 +849,14 @@ class SettingsPanel(Gtk.ScrolledWindow):
             scale.update_property([Gtk.AccessibleProperty.LABEL], ['Posición de la isla, de 0 a 100'])
             scale.connect('value-changed', lambda sc: sc.get_value() != position and handlers['move'](sc.get_value()))
             self.page.append(scale)
+        self.page.append(Gtk.Label(label='Tamaño de la vista cansada', xalign=0))
+        sizes = Gtk.DropDown.new_from_strings([f'{pct} %' for pct in fonts.TIRED_SCALES])
+        sizes.set_halign(Gtk.Align.START)
+        sizes.set_selected(fonts.TIRED_SCALES.index(tired_scale) if tired_scale in fonts.TIRED_SCALES else 0)
+        sizes.update_property([Gtk.AccessibleProperty.LABEL], ['Tamaño de la letra con la vista cansada'])
+        sizes.connect('notify::selected', lambda dd, _p: fonts.TIRED_SCALES[dd.get_selected()] != tired_scale
+                      and handlers['tired_scale'](fonts.TIRED_SCALES[dd.get_selected()]))
+        self.page.append(sizes)
         self.page.append(Gtk.Label(label='Tema', xalign=0))
         tema = Gtk.DropDown.new_from_strings([themes.label(key) for key in themes.keys()])
         tema.set_halign(Gtk.Align.START)

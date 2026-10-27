@@ -203,6 +203,16 @@ def glow():
     return (0, 0, 0) if is_light() else (1, 1, 1)
 
 
+def hot():
+    """El color del texto o del velo que se enciende (pasar el ratón, lo elegido): blanco en oscuro, la tinta en claro."""
+    return tuple_of(get()['ink']) if is_light() else (1, 1, 1)
+
+
+def sink():
+    """El color de lo que se hunde bajo un bloque (el fondo de un código): negro en oscuro, blanco en claro."""
+    return (1, 1, 1) if is_light() else (0, 0, 0)
+
+
 def strong():
     """El extremo con más contraste contra el fondo, para aclarar u oscurecer un color."""
     return '#000000' if is_light() else '#ffffff'

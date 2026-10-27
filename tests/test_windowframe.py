@@ -30,6 +30,31 @@ class Marco(unittest.TestCase):
         css.load_from_string(windowframe.CSS)
         self.assertEqual(errors, [])
 
+    def test_los_botones_miden_24_px_al_menos(self):
+        """WCAG 2.5.8: nada pulsable por debajo de 24x24."""
+        self.assertNotIn('min-height: 0', windowframe.CSS)
+        self.assertGreaterEqual(windowframe.CSS.count('min-height: 24px; min-width: 24px'), 3)
+
+    def test_el_foco_se_ve_en_todos_los_controles(self):
+        for selector in ('entry:focus-within', 'dropdown:focus-within', 'switch:focus-visible', '.elyares-pill:focus-visible'):
+            self.assertIn(selector, windowframe.CSS)
+
+    def test_ajustes_ofrece_los_tres_tamanos_de_la_vista_cansada(self):
+        picked = []
+        handlers = dict(toggle=lambda k: None, move=lambda v: None, theme=lambda: None, font=lambda f: None,
+                        pick_theme=lambda t: None, tired_scale=picked.append)
+        self.frame.settings.set_rows([], None, handlers, tired_scale=150)
+        drops = []
+        child = self.frame.settings.page.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.DropDown):
+                drops.append(child)
+            child = child.get_next_sibling()
+        sizes = drops[0]                      # el primero, antes del tema y de la letra
+        self.assertEqual(sizes.get_selected(), 1)
+        sizes.set_selected(2)
+        self.assertEqual(picked, [200])
+
     def test_el_texto_contrasta_4_5_con_cada_superficie(self):
         def lum(h):
             c = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]

@@ -58,6 +58,11 @@ def vivid(color, sat, light):
     return '#' + ''.join(f'{round(c * 255):02x}' for c in rgb)
 
 
+def legible(color):
+    """Un #rrggbb que se lea sobre un fondo claro: se oscurece. En un tema oscuro queda igual."""
+    return vivid(color, 1.3, .66) if themes.is_light() else color
+
+
 def colors(palette=None):
     """Papel -> #rrggbb. `palette` es lo que trae colors.toml del tema, o nada."""
     palette = palette or {}
@@ -433,7 +438,7 @@ def _code_line(line, lang, mono):
     """Una línea de un bloque de código, resaltada. El fondo del bloque lo
     pinta la isla detrás de todas sus líneas."""
     body = ''.join(f'<span foreground="{color}"{' style="italic"' if italic else ''}>'
-                   f'{html.escape(text, quote=False)}</span>' for text, color, italic in code_colors(lang, line))
+                   f'{html.escape(text, quote=False)}</span>' for text, color, italic in ((t, legible(c), i) for t, c, i in code_colors(lang, line)))
     return f'{mono} {body} </span>'
 
 

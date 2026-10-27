@@ -277,6 +277,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.settings = settings.load()
         fonts.use(self.settings['font'])
         themes.use(self.settings['theme'])
+        fonts.use_scale(self.settings['tired_scale'])
         self.set_tired(self.settings['tired_eyes'])
         self.load_theme()
         # Abierta a mano, con un clic o con elyares-ctl. Fijada (preferencia
@@ -565,11 +566,12 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         look = themes.get()
         ISLAND_BG = (*themes.tuple_of(look['island']), ISLAND_BG[3])
         TITLE_COLOR = (*themes.tuple_of(look['ink']), 1)
+        chatview.TITLE = workflowview.TITLE = TITLE_COLOR[:3]
         MUTED_NORMAL, MUTED_TIRED = look['island_muted'], look['island_tired']
         MUTED_COLOR = MUTED_TIRED if fonts.tired else MUTED_NORMAL
         SEP_COLOR = '#%02x%02x%02x' % tuple(round(c * 255) for c in MUTED_NORMAL[:3])
         paint.ISLAND = look['island']
-        fonts.TIRED_MUTED = look['tired']
+        fonts.TIRED_MUTED, fonts.TIRED_INK = look['tired'], look['ink']
         windowframe.use_theme()
         palette = themes.palette()
         mascot.set_accent(palette.get('accent'))
@@ -1632,7 +1634,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.arc(x0 + r, h - r, r, math.pi / 2, math.pi)
         cr.close_path()
         glass = self.settings['glass']
-        cr.set_source_rgba(*ISLAND_BG[:3], (WIN_GLASS_ALPHA if self.windowed else GLASS_ALPHA) if glass else ISLAND_BG[3])
+        cr.set_source_rgba(*ISLAND_BG[:3], fonts.glass(WIN_GLASS_ALPHA if self.windowed else GLASS_ALPHA) if glass else ISLAND_BG[3])
         cr.fill_preserve()
         # Una ventana no lleva el filo claro: ya tiene su borde de Hyprland.
         return cr.copy_path() if glass and not self.windowed else None
@@ -2385,13 +2387,13 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             now = s is shown
             over = self.over(x, top, cw, REPLY_CHIPS_H - 4)
             mascot.rrect(cr, x, top, cw, REPLY_CHIPS_H - 4, 8)
-            cr.set_source_rgba(*(color if now else (1, 1, 1)), (.28 if now else .12 if over else .05) * alpha)
+            cr.set_source_rgba(*(color if now else themes.hot()), (.28 if now else .12 if over else .05) * alpha)
             cr.fill()
             cr.arc(x + 11, top + (REPLY_CHIPS_H - 4) / 2, 3.5, 0, 2 * math.pi)
             cr.set_source_rgba(*color, alpha)
             cr.fill()
             cr.move_to(x + 20, top + (REPLY_CHIPS_H - 4 - lh) / 2)
-            cr.set_source_rgba(*((1, 1, 1) if now or over else rgb(self.colors['dim'])), alpha)
+            cr.set_source_rgba(*(themes.hot() if now or over else rgb(self.colors['dim'])), alpha)
             PangoCairo.show_layout(cr, layout)
             x += cw + 6
 

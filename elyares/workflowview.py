@@ -878,14 +878,14 @@ class WorkflowView:
         y rojo en lo que salió o falló, ámbar en lo que falta guardar."""
         colors = self.colors
         if role == 'cmd':
-            return mascot.accent(state.MAIN_ROLE)
+            return paint.legible(mascot.accent(state.MAIN_ROLE))
         if role == 'flag':
-            return colors['pct2']
+            return paint.legible(colors['pct2'])
         if role == 'head':
             return paint.mix(colors['text'], themes.strong(), .4)
         if role == 'text':
             return colors['text'] if light is not None and light < .66 else paint.mix(colors['text'], themes.strong(), .35)
-        return colors[role]
+        return paint.legible(colors[role])
 
     def wf_put(self, cr, text, font, x, y, color, alpha, width=None, align=0.0, lines=1):
         """`put` del panel: en modo vidrio, con la sombra de la burbuja debajo
@@ -905,7 +905,7 @@ class WorkflowView:
         if right:
             x -= lw
         over = on and self.over(x - 4, y - 4, lw + 8, lh + 8)
-        color = (1, 1, 1) if over else tone or rgb(self.wf_ink('text', .7))
+        color = themes.hot() if over else tone or rgb(self.wf_ink('text', .7))
         self.tip_text(cr, layout, x, y, color, alpha * (1 if on else .35), self.settings['glass'])
         if on:
             self.hits.append(('wf', key, x - 4, y - 4, lw + 8, lh + 8))
@@ -1016,7 +1016,7 @@ class WorkflowView:
         line = self._layout(cr, 'X', FONT_WF_FIELD).get_pixel_size()[1]
         tx, ty, tw = x + WF_FIELD_INSET, y + (WF_FIELD_H - line) / 2, width - 2 * WF_FIELD_INSET
         if not text:
-            self.wf_put(cr, hint, FONT_WF, tx, ty + 1, (1, 1, 1), .34 * alpha, width=tw)
+            self.wf_put(cr, hint, FONT_WF, tx, ty + 1, themes.hot(), .34 * alpha, width=tw)
         elif not active:
             self.wf_put(cr, text, FONT_WF_FIELD, tx, ty, rgb(self.wf_ink('arg')), alpha, width=tw)
         if active:
@@ -1073,7 +1073,7 @@ class WorkflowView:
             lw, lh = layout.get_pixel_size()
             over = self.over(x, y + 4, lw + 20, WF_FIELD_H - 2)
             mascot.rrect(cr, x, y + 4, lw + 20, WF_FIELD_H - 2, (WF_FIELD_H - 2) / 2)
-            tint = rgb(mascot.accent(state.MAIN_ROLE)) if chosen else (1, 1, 1)
+            tint = rgb(mascot.accent(state.MAIN_ROLE)) if chosen else themes.hot()
             cr.set_source_rgba(*tint, (.24 if chosen else .11 if over else .06) * alpha)
             cr.fill()
             self.tip_text(cr, layout, x + 10, y + 4 + (WF_FIELD_H - 2 - lh) / 2, TITLE if chosen else soft, alpha, self.settings['glass'])
@@ -1168,7 +1168,7 @@ class WorkflowView:
         """Una barra al pie del panel: una pregunta, o lo que no se pudo
         guardar con su referencia, y sus botones. Devuelve dónde acaba."""
         mascot.rrect(cr, left, y, width, WF_BAR, 12)
-        cr.set_source_rgba(*(rgb(self.wf_ink('bad')) if bad else (1, 1, 1)), (.13 if bad else .07) * alpha)
+        cr.set_source_rgba(*(rgb(self.wf_ink('bad')) if bad else themes.hot()), (.13 if bad else .07) * alpha)
         cr.fill()
         x = left + width - 10
         for key, label, primary in reversed(buttons):
