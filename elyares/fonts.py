@@ -35,9 +35,14 @@ CHOICES = (
 )
 _BY_KEY = {c[0]: c for c in CHOICES}
 
+# Cuánto agranda la vista cansada, en %: los tres niveles que ofrece Ajustes.
+TIRED_SCALES = (125, 150, 200)
 TIRED_SCALE = 1.25
+TIRED_GLASS = .9      # el mínimo de opacidad del vidrio con la vista cansada
 # Los colores apagados de los widgets, más claros, para que se lean con la vista cansada.
 TIRED_MUTED = '#c9d2ea'
+# El texto de lo elegido (pestaña, fila): la tinta del tema, no un blanco fijo.
+TIRED_INK = '#ffffff'
 
 current = SYSTEM
 tired = False
@@ -53,10 +58,23 @@ def use(key):
     return current
 
 
+def use_scale(pct):
+    """El nivel de la vista cansada (125, 150 o 200 %); otro valor deja 125."""
+    global TIRED_SCALE
+    TIRED_SCALE = (pct if pct in TIRED_SCALES else TIRED_SCALES[0]) / 100
+    return round(TIRED_SCALE * 100)
+
+
 def use_tired(on):
     global tired
     tired = bool(on)
     return tired
+
+
+def glass(alpha):
+    """La opacidad de un fondo en vidrio: con la vista cansada, casi opaco, porque lo que haya
+    detrás (un fondo claro tras un tema oscuro) se come el contraste del texto."""
+    return max(alpha, TIRED_GLASS) if tired else alpha
 
 
 def scaled(size):
@@ -92,9 +110,12 @@ def css():
         pct = round(TIRED_SCALE * 100)
         out += (f'label, button, entry, dropdown {{ font-size: {pct}%; }}\n'
                 f'.elyares-section {{ font-size: 14px; }}\n'
+                f'.elyares-segments button, .elyares-pill {{ font-size: {min(pct, 150)}%; }}\n'
                 f'.elyares-segments button, .elyares-pill, .elyares-side, .elyares-sidebox {{ color: {TIRED_MUTED}; }}\n'
-                f'.elyares-segments button:checked, .elyares-pill:checked, .elyares-side row:selected {{ color: #ffffff; }}\n'
+                f'.elyares-segments button:checked, .elyares-pill:checked, .elyares-side row:selected {{ color: {TIRED_INK}; }}\n'
                 f'.dim-label, .elyares-section {{ color: {TIRED_MUTED}; opacity: 1; }}\n'
-                f'.elyares-btn:focus-visible, .elyares-segments button:focus-visible, .elyares-side row:focus-visible '
+                f'.elyares-btn:focus-visible, .elyares-segments button:focus-visible, .elyares-side row:focus-visible, '
+                f'.elyares-pill:focus-visible, .elyares-card:focus-visible, entry:focus-within, textview:focus-within, '
+                f'dropdown:focus-within, switch:focus-visible, checkbutton:focus-visible, button:focus-visible '
                 f'{{ outline-width: 3px; }}\n')
     return out

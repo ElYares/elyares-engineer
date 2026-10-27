@@ -30,6 +30,16 @@ class Temas(unittest.TestCase):
         if HAVE_DISPLAY:
             windowframe.use_theme()
 
+    def test_con_vidrio_y_vista_cansada_el_texto_se_lee_sobre_el_peor_fondo(self):
+        """El vidrio de la vista cansada (casi opaco) sobre el peor fondo: blanco tras un tema oscuro, negro tras uno claro."""
+        from elyares import fonts
+        for name, look in themes.THEMES.items():
+            themes.use(name)
+            worst = '#000000' if themes.is_light() else '#ffffff'
+            bg = paint.mix(worst, look['surface'][0], fonts.TIRED_GLASS)
+            for ink in (look['ink'], look['muted'], look['tired']):
+                self.assertGreaterEqual(contrast(ink, bg), 4.5, (name, ink, bg))
+
     def test_uno_que_no_existe_cae_en_el_de_siempre(self):
         self.assertEqual(themes.use('no-existe'), themes.DEFAULT)
         self.assertEqual(themes.use('moonfly'), 'moonfly')

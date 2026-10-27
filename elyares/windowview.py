@@ -451,12 +451,13 @@ class WindowView:
                     ('pinned', 'Isla fijada', bool(st['pinned']), 'De la isla suelta; la ventana ya está abierta.'),
                     ('chat_tech', 'Chat técnico', bool(st['chat_tech']), 'Bloques y tablas con borde fino y títulos en mayúsculas.'),
                     ('tired_eyes', 'Vista cansada', bool(st['tired_eyes']),
-                     'Letra un 25 % más grande y más gruesa, y textos apagados más claros.')]
+                     'Letra más grande y más gruesa, y textos apagados más claros (tamaño abajo).')]
             rows += [(key, f'Fuente: {label}', bool(st[key]), '') for key, label in sources.SOURCES if key != 'claude']
             frame.settings.set_rows(rows, st['position'], dict(toggle=self.window_setting, move=self.move,
                                                                theme=self.window_theme, font=self.window_font,
+                                                               tired_scale=self.window_tired_scale,
                                                                pick_theme=self.pick_theme),
-                                    fonts.current, themes.current)
+                                    fonts.current, themes.current, round(fonts.TIRED_SCALE * 100))
 
     def window_tmux(self):
         """Las sesiones de tmux con el estado de los Claude de cada ventana."""
@@ -506,12 +507,24 @@ class WindowView:
             self.set_tired(not self.settings['tired_eyes'])
             self.settings['tired_eyes'] = fonts.tired
             settings.save(self.settings)
+            windowframe.use_theme()          # el vidrio cambia de opacidad
             windowframe.load_fonts()
             self.chat_theme()
             self.ensure_tick()
             self.overlay.queue_draw()
         else:
             self.toggle_source(key)
+
+    def window_tired_scale(self, pct):
+        """Cambia cuánto agranda la vista cansada (125, 150 o 200 %) y lo guarda."""
+        if fonts.use_scale(pct) == self.settings['tired_scale']:
+            return
+        self.settings['tired_scale'] = round(fonts.TIRED_SCALE * 100)
+        settings.save(self.settings)
+        windowframe.load_fonts()
+        self.chat_theme()
+        self.ensure_tick()
+        self.overlay.queue_draw()
 
     def window_font(self, family):
         """Cambia la letra de la app, en la isla y en la ventana, y la guarda."""

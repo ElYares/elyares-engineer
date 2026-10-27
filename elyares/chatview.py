@@ -1140,7 +1140,7 @@ class ChatView:
 
     def chat_color(self):
         """El color del agente con el que se habla."""
-        return mascot.rgba(mascot.accent(self.chat_role()))[:3]
+        return mascot.rgba(paint.legible(mascot.accent(self.chat_role())))[:3]
 
     def chat_pet(self):
         c = self.chat
@@ -1245,7 +1245,7 @@ class ChatView:
             name = self.chat.name if self.chat is not None else state.MAIN_AGENT
             hint = (PLACEHOLDER.format(agent=name) if self.chat_typing
                     else 'Clic aquí, o elyares-ctl chat, para escribir')
-            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, (1, 1, 1), .38 * alpha,
+            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, themes.hot(), .38 * alpha,
                      width=width - CHAT_INPUT_INSET - 12)
 
     def draw_chat_status(self, cr, left, y, width, alpha):
@@ -1272,7 +1272,7 @@ class ChatView:
                 cr.set_source_rgba(*color, .18 * alpha)
                 cr.fill()
             over = key is not None and self.over(x - 4, y - 3, tw + 8, th + 6)
-            self.tip_text(cr, layout, x, y, (1, 1, 1) if over else color, alpha, False)
+            self.tip_text(cr, layout, x, y, themes.hot() if over else color, alpha, False)
             if key is not None:
                 self.hits.append(('chat', key, x - 4, y - 3, tw + 8, th + 6))
                 anchors[key] = x
@@ -1392,7 +1392,7 @@ class ChatView:
                              int(ih - 2 * CHAT_INPUT_PAD))
         if not text:
             hint = f'Dile a {agent} qué hacer' if typing else f'Clic aquí para encargarle algo a {agent}'
-            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, (1, 1, 1), .38 * alpha,
+            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, themes.hot(), .38 * alpha,
                      width=text_w)
         soft = mascot.rgba(self.ink('text', .66))[:3]
         c = self.chats.get(self.chat_key(agent, self.tab_place(s)))
@@ -1423,7 +1423,7 @@ class ChatView:
         pick_x = left + width - self.chat_links_w(cr, links) - 18
         project = self.chat.project if self.chat is not None else state.project_name(chat.active_cwd())
         name = self.chat.name if self.chat is not None else state.MAIN_AGENT
-        text, markup = self.who(name, project, mascot.accent(role))
+        text, markup = self.who(name, project, paint.legible(mascot.accent(role)))
         tx = left + CHAT_FACE + 10
         room = pick_x - tx - 12
         self.put(cr, text, 'Sans Semi-Bold 11', tx, mid - 17, TITLE, alpha, width=room, markup=markup)
@@ -1435,7 +1435,7 @@ class ChatView:
             layout = self._layout(cr, f'· {where} ▾', FONT_STEP, room - sw - 6)
             ww, wh = layout.get_pixel_size()
             over = self.over(tx + sw + 2, mid, ww + 8, wh + 6)
-            tone = (1, 1, 1) if over else mascot.rgba(self.ink('text', .62))[:3]
+            tone = themes.hot() if over else mascot.rgba(self.ink('text', .62))[:3]
             self.tip_text(cr, layout, tx + sw + 6, mid + 3, tone, alpha, False)
             self.hits.append(('chat', 'project', tx + sw + 2, mid, ww + 8, wh + 6))
         x = left + width
@@ -1445,7 +1445,7 @@ class ChatView:
             x -= lw
             over = self.over(x - 4, mid - lh / 2 - 3, lw + 8, lh + 6)
             color = (mascot.rgba(self.ink('bad'))[:3] if key == 'stop'
-                     else (1, 1, 1) if over else mascot.rgba(self.ink('text', .7))[:3])
+                     else themes.hot() if over else mascot.rgba(self.ink('text', .7))[:3])
             self.tip_text(cr, layout, x, mid - lh / 2, color, alpha, False)
             self.hits.append(('chat', key, x - 4, mid - lh / 2 - 3, lw + 8, lh + 6))
             x -= CHAT_LINK_GAP
@@ -1488,14 +1488,14 @@ class ChatView:
             w = min(room, lw + 16 + (14 if closable else 0))
             over = self.over(x, y, w, CHAT_TABS_H - 4)
             mascot.rrect(cr, x, y, w, CHAT_TABS_H - 4, 8)
-            cr.set_source_rgba(*(color if now else (1, 1, 1)), (.28 if now else .12 if over else .05) * alpha)
+            cr.set_source_rgba(*(color if now else themes.hot()), (.28 if now else .12 if over else .05) * alpha)
             cr.fill()
             tone = (mascot.rgba(self.ink('bad'))[:3] if c.asking else mascot.rgba(self.ink('cmd'))[:3] if c.busy
-                    else (1, 1, 1) if now or over else mascot.rgba(self.ink('text', .7))[:3])
+                    else themes.hot() if now or over else mascot.rgba(self.ink('text', .7))[:3])
             self.tip_text(cr, layout, x + 8, y + (CHAT_TABS_H - 4 - lh) / 2, tone, alpha, False)
             if closable:
                 gone = self.over(x + w - 20, y, 20, CHAT_TABS_H - 4)
-                self.put(cr, '×', FONT_LINK, x + w - 16, y + 3, (1, 1, 1) if gone else mascot.rgba(self.ink('text', .55))[:3],
+                self.put(cr, '×', FONT_LINK, x + w - 16, y + 3, themes.hot() if gone else mascot.rgba(self.ink('text', .55))[:3],
                          alpha)
                 self.hits.append(('chat', f'drop:{i}', x + w - 20, y, 20, CHAT_TABS_H - 4))
             self.hits.append(('chat', f'conv:{i}', x, y, w - (20 if closable else 0), CHAT_TABS_H - 4))
@@ -1507,7 +1507,7 @@ class ChatView:
     def chat_layout(self, cr, index, entry, width):
         """Lo que mide y dibuja una cosa de la conversación, guardado mientras
         no cambie: (layout, alto que ocupa, papel, sus tablas ya medidas)."""
-        key = (index, entry.kind, entry.text, entry.images, width, self.chat_tech(), fonts.tired, fonts.current)
+        key = (index, entry.kind, entry.text, entry.images, width, self.chat_tech(), fonts.tired, fonts.TIRED_SCALE, fonts.current)
         hit = self.chat_cache.get(key)
         if hit is not None:
             PangoCairo.update_layout(cr, hit[0])
@@ -1601,7 +1601,7 @@ class ChatView:
         con cabecera). La columna que cabe en su parte del ancho se queda con
         lo suyo; las demás se reparten lo que sobra y parten su texto. Se
         guarda: mientras Claude sigue escribiendo debajo, la tabla no cambia."""
-        key = (font, width, str(table), fonts.tired, fonts.current)
+        key = (font, width, str(table), fonts.tired, fonts.TIRED_SCALE, fonts.current)
         if key in self.chat_cache:
             return self.chat_cache[key]
         rows, align, headed = table
@@ -1687,7 +1687,7 @@ class ChatView:
             y -= CHAT_GAP
         cr.restore()
         if self.chat_scroll > 0:
-            self.put(cr, '↓ más abajo', FONT_STEP, left + width, bottom - 14, (1, 1, 1), .45 * alpha, align=1.0)
+            self.put(cr, '↓ más abajo', FONT_STEP, left + width, bottom - 14, themes.hot(), .45 * alpha, align=1.0)
 
     @staticmethod
     def code_spans(layout):
@@ -1713,7 +1713,7 @@ class ChatView:
         mascot.rrect(cr, left, top, width, height, radius)
         cr.save()
         cr.clip()
-        cr.set_source_rgba(0, 0, 0, .34 * alpha)
+        cr.set_source_rgba(*themes.sink(), .34 * alpha)
         cr.paint()
         fade = cairo.LinearGradient(left + width, 0, left, 0)
         fade.add_color_stop_rgba(0, r, g, b, .30 * alpha)
@@ -1730,7 +1730,7 @@ class ChatView:
     def draw_outlined(cr, left, top, width, height, color, alpha, radius=4):
         """Un bloque de borde fino del color del agente sobre un fondo oscuro, sin degradado."""
         mascot.rrect(cr, left, top, width, height, radius)
-        cr.set_source_rgba(0, 0, 0, .30 * alpha)
+        cr.set_source_rgba(*themes.sink(), .30 * alpha)
         cr.fill_preserve()
         fade = cairo.LinearGradient(left, 0, left + width, 0)
         fade.add_color_stop_rgba(0, *color, .26 * alpha)
@@ -1767,7 +1767,7 @@ class ChatView:
             cr.save()
             mascot.rrect(cr, left, top, width, height, 6)
             cr.clip()
-            cr.set_source_rgba(0, 0, 0, .26 * alpha)
+            cr.set_source_rgba(*themes.sink(), .26 * alpha)
             cr.paint()
             if headed:
                 cr.rectangle(left, top, width, heights[0])
@@ -1821,7 +1821,7 @@ class ChatView:
             lw, lh = link.get_pixel_size()
             x = right - lw - 10
             over = self.over(x - 4, line_y - 2, lw + 8, lh + 4)
-            color = mascot.rgba(self.ink('pass'))[:3] if copied else (1, 1, 1) if over else soft
+            color = mascot.rgba(self.ink('pass'))[:3] if copied else themes.hot() if over else soft
             self.tip_text(cr, link, x, line_y, color, alpha, False)
             self.hits.append(('chat', f'code:{index}:{n}', x - 4, line_y - 2, lw + 8, lh + 4))
 
@@ -1870,7 +1870,7 @@ class ChatView:
             x -= lw
             over = self.over(x - 4, y - 3, lw + 8, lh + 6)
             lit = label.endswith('copiado ✓')
-            color = mascot.rgba(self.ink('pass'))[:3] if lit else (1, 1, 1) if over else soft
+            color = mascot.rgba(self.ink('pass'))[:3] if lit else themes.hot() if over else soft
             self.tip_text(cr, layout, x, y, color, alpha, False)
             self.hits.append(('chat', key, x - 4, y - 3, lw + 8, lh + 6))
             x -= CHAT_LINK_GAP
@@ -1928,10 +1928,10 @@ class ChatView:
             self.buttons[key] = (left + 8, row, width - 16, CHAT_OPT_H)
             over = self.over(left + 8, row, width - 16, CHAT_OPT_H)
             mascot.rrect(cr, left + 8, row, width - 16, CHAT_OPT_H, 8)
-            cr.set_source_rgba(*(color if marked else (1, 1, 1)), (.30 if marked else .12 if over else .05) * alpha)
+            cr.set_source_rgba(*(color if marked else themes.hot()), (.30 if marked else .12 if over else .05) * alpha)
             cr.fill()
             mark = ('☑ ' if marked else '☐ ') if q['multi'] else ''
-            self.put(cr, mark + label, FONT_LINK, left + 18, row + 5, (1, 1, 1) if over or marked else ink, alpha,
+            self.put(cr, mark + label, FONT_LINK, left + 18, row + 5, themes.hot() if over or marked else ink, alpha,
                      width=width - 36)
             if desc:
                 self.put(cr, desc, FONT_STEP, left + 18, row + 21, soft, alpha, width=width - 36)
