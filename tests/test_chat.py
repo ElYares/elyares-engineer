@@ -459,12 +459,21 @@ class Markdown(unittest.TestCase):
         self.assertEqual(blocks, [('python', 'import os  # c\nx = 3'), ('', '$ ls -la')])
         self.assertEqual((out.count(paint.CODE_MARK), out.count(paint.CODE_END)), (2, 2))   # arriba y abajo de cada bloque
         self.assertEqual(out.count('background="#101010"'), 1)  # solo el inline: el fondo del bloque lo pinta la isla
-        self.assertIn('<span foreground="#aabbcc">import</span>', out)
+        moonfly = paint.MOONFLY
+        self.assertIn(f'<span foreground="{moonfly["keyword"]}">import</span>', out)   # los colores son los de nvim
+        self.assertIn(f'<span foreground="{moonfly["comment"]}" style="italic"># c</span>', out)
 
-    def test_un_papel_que_el_tema_no_trae_no_rompe_el_dibujo(self):
-        ink = {'cmd': '#111111', 'arg': '#222222'}
-        out = paint.markdown('```bash\ncd ~/x --f $HOME 3\n```', ink=ink, shade='#000000')
-        self.assertIn('foreground="#222222"', out)
+    def test_el_codigo_de_rust_sale_con_los_colores_de_nvim(self):
+        moonfly = paint.MOONFLY
+        colors = {text: color for text, color, _ in paint.code_colors('rust', 'pub fn run() -> i64 { println!("a") }')}
+        self.assertEqual(colors['pub'], moonfly['keyword'])
+        self.assertEqual(colors['run'], moonfly['func'])
+        self.assertEqual(colors['i64'], moonfly['type'])
+        self.assertEqual(colors['println'], moonfly['macro'])
+        self.assertEqual(colors['"a"'], moonfly['string'])
+
+    def test_un_bloque_sin_lenguaje_conocido_sale_en_blanco(self):
+        self.assertEqual(paint.code_colors('brainfuck', '+-[]'), [('+-[]', paint.MOONFLY['white'], False)])
 
     def test_un_bloque_sin_cerrar_tambien_se_copia(self):
         blocks = []

@@ -165,6 +165,9 @@ def proc_alive(proc):
 
 
 def do_not_disturb():
-    if not shutil.which('swaync-client'):
+    # elyares-notify es quien tiene hoy org.freedesktop.Notifications. Preguntarle
+    # a swaync-client (parado) activaba su servicio por D-Bus en cada sondeo y
+    # nunca devolvia true.
+    if not shutil.which('elyares-notify'):
         return False
-    return _run('swaync-client', '-D', '-sw') == 'true'
+    return _run('elyares-notify', 'dnd', 'status') == 'true'

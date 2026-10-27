@@ -8,9 +8,12 @@ arma los widgets; qué hace cada botón lo decide quien lo crea con `on_view`.
 
 from gi.repository import Gdk, GLib, Gtk, Pango
 
+from . import fonts, mascot, themes
+
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
-         ('projects', 'Proyectos'), ('sources', 'Fuentes'), ('settings', 'Ajustes'))
+         ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('sources', 'Fuentes'),
+         ('settings', 'Ajustes'))
 SIDEBAR_W = 180
 FOLD_W = 640                    # más angosta que esto, la barra lateral se pliega y el texto conserva su tamaño
 
@@ -23,10 +26,30 @@ SURFACE = ('#050608', '#10131a', '#1a1f2b')     # ventana, tarjeta, tarjeta elev
 INK, MUTED = '#f2f5ff', '#8f9ab8'               # sobre cualquiera de las tres
 ACCENT = '#6ea8ff'                              # foco y botón primario
 DANGER = '#ff6b6b'                              # el aviso rojo, no del tema
+GLASS = ('5, 6, 8', '16, 19, 26', '26, 31, 43')     # lo mismo en rgb, para el vidrio
+ACCENT_RGB = '110, 168, 255'
 
-CSS = f"""
-.elyares-slot {{ background: rgba(5, 6, 8, 0.98); }}
-.elyares-slot.glass, .elyares-side.glass, .elyares-bar.glass, .elyares-sidebox.glass {{ background: rgba(5, 6, 8, 0.5); }}
+
+def _role_rows():
+    """El agente elegido en la barra lateral, con el fondo de su color."""
+    rows = []
+    for role in mascot.ROLES:
+        r, g, b = (round(c * 255) for c in mascot.rgba(mascot.accent(role))[:3])
+        rows.append(f'.elyares-side row.role-{role}:selected {{ background: rgba({r}, {g}, {b}, 0.28); }}')
+    return '\n'.join(rows) + '\n'
+
+
+ROLE_ROWS = _role_rows()
+
+def build_css():
+    return f"""
+.elyares-slot {{ background: rgba({GLASS[0]}, 0.98); }}
+.elyares-slot.glass, .elyares-side.glass, .elyares-bar.glass, .elyares-sidebox.glass {{ background: rgba({GLASS[0]}, 0.5); }}
+/* Con vidrio, también las tarjetas, pastillas y fuentes dejan pasar el fondo. */
+.glass .elyares-card, .glass .elyares-segments, .glass .elyares-pill {{ background: rgba({GLASS[1]}, 0.45); }}
+.glass .elyares-card:hover, .glass .elyares-card.raised, .glass .elyares-pill:hover, .glass .elyares-pill:checked,
+.glass .elyares-segments button:checked {{ background: rgba({GLASS[2]}, 0.6); }}
+.glass .elyares-sources, .glass .elyares-sources viewport, .glass .elyares-chathead {{ background: transparent; }}
 .elyares-bar {{ background: {SURFACE[0]}; color: {INK}; border: none; box-shadow: none;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06); }}
 /* Las vistas, como el control segmentado de macOS: una pastilla con la activa elevada. */
@@ -48,8 +71,8 @@ CSS = f"""
 .elyares-side {{ background: transparent; color: {INK}; padding: {SPACE[0]}px {SPACE[1]}px; }}
 .elyares-side row {{ border-radius: {RADIUS[0]}px; padding: {SPACE[1]}px {SPACE[1]}px; margin: 1px 0; }}
 .elyares-side row:hover {{ background: rgba(255, 255, 255, 0.05); }}
-.elyares-side row:selected {{ background: rgba(110, 168, 255, 0.22); color: {INK}; }}
-.elyares-card {{ background: {SURFACE[1]}; color: {INK}; border-radius: {RADIUS[1]}px;
+.elyares-side row:selected {{ background: rgba({ACCENT_RGB}, 0.22); color: {INK}; }}
+{ROLE_ROWS}.elyares-card {{ background: {SURFACE[1]}; color: {INK}; border-radius: {RADIUS[1]}px;
   padding: {SPACE[1]}px {SPACE[2]}px; border: 1px solid rgba(255, 255, 255, 0.06); }}
 .elyares-card:hover {{ background: {SURFACE[2]}; }}
 .elyares-card.raised {{ background: {SURFACE[2]}; }}
@@ -67,7 +90,21 @@ CSS = f"""
   outline: 2px solid {ACCENT}; outline-offset: 2px; }}
 """
 
+CSS = build_css()
 _provider = None
+
+
+def use_theme():
+    """Toma los colores del tema de ahora; con los estilos ya puestos, los rehace en caliente."""
+    global SURFACE, INK, MUTED, ACCENT, DANGER, GLASS, ACCENT_RGB, CSS
+    look = themes.get()
+    SURFACE, INK, MUTED = look['surface'], look['ink'], look['muted']
+    ACCENT, DANGER = look['accent'], look['danger']
+    GLASS = tuple(', '.join(str(c) for c in themes.rgb255(color)) for color in SURFACE)
+    ACCENT_RGB = ', '.join(str(c) for c in themes.rgb255(ACCENT))
+    CSS = build_css()
+    if _provider is not None:
+        _provider.load_from_string(CSS)
 
 
 def load_css():
@@ -78,6 +115,7 @@ def load_css():
         _provider.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), _provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        load_fonts()
 
 
 class Frame:
@@ -128,6 +166,7 @@ class Frame:
         self.flows = FlowsPanel()
         self.sources = SourcesPanel()
         self.alerts = AlertsPanel()
+        self.tmux = TmuxPanel()
         self.settings = SettingsPanel()
         self.sidebar = Gtk.ListBox()
         self.sidebar.set_size_request(SIDEBAR_W, -1)
@@ -196,6 +235,8 @@ class Frame:
         for sid, name, color, text, *role in rows:
             row = Gtk.ListBoxRow()
             row.sid = sid
+            if role:
+                row.add_css_class(f'role-{role[0]}')
             box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
             if role and face is not None:
                 dot = Gtk.DrawingArea()
@@ -672,6 +713,88 @@ class AlertsPanel(Gtk.ScrolledWindow):
             self.page.append(card)
 
 
+class TmuxPanel(Gtk.ScrolledWindow):
+    """Las sesiones de tmux como proyectos: una tarjeta por sesión y, dentro,
+    un botón por ventana que salta a ella. Sin estado propio: la llena la isla."""
+
+    STATES = {'permission': ('●', 'pide permiso'), 'waiting': ('▲', 'espera respuesta'),
+              'working': ('●', 'trabaja'), 'done': ('○', 'terminó'), 'idle': ('○', 'en reposo')}
+    TONES = {'permission': 'red', 'waiting': 'yellow', 'working': 'green', 'done': 'metal', 'idle': 'metal'}
+
+    def __init__(self):
+        super().__init__()
+        self.add_css_class('elyares-sources')
+        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(self.page, f'set_margin_{side}')(SPACE[2])
+        self.set_child(self.page)
+        self.signature = None
+        self.set_visible(False)
+
+    def set_sessions(self, sessions, handlers):
+        """`sessions`: [dict(name, state, claudes, windows=[dict(index, name, state, path)])] o
+        None si tmux aún no contestó. `handlers`: jump(sesión, ventana)."""
+        sig = repr(sessions)
+        if sig == self.signature:
+            return
+        self.signature = sig
+        while (child := self.page.get_first_child()) is not None:
+            self.page.remove(child)
+        if sessions is None:
+            self._note('Buscando sesiones de tmux…')
+        elif not sessions:
+            self._note('tmux no está corriendo. Abre una sesión en la terminal y aparecerá aquí.')
+        for sess in sessions or []:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
+            card.add_css_class('elyares-card')
+            claudes = sess['claudes']
+            count = 'sin Claude' if not claudes else '1 Claude' if claudes == 1 else f'{claudes} Claude'
+            title = Gtk.Label(xalign=0)
+            title.set_markup(f'<b>{GLib.markup_escape_text(sess["name"])}</b>  '
+                             f'<span alpha="60%">{count}</span>')
+            card.append(title)
+            for win in sess['windows']:
+                card.append(self._window(sess['name'], win, handlers))
+            self.page.append(card)
+
+    def _note(self, text):
+        label = Gtk.Label(label=text, xalign=0, wrap=True)
+        label.add_css_class('dim-label')
+        self.page.append(label)
+
+    def _window(self, session, win, handlers):
+        mark, said = self.STATES.get(win['state'], ('', ''))
+        btn = Gtk.Button()
+        btn.add_css_class('elyares-btn')
+        btn.set_halign(Gtk.Align.FILL)
+        label = Gtk.Label(xalign=0)
+        color = mascot.COLORS.get(self.TONES.get(win['state'], 'metal'), '#8f9ab8')
+        dot = f'<span foreground="{color}">{mark}</span> ' if mark else ''
+        tail = f'  <span alpha="60%">{said}</span>' if said else ''
+        crew = ''.join(f' <span foreground="{mascot.accent(role)}">●</span>' for role in win.get('agents', ()))
+        label.set_markup(f'{dot}{win["index"]} · {GLib.markup_escape_text(win["name"])}{tail}{crew}')
+        btn.set_child(label)
+        btn.update_property([Gtk.AccessibleProperty.LABEL],
+                            [f'Ir a la ventana {win["name"]} de {session}' + (f', {said}' if said else '')
+                             + (f', con {len(win["agents"])} subagentes' if win.get('agents') else '')])
+        btn.connect('clicked', lambda _b: handlers['jump'](session, win['index']))
+        return btn
+
+
+_font_provider = None
+
+
+def load_fonts():
+    """La letra de los widgets: un segundo estilo, encima del primero, que se rehace al cambiarla."""
+    global _font_provider
+    if _font_provider is None:
+        _font_provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), _font_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+    _font_provider.load_from_string(fonts.css())
+
+
 class SettingsPanel(Gtk.ScrolledWindow):
     """Ajustes: un interruptor por cada clave que hoy se cambia con una orden
     o un clic. Cada fila es (clave, texto, activo, nota)."""
@@ -688,10 +811,10 @@ class SettingsPanel(Gtk.ScrolledWindow):
         self.position = None
         self.set_visible(False)
 
-    def set_rows(self, rows, position, handlers):
+    def set_rows(self, rows, position, handlers, family=fonts.SYSTEM, theme_key=themes.DEFAULT):
         """`rows`: [(clave, texto, activo, nota)]; `position`: 0..100 o None.
-        `handlers`: toggle(clave), move(valor), theme()."""
-        sig = repr((rows, position))
+        `handlers`: toggle(clave), move(valor), theme(), font(familia), pick_theme(clave)."""
+        sig = repr((rows, position, family, theme_key))
         if sig == self.signature:
             return
         self.signature = sig
@@ -722,7 +845,28 @@ class SettingsPanel(Gtk.ScrolledWindow):
             scale.update_property([Gtk.AccessibleProperty.LABEL], ['Posición de la isla, de 0 a 100'])
             scale.connect('value-changed', lambda sc: sc.get_value() != position and handlers['move'](sc.get_value()))
             self.page.append(scale)
-        theme = Gtk.Button(label='Releer el color de acento del tema')
+        self.page.append(Gtk.Label(label='Tema', xalign=0))
+        tema = Gtk.DropDown.new_from_strings([themes.label(key) for key in themes.keys()])
+        tema.set_halign(Gtk.Align.START)
+        tema.set_selected(themes.keys().index(themes.valid(theme_key)))
+        tema.update_property([Gtk.AccessibleProperty.LABEL], ['Tema de la isla y la app'])
+        tema.connect('notify::selected', lambda dd, _p: themes.keys()[dd.get_selected()] != theme_key
+                     and handlers['pick_theme'](themes.keys()[dd.get_selected()]))
+        self.page.append(tema)
+        self.page.append(Gtk.Label(label='Letra', xalign=0))
+        names = [choice[1] for choice in fonts.CHOICES]
+        pick = Gtk.DropDown.new_from_strings(names)
+        pick.set_halign(Gtk.Align.START)
+        pick.set_selected(next((i for i, choice in enumerate(fonts.CHOICES) if choice[0] == family), 0))
+        pick.update_property([Gtk.AccessibleProperty.LABEL], ['Letra de la app'])
+        pick.connect('notify::selected', lambda dd, _p: fonts.CHOICES[dd.get_selected()][0] != family
+                     and handlers['font'](fonts.CHOICES[dd.get_selected()][0]))
+        self.page.append(pick)
+        note = Gtk.Label(label='Vale para la isla y para la ventana; el código sigue en monoespaciada.',
+                         xalign=0, wrap=True)
+        note.add_css_class('dim-label')
+        self.page.append(note)
+        theme = Gtk.Button(label='Releer los colores del tema')
         theme.add_css_class('elyares-btn')
         theme.set_halign(Gtk.Align.START)
         theme.connect('clicked', lambda _b: handlers['theme']())

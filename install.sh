@@ -42,6 +42,13 @@ done
 install -m 644 "$here/systemd/elyares-engineer.service" "$unit_dir/"
 echo "✓ binarios en $bin_dir y servicio en $unit_dir"
 
+# Las letras que se eligen en Ajustes (fonts/): se copian a las del usuario.
+font_dir="${XDG_DATA_HOME:-$HOME/.local/share}/fonts/elyares-engineer"
+mkdir -p "$font_dir"
+find "$here/fonts" -type f \( -name '*.ttf' -o -name '*.otf' \) -exec cp -f {} "$font_dir/" \;
+fc-cache -f "$font_dir" 2>/dev/null || true
+echo "✓ letras en $font_dir"
+
 # La app en ventana: su entrada para el lanzador (Walker) y su ícono. Se
 # copian, no se enlazan; el `Exec` lleva la ruta de este equipo.
 apps_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"

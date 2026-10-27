@@ -88,7 +88,7 @@ import cairo
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
-from . import chat, mascot, paint, projects, settings, state, store
+from . import chat, fonts, mascot, paint, projects, settings, state, store, themes
 
 CHAT_W, CHAT_H = 600, 620     # el panel: ancho de la isla con vista previa, y alto
 CHAT_PAD = 16                 # margen por dentro
@@ -141,7 +141,7 @@ textview.elyares-chat, textview.elyares-chat text, scrolledwindow.elyares-chat {
   background: transparent; border: none; box-shadow: none; outline: none;
 }
 textview.elyares-chat, textview.elyares-chat text {
-  color: #eef1f6; caret-color: %s; font-family: "JetBrainsMono Nerd Font"; font-size: 10pt;
+  color: %s; caret-color: %s; font-family: "JetBrainsMono Nerd Font"; font-size: %s;
 }
 '''
 
@@ -235,7 +235,7 @@ class ChatView:
     def chat_theme(self):
         """El cursor de la caja, en el color de acento del tema."""
         if getattr(self, 'chat_css', None) is not None:
-            self.chat_css.load_from_string(CSS % mascot.accent('engineer'))
+            self.chat_css.load_from_string(CSS % (themes.get()['chat_ink'], mascot.accent('engineer'), f'{fonts.scaled("10")}pt'))
 
     def chat_text(self):
         if self.entry is None:
@@ -1308,7 +1308,7 @@ class ChatView:
         hh = len(items) * CHAT_SUGGEST_H + 8
         y = bottom - hh
         mascot.rrect(cr, x - 8, y, width, hh, 10)
-        cr.set_source_rgba(.07, .08, .10, .97 * alpha)
+        cr.set_source_rgba(*themes.get()['popup'], .97 * alpha)
         cr.fill_preserve()
         cr.set_source_rgba(1, 1, 1, .12 * alpha)
         cr.set_line_width(1)
@@ -1507,7 +1507,7 @@ class ChatView:
     def chat_layout(self, cr, index, entry, width):
         """Lo que mide y dibuja una cosa de la conversación, guardado mientras
         no cambie: (layout, alto que ocupa, papel, sus tablas ya medidas)."""
-        key = (index, entry.kind, entry.text, entry.images, width)
+        key = (index, entry.kind, entry.text, entry.images, width, self.chat_tech(), fonts.tired, fonts.current)
         hit = self.chat_cache.get(key)
         if hit is not None:
             PangoCairo.update_layout(cr, hit[0])
@@ -1562,7 +1562,11 @@ class ChatView:
         ink['cmd'] = tone          # el comando de un bloque y el código en línea, del color del agente
         return paint.markdown(text, tone, self.ink('head'), bold='#ffffff',
                               dim=self.colors['text'], accent=agent,
-                              ink=ink, shade=shade, blocks=blocks, tables=tables)
+                              ink=ink, shade=shade, blocks=blocks, tables=tables, caps=self.chat_tech())
+
+    def chat_tech(self):
+        """¿El chat con bloques de borde fino y títulos en mayúsculas?"""
+        return bool(self.settings.get('chat_tech'))
 
     @staticmethod
     def chat_reads(markup):
@@ -1597,7 +1601,7 @@ class ChatView:
         con cabecera). La columna que cabe en su parte del ancho se queda con
         lo suyo; las demás se reparten lo que sobra y parten su texto. Se
         guarda: mientras Claude sigue escribiendo debajo, la tabla no cambia."""
-        key = (font, width, str(table))
+        key = (font, width, str(table), fonts.tired, fonts.current)
         if key in self.chat_cache:
             return self.chat_cache[key]
         rows, align, headed = table
@@ -1722,12 +1726,29 @@ class ChatView:
         cr.fill()
         cr.restore()
 
+    @staticmethod
+    def draw_outlined(cr, left, top, width, height, color, alpha, radius=4):
+        """Un bloque de borde fino del color del agente sobre un fondo oscuro, sin degradado."""
+        mascot.rrect(cr, left, top, width, height, radius)
+        cr.set_source_rgba(0, 0, 0, .30 * alpha)
+        cr.fill_preserve()
+        fade = cairo.LinearGradient(left, 0, left + width, 0)
+        fade.add_color_stop_rgba(0, *color, .26 * alpha)
+        fade.add_color_stop_rgba(.6, *color, .08 * alpha)
+        fade.add_color_stop_rgba(1, *color, .02 * alpha)
+        cr.set_source(fade)
+        cr.fill_preserve()
+        cr.set_source_rgba(*color, .6 * alpha)
+        cr.set_line_width(1)
+        cr.stroke()
+
     def draw_code_backgrounds(self, cr, layout, left, right, y, alpha):
         """El fondo de cada bloque de código, como el de tus mensajes: a lo
         ancho, con la barra del agente a la derecha y un degradado de su color
         que se apaga hacia la izquierda."""
+        draw = self.draw_outlined if self.chat_tech() else self.draw_tinted
         for top, bottom in self.code_spans(layout):
-            self.draw_tinted(cr, left, y + top, right - left, bottom - top, self.chat_color(), alpha)
+            draw(cr, left, y + top, right - left, bottom - top, self.chat_color(), alpha)
 
     def draw_tables(self, cr, layout, grids, x, y, tone, alpha):
         """Las tablas de un texto, cada una en el hueco que le guarda: una caja
@@ -1750,8 +1771,18 @@ class ChatView:
             cr.paint()
             if headed:
                 cr.rectangle(left, top, width, heights[0])
-                cr.set_source_rgba(r, g, b, .20 * alpha)
+                if self.chat_tech():
+                    fade = cairo.LinearGradient(left, 0, left + width, 0)
+                    fade.add_color_stop_rgba(0, r, g, b, .30 * alpha)
+                    fade.add_color_stop_rgba(1, r, g, b, .04 * alpha)
+                    cr.set_source(fade)
+                else:
+                    cr.set_source_rgba(r, g, b, .20 * alpha)
                 cr.fill()
+                if self.chat_tech():
+                    cr.rectangle(left, top + heights[0] - 1, width, 1)
+                    cr.set_source_rgba(r, g, b, .5 * alpha)
+                    cr.fill()
             _, seen_top, _, seen_bottom = cr.clip_extents()
             tops = itertools.accumulate(heights, initial=top)
             for n, (row, row_h, row_y) in enumerate(zip(cells, heights, tops)):
@@ -1947,7 +1978,7 @@ class ChatView:
         hh = len(shown) * CHAT_SUGGEST_H + 8
         y = bottom - hh
         mascot.rrect(cr, left, y, width, hh, 12)
-        cr.set_source_rgba(.07, .08, .10, .97 * alpha)
+        cr.set_source_rgba(*themes.get()['popup'], .97 * alpha)
         cr.fill_preserve()
         cr.set_source_rgba(1, 1, 1, .12 * alpha)
         cr.set_line_width(1)
