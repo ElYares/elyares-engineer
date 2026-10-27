@@ -575,6 +575,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         mascot.set_accent(palette.get('accent'))
         self.colors = paint.colors(palette)
         self.markups = {}
+        if getattr(self, 'chat_cache', None) is not None:
+            getattr(self, 'chat_cache', {}).clear()     # los textos ya medidos llevan los colores del tema anterior
         self.chat_theme()
 
     def markup(self, detail):
@@ -1669,7 +1671,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             cr.restore()
             if edge:
                 cr.append_path(edge)
-                cr.set_source_rgba(1, 1, 1, GLASS_EDGE)
+                cr.set_source_rgba(*themes.glow(), GLASS_EDGE)
                 cr.set_line_width(1)
                 cr.stroke()
             self.chat_place(h)
@@ -1679,7 +1681,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             cr.restore()
             if edge:
                 cr.append_path(edge)
-                cr.set_source_rgba(1, 1, 1, GLASS_EDGE)
+                cr.set_source_rgba(*themes.glow(), GLASS_EDGE)
                 cr.set_line_width(1)
                 cr.stroke()
             self.chat_place(h)
@@ -1715,7 +1717,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if edge:
             # El filo claro es lo que hace que el fondo translúcido se lea como vidrio.
             cr.append_path(edge)
-            cr.set_source_rgba(1, 1, 1, GLASS_EDGE)
+            cr.set_source_rgba(*themes.glow(), GLASS_EDGE)
             cr.set_line_width(1)
             cr.stroke()
         if self.tip or self.tip_pop:
@@ -1878,7 +1880,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         """Una tarjeta del tablero. Con `tint`, un velo de ese color que sube
         desde abajo: de qué color es dice cómo está quien va dentro."""
         mascot.rrect(cr, x, y, w, h, 16)
-        cr.set_source_rgba(1, 1, 1, (.085 if over else .05) * alpha)
+        cr.set_source_rgba(*themes.glow(), (.085 if over else .05) * alpha)
         cr.fill_preserve()
         if tint:
             r, g, b, _ = mascot.rgba(tint)
@@ -1978,7 +1980,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             chosen = s is current
             if chosen or self.over(x, y, tw, th):
                 mascot.rrect(cr, x, y, tw, th, th / 2)
-                cr.set_source_rgba(1, 1, 1, (.13 if chosen else .06) * alpha)
+                cr.set_source_rgba(*themes.glow(), (.13 if chosen else .06) * alpha)
                 cr.fill()
             color = self.tab_dot(s)
             cr.new_sub_path()
@@ -2001,11 +2003,11 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             tw = lw + 20
             over = self.over(x, y, tw, th)
             mascot.rrect(cr, x + .5, y + .5, tw - 1, th - 1, th / 2)
-            cr.set_source_rgba(1, 1, 1, (.10 if over else 0) * alpha)
+            cr.set_source_rgba(*themes.glow(), (.10 if over else 0) * alpha)
             cr.fill_preserve()
             cr.set_dash([3, 3])
             cr.set_line_width(1)
-            cr.set_source_rgba(1, 1, 1, (.45 if over else .22) * alpha)
+            cr.set_source_rgba(*themes.glow(), (.45 if over else .22) * alpha)
             cr.stroke()
             cr.set_dash([])
             cr.move_to(x + 10, y + (th - lh) / 2)
@@ -2140,7 +2142,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             over = member.role != MAIN_ROLE and self.over(x, cy - step / 2, w, step)
             if over:
                 mascot.rrect(cr, x + 4, cy - step / 2 + 3, w - 8, step - 6, 10)
-                cr.set_source_rgba(1, 1, 1, .06 * alpha)
+                cr.set_source_rgba(*themes.glow(), .06 * alpha)
                 cr.fill()
             if member.role != MAIN_ROLE:
                 self.hits.append(('brief', (s.sid, member.role), x, cy - step / 2, w, step))
@@ -2165,7 +2167,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if over:
                 hovered = member
                 mascot.rrect(cr, cx + 4, cy + 1, cw - 8, ch - 2, 9)
-                cr.set_source_rgba(1, 1, 1, .08 * alpha)
+                cr.set_source_rgba(*themes.glow(), .08 * alpha)
                 cr.fill()
             if member.role != MAIN_ROLE:
                 self.hits.append(('brief', (s.sid, member.role), cx, cy, cw, ch))
@@ -2241,7 +2243,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             last = i == len(shown) - 1
             if last:
                 mascot.rrect(cr, left - 4, ty - 5, right - left + 8, 24, 8)
-                cr.set_source_rgba(1, 1, 1, .07 * alpha)
+                cr.set_source_rgba(*themes.glow(), .07 * alpha)
                 cr.fill()
                 mark, color = marks.get(member.state, ('›', None))
                 spent = 'ahora' if member.busy else ''
@@ -2273,7 +2275,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def draw_rows(self, cr, x0, w, top, alpha, rows, limit):
         """Una fila por alerta: su punto, de quién es y qué pasa."""
         left, right = x0 + 14, x0 + w - 14
-        cr.set_source_rgba(1, 1, 1, .08 * alpha)
+        cr.set_source_rgba(*themes.glow(), .08 * alpha)
         cr.rectangle(left + 4, top - 1, right - left - 8, 1)
         cr.fill()
         # Si no caben todas, la última fila dice cuántas faltan.
@@ -2290,7 +2292,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             # La que tiene la ficha abierta se queda marcada.
             if self.over(left, y, right - left, ROW_H - 1) or (s.card and s is self.view.session):
                 mascot.rrect(cr, left, y + 1, right - left, ROW_H - 2, 8)
-                cr.set_source_rgba(1, 1, 1, .07 * alpha)
+                cr.set_source_rgba(*themes.glow(), .07 * alpha)
                 cr.fill()
             cr.new_sub_path()
             color = dot_color(s)
@@ -2327,7 +2329,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         p = self.preview()
         left, right = x0 + 14, x0 + w - 14
         mascot.rrect(cr, left, top + 2, right - left, height - 6, 10)
-        cr.set_source_rgba(1, 1, 1, .05 * alpha)
+        cr.set_source_rgba(*themes.glow(), .05 * alpha)
         cr.fill()
         tx, y = left + 12, top + PREVIEW_PAD
         # Arriba: el archivo y la línea a la izquierda, lo que cambia a la derecha.
@@ -2406,7 +2408,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                                  alpha, 10)
             else:
                 mascot.rrect(cr, left, top + 2, right - left, body - 6, 10)
-                cr.set_source_rgba(1, 1, 1, .05 * alpha)
+                cr.set_source_rgba(*themes.glow(), .05 * alpha)
                 cr.fill()
             tx, y = left + 12, top + PREVIEW_PAD
             if s.where or s.note:
@@ -2455,7 +2457,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         de los atajos de elyares-engineer."""
         left, right = x0 + 18, x0 + w - 18
         top = bottom - PILLS_H
-        cr.set_source_rgba(1, 1, 1, .08 * alpha)
+        cr.set_source_rgba(*themes.glow(), .08 * alpha)
         cr.rectangle(left, top, right - left, 1)
         cr.fill()
         px, py = self.pointer or (-1, -1)
@@ -2467,7 +2469,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             pw = lw + PILL_PAD
             over = x <= px <= x + pw and y <= py <= y + PILL_H
             mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
-            cr.set_source_rgba(1, 1, 1, (.13 if over else .07) * alpha)
+            cr.set_source_rgba(*themes.glow(), (.13 if over else .07) * alpha)
             cr.fill()
             cr.new_sub_path()
             if state == 'off':
@@ -2514,7 +2516,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             qx = cx - PILL_GAP - qpw
             over_plus = qx <= px <= qx + qpw and y <= py <= y + PILL_H
             mascot.rrect(cr, qx, y, qpw, PILL_H, PILL_H / 2)
-            cr.set_source_rgba(1, 1, 1, (.13 if over_plus else .07) * alpha)
+            cr.set_source_rgba(*themes.glow(), (.13 if over_plus else .07) * alpha)
             cr.fill()
             cr.move_to(qx + (qpw - qw) / 2, y + (PILL_H - qh) / 2)
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
@@ -2527,7 +2529,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             fx = qx - PILL_GAP - fpw
             over_flows = fx <= px <= fx + fpw and y <= py <= y + PILL_H
             mascot.rrect(cr, fx, y, fpw, PILL_H, PILL_H / 2)
-            cr.set_source_rgba(1, 1, 1, (.13 if over_flows else .07) * alpha)
+            cr.set_source_rgba(*themes.glow(), (.13 if over_flows else .07) * alpha)
             cr.fill()
             cr.move_to(fx + (fpw - fw) / 2, y + (PILL_H - fh) / 2)
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
@@ -2536,7 +2538,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
-        cr.set_source_rgba(1, 1, 1, (.13 if over else .07) * alpha)
+        cr.set_source_rgba(*themes.glow(), (.13 if over else .07) * alpha)
         cr.fill()
         cr.move_to(x + (pw - lw) / 2, y + (PILL_H - lh) / 2)
         cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
@@ -2614,20 +2616,20 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.fill_preserve()
         if glass:
             sheen = cairo.LinearGradient(0, y, 0, y + h / 2)
-            sheen.add_color_stop_rgba(0, 1, 1, 1, TIP_SHEEN * alpha)
-            sheen.add_color_stop_rgba(1, 1, 1, 1, 0)
+            sheen.add_color_stop_rgba(0, *themes.glow(), TIP_SHEEN * alpha)
+            sheen.add_color_stop_rgba(1, *themes.glow(), 0)
             cr.set_source(sheen)
             cr.fill_preserve()
         edge = cairo.LinearGradient(0, tip_y, 0, y + h)
         for stop, light in enumerate(TIP_EDGE):
-            edge.add_color_stop_rgba(stop, 1, 1, 1, light * alpha)
+            edge.add_color_stop_rgba(stop, *themes.glow(), light * alpha)
         cr.set_source(edge)
         cr.set_line_width(1)
         cr.stroke()
         ty = y + TIP_PAD
         for (_, _, gap, _, draw), step in zip(blocks, steps):
             if gap >= TIP_HEAD_GAP:
-                cr.set_source_rgba(1, 1, 1, TIP_RULE * alpha)
+                cr.set_source_rgba(*themes.glow(), TIP_RULE * alpha)
                 cr.rectangle(x + TIP_PAD, ty + gap // 2 - 2, w - 2 * TIP_PAD, 1)
                 cr.fill()
             draw(x + TIP_PAD, ty + gap, w - 2 * TIP_PAD, alpha, glass)

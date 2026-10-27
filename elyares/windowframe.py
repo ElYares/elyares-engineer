@@ -28,6 +28,7 @@ ACCENT = '#6ea8ff'                              # foco y botón primario
 DANGER = '#ff6b6b'                              # el aviso rojo, no del tema
 GLASS = ('5, 6, 8', '16, 19, 26', '26, 31, 43')     # lo mismo en rgb, para el vidrio
 ACCENT_RGB = '110, 168, 255'
+GLOW = '255, 255, 255'                          # velos y filos: blanco en oscuro, negro en claro
 
 
 def _role_rows():
@@ -51,13 +52,13 @@ def build_css():
 .glass .elyares-segments button:checked {{ background: rgba({GLASS[2]}, 0.6); }}
 .glass .elyares-sources, .glass .elyares-sources viewport, .glass .elyares-chathead {{ background: transparent; }}
 .elyares-bar {{ background: {SURFACE[0]}; color: {INK}; border: none; box-shadow: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06); }}
+  border-bottom: 1px solid rgba({GLOW}, 0.06); }}
 /* Las vistas, como el control segmentado de macOS: una pastilla con la activa elevada. */
 .elyares-segments {{ background: {SURFACE[1]}; border-radius: {RADIUS[0]}px; padding: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.06); }}
+  border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-segments button {{ background: transparent; color: {MUTED}; border: none; box-shadow: none;
   padding: {SPACE[0]}px {SPACE[2]}px; border-radius: 6px; min-height: 0; }}
-.elyares-segments button:hover {{ background: rgba(255, 255, 255, 0.05); }}
+.elyares-segments button:hover {{ background: rgba({GLOW}, 0.05); }}
 .elyares-segments button:checked {{ background: {SURFACE[2]}; color: {INK};
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }}
 .elyares-pill {{ background: {SURFACE[1]}; color: {MUTED}; border: none;
@@ -65,27 +66,27 @@ def build_css():
 .elyares-pill:checked {{ background: {SURFACE[2]}; color: {INK}; }}
 .elyares-pill:hover {{ background: {SURFACE[2]}; }}
 /* La barra lateral: sección en versalitas y la fila elegida con el acento, como en macOS. */
-.elyares-sidebox {{ background: {SURFACE[0]}; border-right: 1px solid rgba(255, 255, 255, 0.06); }}
+.elyares-sidebox {{ background: {SURFACE[0]}; border-right: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-section {{ color: {MUTED}; font-size: 11px; font-weight: 700; letter-spacing: 1px;
   padding: {SPACE[2]}px {SPACE[2]}px {SPACE[0]}px; }}
 .elyares-side {{ background: transparent; color: {INK}; padding: {SPACE[0]}px {SPACE[1]}px; }}
 .elyares-side row {{ border-radius: {RADIUS[0]}px; padding: {SPACE[1]}px {SPACE[1]}px; margin: 1px 0; }}
-.elyares-side row:hover {{ background: rgba(255, 255, 255, 0.05); }}
+.elyares-side row:hover {{ background: rgba({GLOW}, 0.05); }}
 .elyares-side row:selected {{ background: rgba({ACCENT_RGB}, 0.22); color: {INK}; }}
 {ROLE_ROWS}.elyares-card {{ background: {SURFACE[1]}; color: {INK}; border-radius: {RADIUS[1]}px;
-  padding: {SPACE[1]}px {SPACE[2]}px; border: 1px solid rgba(255, 255, 255, 0.06); }}
+  padding: {SPACE[1]}px {SPACE[2]}px; border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-card:hover {{ background: {SURFACE[2]}; }}
 .elyares-card.raised {{ background: {SURFACE[2]}; }}
 .elyares-btn {{ background: {SURFACE[2]}; color: {INK}; border-radius: 6px;
-  padding: {SPACE[1]}px {SPACE[3]}px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: none; }}
+  padding: {SPACE[1]}px {SPACE[3]}px; border: 1px solid rgba({GLOW}, 0.08); box-shadow: none; }}
 .elyares-btn:disabled {{ opacity: 0.4; }}
-.elyares-btn:hover {{ background: rgba(255, 255, 255, 0.14); }}
+.elyares-btn:hover {{ background: rgba({GLOW}, 0.14); }}
 .elyares-btn.compact {{ padding: {SPACE[0]}px {SPACE[1]}px; min-height: 0; }}
 .elyares-btn.primary {{ background: {ACCENT}; color: {SURFACE[0]}; border: none; }}
 .elyares-btn.danger {{ background: {DANGER}; color: {SURFACE[0]}; border: none; }}
 .elyares-sources, .elyares-sources viewport {{ background: {SURFACE[0]}; color: {INK}; }}
 .elyares-chathead {{ background: {SURFACE[0]}; color: {INK}; padding: {SPACE[1]}px {SPACE[2]}px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06); }}
+  border-bottom: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-segments button:focus-visible, .elyares-side row:focus-visible, .elyares-btn:focus-visible {{
   outline: 2px solid {ACCENT}; outline-offset: 2px; }}
 """
@@ -96,12 +97,13 @@ _provider = None
 
 def use_theme():
     """Toma los colores del tema de ahora; con los estilos ya puestos, los rehace en caliente."""
-    global SURFACE, INK, MUTED, ACCENT, DANGER, GLASS, ACCENT_RGB, CSS
+    global SURFACE, INK, MUTED, ACCENT, DANGER, GLASS, ACCENT_RGB, GLOW, CSS
     look = themes.get()
     SURFACE, INK, MUTED = look['surface'], look['ink'], look['muted']
     ACCENT, DANGER = look['accent'], look['danger']
     GLASS = tuple(', '.join(str(c) for c in themes.rgb255(color)) for color in SURFACE)
     ACCENT_RGB = ', '.join(str(c) for c in themes.rgb255(ACCENT))
+    GLOW = '0, 0, 0' if themes.is_light() else '255, 255, 255'
     CSS = build_css()
     if _provider is not None:
         _provider.load_from_string(CSS)
