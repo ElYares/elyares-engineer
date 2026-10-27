@@ -3253,6 +3253,17 @@ class Ventana(Dibujo):
         isl.window_fit(content_h=300 - windowview.FIT_PAD, room=0)      # 300 menos: encoge
         isl.window_resize.assert_called_once()
 
+    def test_los_paneles_se_ponen_al_dia_a_lo_mas_cada_decima_de_segundo(self):
+        isl = self.isl
+        isl.frame, isl.windowed, isl.chat_open, isl.focus, isl.tab = mock.Mock(), True, False, None, 'a'
+        isl.sources_open, isl.panel_open, isl.wf_open = False, '', False
+        isl.panels_key, isl.panels_at = None, 0.0
+        self.assertTrue(isl.window_panels_due(10.0))
+        self.assertFalse(isl.window_panels_due(10.05))          # mismo estado, hace 50 ms
+        self.assertTrue(isl.window_panels_due(10.2))            # ya pasó la décima
+        isl.focus = ('a', 'auditor')                            # cambió algo que se ve: de inmediato
+        self.assertTrue(isl.window_panels_due(10.21))
+
     def test_otra_vista_tapa_a_fuentes(self):
         isl = self.isl
         isl.frame, isl.sources_open = mock.Mock(), True
@@ -3420,6 +3431,7 @@ class Ventana(Dibujo):
         isl.open_window()
         isl.app_win.get_width.return_value = 660
         isl.app_win.get_height.return_value = 0
+        isl.hypr_async = False              # el pedido a Hyprland sale en el acto, sin hilo
         return isl
 
     def test_la_ventana_sigue_el_alto_del_contenido(self):
@@ -3522,6 +3534,7 @@ class Ventana(Dibujo):
         isl.open_window()
         isl.app_win.get_width.return_value = 660
         isl.app_win.get_height.return_value = 0
+        isl.hypr_async = False
         with mock.patch.object(app.windowview.hypr, 'request', side_effect=OSError):
             isl.window_fit(400, 0)
         isl.app_win.set_default_size.assert_called_once_with(660, 412)

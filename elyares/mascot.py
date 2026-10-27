@@ -206,6 +206,37 @@ BLUSH = {'idle': .22, 'working': .12, 'done': .5, 'annoyed': .55, 'confused': .1
          'dizzy': .3, 'sleep': .25, 'permission': 0}
 
 
+_STATIC = {}                        # (rol, gesto, tamaño) -> superficie ya dibujada
+_STATIC_MAX = 96
+_OVERSCAN = 1.3                     # lo que sobresale de la caja de 253: antena, sombrero, sombra
+
+
+def paint_static(cr, role, pet, x, y, size, alpha=1.0):
+    """Una cara quieta, centrada en (x, y) y de `size` de alto. Se dibuja una
+    sola vez a doble resolución y después solo se estampa: vectorizarla en cada
+    cuadro costaba ~3 ms por cara."""
+    import cairo
+    px = max(2, int(size * 2))
+    key = (role, pet, px)
+    surf = _STATIC.get(key)
+    side = int(px * _OVERSCAN) + 2
+    if surf is None:
+        if len(_STATIC) >= _STATIC_MAX:
+            _STATIC.clear()
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, side, side)
+        c = cairo.Context(surf)
+        c.translate(side / 2, side / 2)
+        c.scale(px / 253, px / 253)
+        draw(c, pet, 0, 0, motion=0, role=role)
+        _STATIC[key] = surf
+    cr.save()
+    cr.translate(x, y + size * .015)
+    cr.scale(.5, .5)
+    cr.set_source_surface(surf, -side / 2, -side / 2)
+    cr.paint_with_alpha(alpha)
+    cr.restore()
+
+
 def draw(cr, state, age, t, look=(0.0, 0.0), blink=False, ink='#e8eefc', motion=1.0,
          role='engineer'):
     """Dibuja a ElYares centrado en (0, 0).

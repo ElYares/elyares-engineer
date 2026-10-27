@@ -55,6 +55,7 @@ CSS = f"""
 .elyares-card.raised {{ background: {SURFACE[2]}; }}
 .elyares-btn {{ background: {SURFACE[2]}; color: {INK}; border-radius: 6px;
   padding: {SPACE[1]}px {SPACE[3]}px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: none; }}
+.elyares-btn:disabled {{ opacity: 0.4; }}
 .elyares-btn:hover {{ background: rgba(255, 255, 255, 0.14); }}
 .elyares-btn.compact {{ padding: {SPACE[0]}px {SPACE[1]}px; min-height: 0; }}
 .elyares-btn.primary {{ background: {ACCENT}; color: {SURFACE[0]}; border: none; }}
@@ -124,6 +125,7 @@ class Frame:
         self.board = BoardPanel()
         self.chat_head = ChatHead()
         self.focus = FocusPanel()
+        self.flows = FlowsPanel()
         self.sources = SourcesPanel()
         self.alerts = AlertsPanel()
         self.settings = SettingsPanel()
@@ -247,6 +249,7 @@ class Frame:
         volver la isla suelta se esconden, o se verían sobre ella."""
         self.board.place(0)
         self.focus.place(0)
+        self.flows.set_visible(False)
         self.chat_head.place(0)
         for panel in (self.sources, self.alerts, self.settings):
             panel.set_visible(False)
@@ -923,3 +926,99 @@ class FocusPanel(Gtk.ScrolledWindow):
         mid.append(others)
         root.append(mid)
         self.set_child(root)
+
+
+class FlowsPanel(Gtk.ScrolledWindow):
+    """Flujos: la lista de workflows guardados, con el mismo estilo que el resto
+    de la app. Cada uno es una tarjeta con su nombre, sus pasos y dónde corre,
+    y sus botones Lanzar, Editar y Borrar. El editor y la corrida siguen en el
+    dibujo de la isla. Sin estado propio: la llena la isla con `set_flows`."""
+
+    def __init__(self):
+        super().__init__()
+        self.add_css_class('elyares-sources')
+        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[2])
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(self.page, f'set_margin_{side}')(SPACE[3])
+        self.set_child(self.page)
+        self.signature = None
+        self.refs = []
+        self.set_visible(False)
+
+    def set_flows(self, rows, handlers):
+        """`rows`: [dict(name, steps, place, status, tone, mine, busy, launch,
+        delete)]. `handlers`: act(clave) con las claves de siempre:
+        launch:N, edit:N, delete:N, view, new, close."""
+        shape = tuple((r['name'], r['mine'], r['busy'], r['launch'], r['delete']) for r in rows)
+        if shape == self.signature:
+            for ref, r in zip(self.refs, rows):
+                note = r['place'] if not r['status'] else f'{r["place"]} · {r["status"]}'
+                if ref.get_label() != note:
+                    ref.set_label(note)
+            return
+        self.signature = shape
+        self.refs = []
+        while (child := self.page.get_first_child()) is not None:
+            self.page.remove(child)
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+        title = Gtk.Label(xalign=0)
+        title.set_markup('<span size="x-large" weight="bold">Workflows</span>')
+        head.append(title)
+        count = Gtk.Label(label='' if not rows else '1 guardado' if len(rows) == 1 else f'{len(rows)} guardados')
+        count.add_css_class('dim-label')
+        count.set_hexpand(True)
+        count.set_xalign(0)
+        head.append(count)
+        new = Gtk.Button(label='Nuevo')
+        new.add_css_class('elyares-btn')
+        new.add_css_class('primary')
+        new.connect('clicked', lambda _b: handlers['act']('new'))
+        close = Gtk.Button(label='Cerrar')
+        close.add_css_class('elyares-btn')
+        close.connect('clicked', lambda _b: handlers['act']('close'))
+        head.append(new)
+        head.append(close)
+        self.page.append(head)
+        if not rows:
+            empty = Gtk.Label(label='Todavía no guardaste ningún workflow. Crea uno para repetir una cadena '
+                                    'de agentes sin escribirla cada vez.', xalign=0, wrap=True)
+            empty.add_css_class('dim-label')
+            self.page.append(empty)
+            return
+        for i, r in enumerate(rows):
+            card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+            card.add_css_class('elyares-card')
+            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
+            col.set_hexpand(True)
+            name = Gtk.Label(xalign=0)
+            name.set_markup(f'<b>{GLib.markup_escape_text(r["name"])}</b>')
+            name.set_ellipsize(Pango.EllipsizeMode.END)
+            note = Gtk.Label(xalign=0, wrap=True)
+            note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            note.set_max_width_chars(1)
+            note.add_css_class('dim-label')
+            note.set_label(r['place'] if not r['status'] else f'{r["place"]} · {r["status"]}')
+            self.refs.append(note)
+            col.append(name)
+            col.append(note)
+            card.append(col)
+            buttons = [('Ver', 'view', False, r['mine']),
+                       ('Lanzar', f'launch:{i}', True, r['launch']),
+                       ('Editar', f'edit:{i}', False, True),
+                       ('Borrar', f'delete:{i}', False, r['delete'])]
+            for label, key, primary, on in buttons:
+                if label == 'Ver' and not r['mine']:
+                    continue
+                btn = Gtk.Button(label=label)
+                btn.add_css_class('elyares-btn')
+                btn.add_css_class('compact')
+                if primary:
+                    btn.add_css_class('primary')
+                if label == 'Borrar':
+                    btn.add_css_class('danger')
+                btn.set_sensitive(on)
+                btn.set_valign(Gtk.Align.CENTER)
+                btn.connect('clicked', lambda _b, k=key: handlers['act'](k))
+                card.append(btn)
+            self.page.append(card)
