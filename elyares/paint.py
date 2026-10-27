@@ -166,7 +166,7 @@ def urls(text):
 
 
 def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=None,
-             ink=None, shade=None, blocks=None, tables=None):
+             ink=None, shade=None, blocks=None, tables=None, caps=False):
     """Lo que escribe Claude (markdown) como marcado de Pango, con lo justo
     para leerlo en la isla: negritas, `código` y títulos, viñetas, y los
     bloques de código y las tablas en monoespaciado, para que no se
@@ -178,11 +178,13 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
     con su barra, la raya `---` como una línea suave, y un respiro antes de
     cada título. Sin ellos sale como siempre.
 
-    Con `ink` (papel -> #rrggbb) y `shade` (un #rrggbb de fondo), los bloques
-    de código salen resaltados según su lenguaje y sobre ese fondo, y el
-    código inline también. `blocks` recibe [(lenguaje, texto)] de cada bloque,
+    Con `ink` y `shade` (un #rrggbb de fondo), los bloques de código salen
+    resaltados según su lenguaje, con los colores de moonfly (el tema de
+    nvim), y sobre ese fondo; el código inline lleva el fondo también. `blocks` recibe [(lenguaje, texto)] de cada bloque,
     en orden. Cada bloque va entre dos líneas de respiro que llevan CODE_MARK
     y CODE_END: con ellas la isla sabe dónde pintar su fondo.
+
+    Con `caps`, los títulos salen chicos, en mayúsculas y con espacio entre letras.
 
     Con `tables` (una lista), una tabla no va en el texto: deja en su sitio
     una línea con TABLE_MARK y se apunta ahí como (filas, alineación, con
@@ -225,7 +227,7 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
             continue
         if fenced:
             if shade and ink:
-                out.append(_code_line(line, lang, ink, mono))
+                out.append(_code_line(line, lang, mono))
             else:
                 out.append(f'{mono}{html.escape(line, quote=False)}</span>')
             body.append(line)
@@ -237,9 +239,11 @@ def markdown(text, code='#c0caf5', head='#ffffff', bold=None, dim=None, accent=N
         m = HEADING.fullmatch(line)
         if m:
             size = ' size="large"' if len(m[1]) <= 2 else ''
+            if caps:
+                size = ' size="small" letter_spacing="1200"'
             if rich and out and out[-1] != '':
                 out.append('')          # un respiro antes de un título
-            out.append(f'<span foreground="{head}" weight="bold"{size}>{inline(m[2])}</span>')
+            out.append(f'<span foreground="{head}" weight="bold"{size}>{inline(m[2].upper() if caps else m[2])}</span>')
             continue
         m = STEP_TITLE.fullmatch(line) if rich else None
         if m:
@@ -320,11 +324,114 @@ def highlight(lang, line):
     return out
 
 
-def _code_line(line, lang, ink, mono):
+# Los colores de los bloques de código son los de moonfly, el tema de nvim.
+MOONFLY = {
+    'white': '#c6c6c6', 'comment': '#949494', 'keyword': '#cf87e8', 'const': '#ff5189', 'string': '#c6c684',
+    'number': '#de935f', 'func': '#74b2ff', 'type': '#36c692', 'macro': '#79dac8', 'prop': '#adadf3',
+    'self': '#8cc85f', 'op': '#e65e72', 'path': '#e196a2', 'add': '#85dc85', 'del': '#ff5d5d',
+}
+_C_KEYWORDS = ('if else for while do switch case default break continue return goto in as is new delete throw try '
+               'catch finally await async yield import export from package use mod pub crate super where impl trait '
+               'struct enum union class interface extends implements static const let mut var val fn func function def '
+               'type typeof instanceof void unsafe extern ref move dyn loop match fun override abstract final '
+               'public private protected namespace using lambda with pass raise except elif and or not del global '
+               'nonlocal assert select from where insert into update delete create table join left right inner on '
+               'group by order limit set values end then local repeat until function readonly declare').split()
+_C_TYPES = ('i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize f32 f64 bool char str int float double long short '
+            'string number boolean any never object byte rune error uint int32 int64 uint8 dynamic String Vec Option '
+            'Result Box').split()
+_COMMENTS = {'c': r'//.*|/\*.*?(?:\*/|$)', 'hash': r'#.*', 'dash': r'--.*'}
+_KIND = {'rust': 'c', 'rs': 'c', 'go': 'c', 'golang': 'c', 'c': 'c', 'cpp': 'c', 'c++': 'c', 'h': 'c', 'java': 'c',
+         'kotlin': 'c', 'dart': 'c', 'php': 'c', 'js': 'c', 'javascript': 'c', 'ts': 'c', 'typescript': 'c',
+         'jsx': 'c', 'tsx': 'c', 'json': 'c', 'jsonc': 'c', 'python': 'hash', 'py': 'hash', 'yaml': 'hash',
+         'yml': 'hash', 'toml': 'hash', 'sql': 'dash', 'lua': 'dash'}
+_CONSTS = {'true', 'false', 'True', 'False', 'None', 'null', 'nil', 'undefined', 'NULL'}
+_SELF = {'self', 'Self', 'this', 'super'}
+_NAMING = {'struct', 'enum', 'class', 'trait', 'impl', 'interface', 'type', 'union', 'new', 'as', 'extends',
+           'implements'}
+_CODE_RE = {}
+
+
+def _code_re(kind, rust):
+    if kind not in _CODE_RE:
+        char = r"|'(?:\\.|[^'\\])'" if rust else r"|'(?:[^'\\]|\\.)*'?"
+        _CODE_RE[kind, rust] = re.compile(
+            rf'(?P<com>{_COMMENTS[kind]})|(?P<str>"(?:[^"\\]|\\.)*"?{char}|`[^`]*`?)'
+            r'|(?P<attr>#!?\[[^\]]*\]|@[A-Za-z_][\w.]*)'
+            r'|(?P<num>\b0x[\da-fA-F_]+\b|\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?(?:[iuf]\d+|usize|isize)?\b)'
+            r'|(?P<word>[A-Za-z_$][\w$]*)|(?P<op>[-+*/%=<>!&|^~?:]+)|(?P<other>.)', re.S)
+    return _CODE_RE[kind, rust]
+
+
+def code_colors(lang, line):
+    """Una línea de un bloque de código como [(texto, color, cursiva)], con los
+    colores de moonfly. Sin lenguaje conocido va en blanco; `diff` colorea por
+    el signo de cada línea y el shell se lee como un comando."""
+    name = (lang or '').split()[0] if lang else ''
+    white = MOONFLY['white']
+    if name == 'diff':
+        color = {'+': 'add', '-': 'del', '@': 'func'}.get(line[:1])
+        return [(line, MOONFLY.get(color, white), False)]
+    if LANGS.get(name) == 'shell' and name not in _KIND:
+        if line.lstrip().startswith('#'):
+            return [(line, MOONFLY['comment'], True)]
+        roles = {'cmd': 'func', 'flag': 'number', 'str': 'string', 'var': 'macro', 'path': 'path', 'num': 'number',
+                 'dim': 'op', 'arg': 'white'}
+        return [(t, MOONFLY[roles[r]], False) for t, r in _shell(line[2:] if line.startswith('$ ') else line)]
+    kind = _KIND.get(name)
+    if not kind:
+        return [(line, white, False)]
+    keyed = name in ('json', 'jsonc', 'yaml', 'yml', 'toml')
+    out, last = [], ''
+    for m in _code_re(kind, name in ('rust', 'rs')).finditer(line):
+        tok, role, rest = m.group(), m.lastgroup, line[m.end():]
+        ahead = rest.lstrip()[:1]
+        color, italic = white, False
+        if role == 'com':
+            color, italic = MOONFLY['comment'], True
+        elif role == 'str':
+            color = MOONFLY['prop'] if keyed and re.match(r'\s*:', rest) else MOONFLY['string']
+        elif role == 'attr':
+            color = MOONFLY['func']
+        elif role == 'num':
+            color = MOONFLY['number']
+        elif role == 'op':
+            color = MOONFLY['op']
+        elif role == 'word':
+            color = _word_color(tok, line[:m.start()], ahead, last, keyed and re.match(r'\s*[:=]', rest))
+            last = tok
+        out.append((tok, color, italic))
+    return out
+
+
+def _word_color(tok, before, ahead, last, key):
+    """El color de una palabra de código: por lo que es y por lo que la rodea."""
+    if key:
+        return MOONFLY['prop']
+    if tok in _CONSTS:
+        return MOONFLY['const']
+    if tok in _SELF:
+        return MOONFLY['self']
+    if tok in _C_KEYWORDS:
+        return MOONFLY['keyword']
+    if tok in _C_TYPES or last in _NAMING:
+        return MOONFLY['type']
+    if ahead == '!' and not before.endswith('!'):
+        return MOONFLY['macro']
+    if ahead == '(':
+        return MOONFLY['func']
+    if before.endswith('.'):
+        return MOONFLY['prop']
+    if tok[0].isupper():
+        return MOONFLY['number'] if tok.isupper() and len(tok) > 1 else MOONFLY['type']
+    return MOONFLY['white']
+
+
+def _code_line(line, lang, mono):
     """Una línea de un bloque de código, resaltada. El fondo del bloque lo
     pinta la isla detrás de todas sus líneas."""
-    body = ''.join(f'<span foreground="{ink.get(role) or ink['arg']}">{html.escape(text, quote=False)}</span>'
-                   for text, role in highlight(lang, line))
+    body = ''.join(f'<span foreground="{color}"{' style="italic"' if italic else ''}>'
+                   f'{html.escape(text, quote=False)}</span>' for text, color, italic in code_colors(lang, line))
     return f'{mono} {body} </span>'
 
 

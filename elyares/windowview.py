@@ -17,7 +17,7 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import hypr, mascot, settings, windowframe
+from . import fonts, hypr, mascot, settings, themes, tmuxsessions, windowframe
 from .state import MAIN_ROLE, elapsed
 
 APP_ID = 'dev.elyares.Engineer'
@@ -52,11 +52,12 @@ class WindowView:
     hypr_async = True               # las pruebas lo apagan: el pedido sale en el acto
     window_body = 0                 # alto extra que piden las tarjetas del tablero (lo usa body_h)
     sources_pick = 'claude'         # la fuente que muestra
-    panel_open = ''                 # 'alerts' o 'settings' cuando una de esas vistas está a la vista
+    panel_open = ''                 # 'alerts', 'settings' o 'tmux' cuando una de esas vistas está a la vista
     help_win = None
     frame = None                    # el marco de widgets (windowframe.Frame); None sin ventana real
 
     def window_init(self):
+        self.tmux_watch = tmuxsessions.Watcher()
         self.windowed = False
         self.app_win = None
         self.frame = None
@@ -138,6 +139,7 @@ class WindowView:
         self.overlay.add_overlay(self.frame.sources)       # y la vista Fuentes, que lo cubre todo
         self.overlay.add_overlay(self.frame.alerts)        # y la bandeja y los ajustes, igual
         self.overlay.add_overlay(self.frame.settings)
+        self.overlay.add_overlay(self.frame.tmux)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
 
@@ -151,7 +153,7 @@ class WindowView:
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
         self.sources_open = key == 'sources'
-        self.panel_open = key if key in ('alerts', 'settings') else ''
+        self.panel_open = key if key in ('alerts', 'settings', 'tmux') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -429,6 +431,9 @@ class WindowView:
             self.panel_open = ''
         frame.alerts.set_visible(self.panel_open == 'alerts')
         frame.settings.set_visible(self.panel_open == 'settings')
+        frame.tmux.set_visible(self.panel_open == 'tmux')
+        if self.panel_open == 'tmux':
+            frame.tmux.set_sessions(self.window_tmux(), dict(jump=self.window_tmux_jump))
         if self.panel_open == 'alerts':
             tones = {'': 'red', 'ok': 'green', 'info': 'yellow', 'run': 'metal'}
             cards = []
@@ -443,10 +448,32 @@ class WindowView:
             st = self.settings
             rows = [('glass', 'Vidrio', bool(st['glass']), 'La ventana translúcida, desenfocada por Hyprland.'),
                     ('compact', 'Modo compacto', bool(st['compact']), 'De la isla suelta; la ventana no lo usa.'),
-                    ('pinned', 'Isla fijada', bool(st['pinned']), 'De la isla suelta; la ventana ya está abierta.')]
+                    ('pinned', 'Isla fijada', bool(st['pinned']), 'De la isla suelta; la ventana ya está abierta.'),
+                    ('chat_tech', 'Chat técnico', bool(st['chat_tech']), 'Bloques y tablas con borde fino y títulos en mayúsculas.'),
+                    ('tired_eyes', 'Vista cansada', bool(st['tired_eyes']),
+                     'Letra un 25 % más grande y más gruesa, y textos apagados más claros.')]
             rows += [(key, f'Fuente: {label}', bool(st[key]), '') for key, label in sources.SOURCES if key != 'claude']
             frame.settings.set_rows(rows, st['position'], dict(toggle=self.window_setting, move=self.move,
-                                                               theme=self.window_theme))
+                                                               theme=self.window_theme, font=self.window_font,
+                                                               pick_theme=self.pick_theme),
+                                    fonts.current, themes.current)
+
+    def window_tmux(self):
+        """Las sesiones de tmux con el estado de los Claude de cada ventana."""
+        return self.tmux_sessions()
+
+    def tmux_sessions(self, fresh=False):
+        """Lo mismo, o None si tmux aún no contestó; `fresh` pregunta en el acto."""
+        found = tmuxsessions.snapshot() if fresh else self.tmux_watch.read()
+        if found is None:
+            return None
+        claude = [(s.pane, s.state, [a.role for a in s.agents.values()])
+                  for s in self.model.sessions.values() if s.pane]
+        return tmuxsessions.merge(found, claude)
+
+    def window_tmux_jump(self, session, window):
+        threading.Thread(target=tmuxsessions.jump, args=(session, window), daemon=True).start()
+        self.tmux_watch.refresh()
 
     def window_alert(self, sid, key):
         s = self.model.sessions.get(sid)
@@ -470,8 +497,42 @@ class WindowView:
         elif key == 'pinned':
             self.settings['pinned'] = not self.settings['pinned']
             settings.save(self.settings)
+        elif key == 'chat_tech':
+            self.settings['chat_tech'] = not self.settings['chat_tech']
+            settings.save(self.settings)
+            self.ensure_tick()
+            self.overlay.queue_draw()
+        elif key == 'tired_eyes':
+            self.set_tired(not self.settings['tired_eyes'])
+            self.settings['tired_eyes'] = fonts.tired
+            settings.save(self.settings)
+            windowframe.load_fonts()
+            self.chat_theme()
+            self.ensure_tick()
+            self.overlay.queue_draw()
         else:
             self.toggle_source(key)
+
+    def window_font(self, family):
+        """Cambia la letra de la app, en la isla y en la ventana, y la guarda."""
+        if fonts.valid(family) == fonts.current:
+            return
+        self.settings['font'] = fonts.use(family)
+        settings.save(self.settings)
+        windowframe.load_fonts()
+        self.ensure_tick()
+        self.overlay.queue_draw()
+
+    def pick_theme(self, name):
+        """Cambia el tema de la isla y de la ventana, y lo guarda."""
+        if themes.valid(name) == themes.current:
+            return
+        self.settings['theme'] = themes.use(name)
+        settings.save(self.settings)
+        self.load_theme()
+        windowframe.load_fonts()
+        self.ensure_tick()
+        self.overlay.queue_draw()
 
     def window_theme(self):
         self.load_theme()

@@ -83,8 +83,8 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import (actions, chatview, coffe, commands, devherd, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, projectview, settings, sources, state, store, testrun, theme, windowview, workflowview)
+from . import (actions, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
+               preview, projectview, settings, sources, state, store, testrun, theme, themes, windowframe, windowview, workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
 MAX_ROWS = 5          # filas de la lista de alertas, con la cabecera de siempre
@@ -191,11 +191,14 @@ PET_SCALE = PET / 260
 TEXT_INSET = 12 + PET + 10 + 18   # lo que le quitan al texto la mascota y los márgenes
 ISLAND_BG = (5 / 255, 6 / 255, 8 / 255, .97)
 GLASS_ALPHA, GLASS_EDGE = .5, .16    # modo vidrio: fondo translúcido y filo claro
+WIN_GLASS_ALPHA = .5                 # la ventana de la app, en vidrio (igual que la isla suelta)
 TIP_GLASS_ALPHA = .7                 # la burbuja, en vidrio: más opaca que la isla, que se lee más rato
 TITLE_COLOR = (.95, .96, 1, 1)
-MUTED_COLOR = (.44, .49, .63, 1)
+MUTED_NORMAL = (.44, .49, .63, 1)
+MUTED_TIRED = (.78, .82, .92, 1)         # vista cansada: el gris apagado, mucho más claro
+MUTED_COLOR = MUTED_NORMAL
 # La barra entre el agente y el proyecto, en el mismo gris.
-SEP_COLOR = '#%02x%02x%02x' % tuple(round(c * 255) for c in MUTED_COLOR[:3])
+SEP_COLOR = '#%02x%02x%02x' % tuple(round(c * 255) for c in MUTED_NORMAL[:3])
 FONT_TITLE = 'Sans Semi-Bold 11'
 FONT_DETAIL = 'JetBrainsMono Nerd Font 9'
 FONT_BUTTON = 'Sans Semi-Bold 10'
@@ -272,6 +275,9 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.dnd = False
         self.hover = False
         self.settings = settings.load()
+        fonts.use(self.settings['font'])
+        themes.use(self.settings['theme'])
+        self.set_tired(self.settings['tired_eyes'])
         self.load_theme()
         # Abierta a mano, con un clic o con elyares-ctl. Fijada (preferencia
         # `pinned`) se queda así: no se cierra sola ni cuando el ratón se va.
@@ -545,9 +551,27 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.saved = data
             store.save(data)
 
+    @staticmethod
+    def set_tired(on):
+        """Vista cansada: letra más grande y grises más claros, en la isla y la ventana."""
+        global MUTED_COLOR, PILL_PAD, PILL_GAP
+        on = fonts.use_tired(on)
+        MUTED_COLOR = MUTED_TIRED if on else MUTED_NORMAL
+        PILL_PAD, PILL_GAP = (18, 3) if on else (22, 5)
+
     def load_theme(self):
-        """Acento de la mascota y colores del texto, del tema de omarchy."""
-        palette = theme.palette()
+        """Fondo, grises, acento de la mascota y colores del texto, del tema elegido."""
+        global ISLAND_BG, TITLE_COLOR, MUTED_NORMAL, MUTED_TIRED, MUTED_COLOR, SEP_COLOR
+        look = themes.get()
+        ISLAND_BG = (*themes.tuple_of(look['island']), ISLAND_BG[3])
+        TITLE_COLOR = (*themes.tuple_of(look['ink']), 1)
+        MUTED_NORMAL, MUTED_TIRED = look['island_muted'], look['island_tired']
+        MUTED_COLOR = MUTED_TIRED if fonts.tired else MUTED_NORMAL
+        SEP_COLOR = '#%02x%02x%02x' % tuple(round(c * 255) for c in MUTED_NORMAL[:3])
+        paint.ISLAND = look['island']
+        fonts.TIRED_MUTED = look['tired']
+        windowframe.use_theme()
+        palette = themes.palette()
         mascot.set_accent(palette.get('accent'))
         self.colors = paint.colors(palette)
         self.markups = {}
@@ -688,6 +712,9 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 req.reply({'sources': [
                     {'key': key, 'label': label, 'state': self.source_state(key),
                      'note': self.source_note(key)} for key, label in sources.SOURCES]})
+        elif order == 'sessions':
+            if req:
+                req.reply({'sessions': self.tmux_sessions(fresh=True) or []})
         elif order in ('allow', 'deny'):
             why = self.answer(order == 'allow', (msg or {}).get('peer'))
             if req:
@@ -710,8 +737,12 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         elif order == 'pin':
             self.toggle_pinned()
         elif order == 'theme':
-            self.load_theme()
-            self.ensure_tick()
+            name = (msg or {}).get('name')
+            if name in themes.THEMES:
+                self.pick_theme(name)
+            else:
+                self.load_theme()
+                self.ensure_tick()
         elif order == 'glass':
             self.settings['glass'] = not self.settings['glass']
             settings.save(self.settings)
@@ -1599,7 +1630,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.arc(x0 + r, h - r, r, math.pi / 2, math.pi)
         cr.close_path()
         glass = self.settings['glass']
-        cr.set_source_rgba(*ISLAND_BG[:3], GLASS_ALPHA if glass else ISLAND_BG[3])
+        cr.set_source_rgba(*ISLAND_BG[:3], (WIN_GLASS_ALPHA if self.windowed else GLASS_ALPHA) if glass else ISLAND_BG[3])
         cr.fill_preserve()
         # Una ventana no lleva el filo claro: ya tiene su borde de Hyprland.
         return cr.copy_path() if glass and not self.windowed else None
@@ -2840,7 +2871,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def _shape(layout, font, width=None, lines=1):
         """Fuente, ancho y corte de un texto. Con lines > 1 se parte en líneas y
         solo lleva "…" si ni así cabe."""
-        layout.set_font_description(Pango.FontDescription.from_string(font))
+        layout.set_font_description(Pango.FontDescription.from_string(fonts.pick(font)))
         if width:
             layout.set_width(int(max(10, width) * Pango.SCALE))
             layout.set_ellipsize(Pango.EllipsizeMode.END)

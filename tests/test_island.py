@@ -431,8 +431,8 @@ class Consulta(IslandCase):
     def test_agente_y_proyecto_con_el_agente_en_su_color(self):
         mascot = app.mascot
         cases = (('elyares-auditor', 'a & b', mascot.accent('auditor'), mascot.ACCENTS['auditor']),
-                 # El engineer va con el color del tema.
-                 (state.MAIN_AGENT, 'p', mascot.accent(state.MAIN_ROLE), mascot.COLORS['accent']),
+                 # El engineer va con el color de su gorra.
+                 (state.MAIN_AGENT, 'p', mascot.accent(state.MAIN_ROLE), mascot.COLORS['mesh']),
                  # Uno que no es de la familia va sin color propio, y su nombre llega de fuera.
                  ('a<b', 'p', None, None))
         for name, project, color, expected in cases:
@@ -514,6 +514,20 @@ class Tablero(Dibujo):
         self.isl.hover, self.isl.expanded = False, True
         self.assertEqual(self.isl.target(), 'board')
         self.assertEqual(self.isl.goal()[0], app.BOARD_W)
+
+    def test_cambiar_de_tema_repinta_la_isla_y_se_guarda(self):
+        self.isl.expanded = True
+        self.isl.overlay = mock.Mock()
+        with mock.patch.object(app.settings, 'save') as save:
+            self.isl.pick_theme('moonfly')
+        self.assertEqual(self.isl.settings['theme'], 'moonfly')
+        self.assertEqual(save.call_args.args[0]['theme'], 'moonfly')
+        self.assertEqual(app.ISLAND_BG[:3], app.themes.tuple_of(app.themes.THEMES['moonfly']['island']))
+        self.assertEqual(app.paint.ISLAND, app.themes.THEMES['moonfly']['island'])
+        self.draw()
+        with mock.patch.object(app.settings, 'save'):
+            self.isl.pick_theme('omarchy')
+        self.assertEqual(app.ISLAND_BG[:3], app.themes.tuple_of('#050608'))
 
     def reply(self, agent, tint, proj, at=0):
         self.isl.model.handle({'event': 'alert', 'session_id': f'chat:{agent}', 'name': proj, 'tone': 'ok',
@@ -1063,7 +1077,7 @@ class Chat(Dibujo):
             self.reviewer(agent)
             out = self.isl.chat_markdown(src)
             self.assertIn(f'foreground="{tones[role]}" background=', out)   # el código en línea
-            self.assertIn(f'foreground="{tones[role]}">git</span>', out)    # el comando del bloque
+            self.assertIn(f'foreground="{paint.MOONFLY["func"]}">git</span>', out)   # el bloque: colores de nvim
             self.assertNotIn(tones[other], out)
 
     def test_un_agente_de_solo_lectura_abre_otra_conversacion_sin_esperar(self):
@@ -3401,7 +3415,7 @@ class Ventana(Dibujo):
         surface.flush()
         data = surface.get_data()
         corner = bytes(data[0:4])
-        self.assertEqual(corner[3], round(app.GLASS_ALPHA * 255))   # deja ver (y desenfocar) lo de atrás
+        self.assertEqual(corner[3], round(app.WIN_GLASS_ALPHA * 255))   # deja ver (y desenfocar) lo de atrás
         self.assertLess(corner[3], 255)
         self.assertIsNone(isl.island_fill(self.cr, 0, 700, 400))     # sin el filo claro de la isla suelta
         isl.settings['glass'] = False                                # sin vidrio, entero como siempre

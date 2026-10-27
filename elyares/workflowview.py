@@ -59,7 +59,7 @@ gi.require_version('Gtk', '4.0')
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import mascot, paint, projects, settings, state, workflows  # noqa: E402
+from . import mascot, paint, projects, settings, state, themes, workflows  # noqa: E402
 
 WF_W = 600                    # la isla de los flujos, abierta: el ancho del chat y del tablero
 WF_WIN_H = 760                # alto de su ventana: lo más alto que llega (el editor con diez pasos)
@@ -1206,7 +1206,7 @@ class WorkflowView:
         y = max(6, min(y, h - mh - 6))
         mascot.rrect(cr, x, y, width, mh, 10)
         # En vidrio el menú es translúcido como la burbuja de una fuente; con la isla opaca, casi opaco.
-        cr.set_source_rgba(.07, .08, .10, (WF_GLASS_ALPHA if self.settings['glass'] else .98) * alpha)
+        cr.set_source_rgba(*themes.get()['popup'], (WF_GLASS_ALPHA if self.settings['glass'] else .98) * alpha)
         cr.fill_preserve()
         cr.set_source_rgba(1, 1, 1, .12 * alpha)
         cr.set_line_width(1)

@@ -385,6 +385,28 @@ class Bandeja(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
+class Sesiones(unittest.TestCase):
+
+    def test_un_boton_por_ventana_y_el_clic_salta(self):
+        log = []
+        panel = windowframe.TmuxPanel()
+        wins = [dict(index='1', name='edit', state='', path='/p'),
+                dict(index='2', name='claude', state='working', path='/p')]
+        panel.set_sessions([dict(name='api', state='working', claudes=1, windows=wins)],
+                           dict(jump=lambda s, w: log.append((s, w))))
+        self.assertEqual(len(_buttons(panel)), 2)
+        _buttons(panel)[1].emit('clicked')
+        self.assertEqual(log, [('api', '2')])
+
+    def test_sin_tmux_y_sin_respuesta_no_hay_botones(self):
+        panel = windowframe.TmuxPanel()
+        panel.set_sessions([], {})
+        self.assertEqual(_buttons(panel), [])
+        panel.set_sessions(None, {})
+        self.assertEqual(_buttons(panel), [])
+
+
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
 class Ayuda(unittest.TestCase):
 
     def setUp(self):

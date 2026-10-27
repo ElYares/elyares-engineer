@@ -181,6 +181,28 @@ class Socket(unittest.TestCase):
         self.assertEqual(r.stdout.split(), ['GitHub', 'conectada', '2', 'cuentas'])
         self.next()
 
+    def test_sessions(self):
+        type(self).answer = {'sessions': [dict(name='api', claudes=1, state='working', windows=[
+            dict(index='1', name='edit', state='', agents=[]),
+            dict(index='2', name='claude', state='working', agents=['auditor'])])]}
+        r = self.run_bin('elyares-ctl', 'sessions')
+        self.assertEqual(r.stdout.splitlines(), ['api  (1 Claude)', '  1 edit', '  2 claude      trabaja [auditor]'])
+        self.next()
+
+    def test_sessions_en_una_linea(self):
+        type(self).answer = {'sessions': [
+            dict(name='api', claudes=2, state='working', windows=[dict(index='1', name='a', state='working', agents=[]),
+                                                                 dict(index='2', name='b', state='waiting', agents=[])]),
+            dict(name='web', claudes=0, state='', windows=[dict(index='1', name='a', state='', agents=[])])]}
+        r = self.run_bin('elyares-ctl', 'sessions', '--line', 'api')
+        self.assertEqual(r.stdout.strip(), '▲1 ●1')
+        self.next()
+        type(self).answer = {'sessions': [dict(name='web', claudes=0, state='', windows=[
+            dict(index='1', name='a', state='', agents=[])])]}
+        r = self.run_bin('elyares-ctl', 'sessions', '--line', 'web')
+        self.assertEqual(r.stdout.strip(), '')
+        self.next()
+
     def test_orden_desconocida(self):
         self.assertEqual(self.run_bin('elyares-ctl', 'bailar').returncode, 2)
         self.assertEqual(self.run_bin('elyares-ctl', 'toggle', 'nada').returncode, 2)

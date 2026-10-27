@@ -58,8 +58,9 @@ def set_accent(color):
 
 
 def accent(role):
-    """El color de un personaje, en hexadecimal: el suyo, o el del tema si es el engineer."""
-    return ACCENTS.get(role, COLORS['accent'])
+    """El color de un personaje, en hexadecimal: el suyo, o el de la gorra si es el engineer
+    (la antena sigue el tema: `COLORS['accent']`)."""
+    return ACCENTS.get(role, COLORS['mesh'])
 
 
 def rgba(color, alpha=1.0):
