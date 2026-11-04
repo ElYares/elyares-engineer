@@ -207,7 +207,8 @@ class Equipo(ModelCase):
         self.assertEqual([m.role for m in self.m.sessions['a'].team()], list(state.TEAM))
         self.assertEqual([m.name for m in self.m.sessions['a'].team()],
                          ['elyares-engineer', 'elyares-architect', 'elyares-auditor', 'elyares-reviewer',
-                          'elyares-designer', 'elyares-mobile', 'elyares-devops', 'elyares-researcher'])
+                          'elyares-designer', 'elyares-mobile', 'elyares-devops', 'elyares-researcher',
+                          'elyares-coach'])
         self.assertEqual(self.states(), self.rest_idle('working', 'idle', 'idle', 'idle'))
 
     def test_los_pasos_del_engineer_son_los_del_turno(self):
@@ -323,13 +324,13 @@ class Equipo(ModelCase):
     def test_los_agentes_nuevos_son_de_la_familia(self):
         self.send('start')
         self.send('tool', tool_name='Agent', tool_input={})
-        new = ('designer', 'mobile', 'devops', 'researcher')
+        new = ('designer', 'mobile', 'devops', 'researcher', 'coach')
         for i, kind in enumerate(new):
             self.send('agent-start', agent_id=f's{i}', agent_type=f'elyares-{kind}')
             self.send('tool', agent_id=f's{i}', agent_type=f'elyares-{kind}', tool_name='Read',
                       tool_input={'file_path': '/x/proj/app.dart'})
         team = {m.role: m for m in self.m.sessions['a'].team()}
-        self.assertEqual([team[kind].state for kind in new], ['working'] * 4)
+        self.assertEqual([team[kind].state for kind in new], ['working'] * 5)
         self.assertEqual((team['mobile'].name, team['devops'].name), ('elyares-mobile', 'elyares-devops'))
         # Una sesión entera de uno de ellos (`claude --agent`) sale con su cara.
         self.send('start', sid='b', agent_type='elyares-designer')
