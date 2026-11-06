@@ -44,8 +44,12 @@ TIRED_MUTED = '#c9d2ea'
 # El texto de lo elegido (pestaña, fila): la tinta del tema, no un blanco fijo.
 TIRED_INK = '#ffffff'
 
+# El estilo técnico pone toda la letra en monoespaciada, sea cual sea la elegida.
+MONO = 'JetBrainsMono Nerd Font'
+
 current = SYSTEM
 tired = False
+techno = False
 
 
 def valid(key):
@@ -63,6 +67,12 @@ def use_scale(pct):
     global TIRED_SCALE
     TIRED_SCALE = (pct if pct in TIRED_SCALES else TIRED_SCALES[0]) / 100
     return round(TIRED_SCALE * 100)
+
+
+def use_techno(on):
+    global techno
+    techno = bool(on)
+    return techno
 
 
 def use_tired(on):
@@ -89,7 +99,9 @@ def pick(font):
     size = font.rsplit(' ', 1)[-1]
     has_size = size.isdigit()
     head = font[:-len(size)].rstrip() if has_size else font
-    if current != SYSTEM and (head == SYSTEM or head.startswith(SYSTEM + ' ')):
+    if techno and (head == SYSTEM or head.startswith(SYSTEM + ' ')):
+        head = MONO + head[len(SYSTEM):]
+    elif current != SYSTEM and (head == SYSTEM or head.startswith(SYSTEM + ' ')):
         _key, _label, family, style, _weight, _italic = _BY_KEY[current]
         head = ' '.join(part for part in (family, style) if part)
     elif tired and head == SYSTEM and has_size:
@@ -100,7 +112,10 @@ def pick(font):
 def css():
     """La letra de los widgets; la caja del chat lleva la suya."""
     out = ''
-    if current != SYSTEM:
+    if techno:
+        out += (f'label, button, entry, dropdown, .elyares-pill {{ font-family: "{MONO}"; '
+                f'font-style: normal; }}\n')
+    elif current != SYSTEM:
         _key, _label, family, _style, weight, italic = _BY_KEY[current]
         out += (f'.elyares-slot label, .elyares-bar label, .elyares-bar button, .elyares-sidebox label, '
                 f'.elyares-segments button, .elyares-pill, .elyares-card label, .elyares-btn, .elyares-sources label, '

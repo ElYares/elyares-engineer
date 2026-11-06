@@ -279,6 +279,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         themes.use(self.settings['theme'])
         fonts.use_scale(self.settings['tired_scale'])
         self.set_tired(self.settings['tired_eyes'])
+        self.set_techno(self.settings['tech_style'])
         self.load_theme()
         # Abierta a mano, con un clic o con elyares-ctl. Fijada (preferencia
         # `pinned`) se queda así: no se cierra sola ni cuando el ratón se va.
@@ -559,6 +560,11 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         on = fonts.use_tired(on)
         MUTED_COLOR = MUTED_TIRED if on else MUTED_NORMAL
         PILL_PAD, PILL_GAP = (18, 3) if on else (22, 5)
+
+    @staticmethod
+    def set_techno(on):
+        """Estilo técnico: esquinas rectas y letra monoespaciada, en la isla y la ventana."""
+        mascot.SQUARE = fonts.use_techno(on)
 
     def load_theme(self):
         """Fondo, grises, acento de la mascota y colores del texto, del tema elegido."""
@@ -1881,7 +1887,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def panel(cr, x, y, w, h, alpha, tint=None, over=False):
         """Una tarjeta del tablero. Con `tint`, un velo de ese color que sube
         desde abajo: de qué color es dice cómo está quien va dentro."""
-        mascot.rrect(cr, x, y, w, h, 16)
+        mascot.box(cr, x, y, w, h, 16)
         cr.set_source_rgba(*themes.glow(), (.085 if over else .05) * alpha)
         cr.fill_preserve()
         if tint:
@@ -1981,7 +1987,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             tw = lw + 28
             chosen = s is current
             if chosen or self.over(x, y, tw, th):
-                mascot.rrect(cr, x, y, tw, th, th / 2)
+                mascot.box(cr, x, y, tw, th, th / 2)
                 cr.set_source_rgba(*themes.glow(), (.13 if chosen else .06) * alpha)
                 cr.fill()
             color = self.tab_dot(s)
@@ -2004,7 +2010,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             lw, lh = label.get_pixel_size()
             tw = lw + 20
             over = self.over(x, y, tw, th)
-            mascot.rrect(cr, x + .5, y + .5, tw - 1, th - 1, th / 2)
+            mascot.box(cr, x + .5, y + .5, tw - 1, th - 1, th / 2)
             cr.set_source_rgba(*themes.glow(), (.10 if over else 0) * alpha)
             cr.fill_preserve()
             cr.set_dash([3, 3])
@@ -2143,7 +2149,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             cy = y + step * i + step / 2
             over = member.role != MAIN_ROLE and self.over(x, cy - step / 2, w, step)
             if over:
-                mascot.rrect(cr, x + 4, cy - step / 2 + 3, w - 8, step - 6, 10)
+                mascot.box(cr, x + 4, cy - step / 2 + 3, w - 8, step - 6, 10)
                 cr.set_source_rgba(*themes.glow(), .06 * alpha)
                 cr.fill()
             if member.role != MAIN_ROLE:
@@ -2168,7 +2174,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             over = member.role != MAIN_ROLE and self.over(cx, cy, cw, ch)
             if over:
                 hovered = member
-                mascot.rrect(cr, cx + 4, cy + 1, cw - 8, ch - 2, 9)
+                mascot.box(cr, cx + 4, cy + 1, cw - 8, ch - 2, 9)
                 cr.set_source_rgba(*themes.glow(), .08 * alpha)
                 cr.fill()
             if member.role != MAIN_ROLE:
@@ -2244,7 +2250,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         for i, (text, at) in enumerate(shown):
             last = i == len(shown) - 1
             if last:
-                mascot.rrect(cr, left - 4, ty - 5, right - left + 8, 24, 8)
+                mascot.box(cr, left - 4, ty - 5, right - left + 8, 24, 8)
                 cr.set_source_rgba(*themes.glow(), .07 * alpha)
                 cr.fill()
                 mark, color = marks.get(member.state, ('›', None))
@@ -2293,7 +2299,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.rows.append((s, y, ROW_H))
             # La que tiene la ficha abierta se queda marcada.
             if self.over(left, y, right - left, ROW_H - 1) or (s.card and s is self.view.session):
-                mascot.rrect(cr, left, y + 1, right - left, ROW_H - 2, 8)
+                mascot.box(cr, left, y + 1, right - left, ROW_H - 2, 8)
                 cr.set_source_rgba(*themes.glow(), .07 * alpha)
                 cr.fill()
             cr.new_sub_path()
@@ -2330,7 +2336,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         """El fragmento que se está editando, como un diff de pocas líneas."""
         p = self.preview()
         left, right = x0 + 14, x0 + w - 14
-        mascot.rrect(cr, left, top + 2, right - left, height - 6, 10)
+        mascot.box(cr, left, top + 2, right - left, height - 6, 10)
         cr.set_source_rgba(*themes.glow(), .05 * alpha)
         cr.fill()
         tx, y = left + 12, top + PREVIEW_PAD
@@ -2386,7 +2392,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.buttons[key] = (x, top, cw, REPLY_CHIPS_H - 4)
             now = s is shown
             over = self.over(x, top, cw, REPLY_CHIPS_H - 4)
-            mascot.rrect(cr, x, top, cw, REPLY_CHIPS_H - 4, 8)
+            mascot.box(cr, x, top, cw, REPLY_CHIPS_H - 4, 8)
             cr.set_source_rgba(*(color if now else themes.hot()), (.28 if now else .12 if over else .05) * alpha)
             cr.fill()
             cr.arc(x + 11, top + (REPLY_CHIPS_H - 4) / 2, 3.5, 0, 2 * math.pi)
@@ -2409,7 +2415,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 self.draw_tinted(cr, left, top + 2, right - left, body - 6, mascot.rgba(mascot.accent(s.tint))[:3],
                                  alpha, 10)
             else:
-                mascot.rrect(cr, left, top + 2, right - left, body - 6, 10)
+                mascot.box(cr, left, top + 2, right - left, body - 6, 10)
                 cr.set_source_rgba(*themes.glow(), .05 * alpha)
                 cr.fill()
             tx, y = left + 12, top + PREVIEW_PAD
@@ -2470,7 +2476,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             lw, lh = layout.get_pixel_size()
             pw = lw + PILL_PAD
             over = x <= px <= x + pw and y <= py <= y + PILL_H
-            mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
+            mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
             cr.set_source_rgba(*themes.glow(), (.13 if over else .07) * alpha)
             cr.fill()
             cr.new_sub_path()
@@ -2504,7 +2510,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             cpw = cw + 20
             cx = x - PILL_GAP - cpw
             over_chat = cx <= px <= cx + cpw and y <= py <= y + PILL_H
-            mascot.rrect(cr, cx, y, cpw, PILL_H, PILL_H / 2)
+            mascot.box(cr, cx, y, cpw, PILL_H, PILL_H / 2)
             accent = mascot.rgba(mascot.accent('engineer'))[:3]
             cr.set_source_rgba(*accent, (.30 if over_chat else .18) * alpha)
             cr.fill()
@@ -2517,7 +2523,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             qpw = qw + 16
             qx = cx - PILL_GAP - qpw
             over_plus = qx <= px <= qx + qpw and y <= py <= y + PILL_H
-            mascot.rrect(cr, qx, y, qpw, PILL_H, PILL_H / 2)
+            mascot.box(cr, qx, y, qpw, PILL_H, PILL_H / 2)
             cr.set_source_rgba(*themes.glow(), (.13 if over_plus else .07) * alpha)
             cr.fill()
             cr.move_to(qx + (qpw - qw) / 2, y + (PILL_H - qh) / 2)
@@ -2530,7 +2536,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             fpw = fw + 16
             fx = qx - PILL_GAP - fpw
             over_flows = fx <= px <= fx + fpw and y <= py <= y + PILL_H
-            mascot.rrect(cr, fx, y, fpw, PILL_H, PILL_H / 2)
+            mascot.box(cr, fx, y, fpw, PILL_H, PILL_H / 2)
             cr.set_source_rgba(*themes.glow(), (.13 if over_flows else .07) * alpha)
             cr.fill()
             cr.move_to(fx + (fpw - fw) / 2, y + (PILL_H - fh) / 2)
@@ -2539,7 +2545,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
             self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
-        mascot.rrect(cr, x, y, pw, PILL_H, PILL_H / 2)
+        mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
         cr.set_source_rgba(*themes.glow(), (.13 if over else .07) * alpha)
         cr.fill()
         cr.move_to(x + (pw - lw) / 2, y + (PILL_H - lh) / 2)
@@ -2714,7 +2720,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         w, h = lw + 2 * TIP_CHIP_PAD + lead, lh + 2 * TIP_CHIP_PAD_Y
 
         def draw(x, y, alpha, glass):
-            mascot.rrect(cr, x, y, w, h, h / 2)
+            mascot.box(cr, x, y, w, h, h / 2)
             cr.set_source_rgba(*color, TIP_CHIP_FILL * alpha)
             cr.fill_preserve()
             cr.set_source_rgba(*color, TIP_CHIP_EDGE * alpha)
@@ -2801,7 +2807,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             tw = (width - (cols - 1) * TIP_STAT_GAP) / cols
             for i, (value, label, color) in enumerate(tiles):
                 tx = x + i * (tw + TIP_STAT_GAP)
-                mascot.rrect(cr, tx, y, tw, h, TIP_STAT_R)
+                mascot.box(cr, tx, y, tw, h, TIP_STAT_R)
                 cr.set_source_rgba(*color, TIP_STAT_FILL * alpha)
                 cr.fill_preserve()
                 cr.set_source_rgba(*color, TIP_STAT_EDGE * alpha)

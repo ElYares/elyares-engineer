@@ -1220,7 +1220,7 @@ class ChatView:
         deja ver el vidrio), un degradado suave del color del agente que nace en
         su borde derecho, y ahí mismo su barra, más fuerte si se está escribiendo."""
         r, g, b = color
-        mascot.rrect(cr, left, y, width, ih, 10)
+        mascot.box(cr, left, y, width, ih, 10)
         cr.set_source_rgba(*themes.glow(), (.09 if typing else .05) * alpha)
         cr.fill_preserve()
         cr.save()
@@ -1268,7 +1268,7 @@ class ChatView:
             layout = self._layout(cr, text, FONT_STEP)
             tw, th = layout.get_pixel_size()
             if key == 'plan' and plan:
-                mascot.rrect(cr, x - 6, y - 2, tw + 12, th + 4, (th + 4) / 2)
+                mascot.box(cr, x - 6, y - 2, tw + 12, th + 4, (th + 4) / 2)
                 cr.set_source_rgba(*color, .18 * alpha)
                 cr.fill()
             over = key is not None and self.over(x - 4, y - 3, tw + 8, th + 6)
@@ -1307,7 +1307,7 @@ class ChatView:
         width = 200 if faces else 170
         hh = len(items) * CHAT_SUGGEST_H + 8
         y = bottom - hh
-        mascot.rrect(cr, x - 8, y, width, hh, 10)
+        mascot.box(cr, x - 8, y, width, hh, 10)
         cr.set_source_rgba(*themes.get()['popup'], .97 * alpha)
         cr.fill_preserve()
         cr.set_source_rgba(*themes.glow(), .12 * alpha)
@@ -1316,7 +1316,7 @@ class ChatView:
         for i, (key, text, chosen) in enumerate(items):
             ry = y + 4 + i * CHAT_SUGGEST_H
             if self.over(x - 4, ry, width - 8, CHAT_SUGGEST_H):
-                mascot.rrect(cr, x - 4, ry, width - 8, CHAT_SUGGEST_H, 7)
+                mascot.box(cr, x - 4, ry, width - 8, CHAT_SUGGEST_H, 7)
                 cr.set_source_rgba(*themes.glow(), .08 * alpha)
                 cr.fill()
             color = self.chat_color() if chosen else mascot.rgba(self.ink('arg'))[:3]
@@ -1338,7 +1338,7 @@ class ChatView:
             layout = self._layout(cr, text, FONT_LINK)
             tw, th = layout.get_pixel_size()
             cw = tw + 20
-            mascot.rrect(cr, x, y, cw, CHAT_CHIP_H, CHAT_CHIP_H / 2)
+            mascot.box(cr, x, y, cw, CHAT_CHIP_H, CHAT_CHIP_H / 2)
             cr.set_source_rgba(*color, .18 * alpha)
             cr.fill_preserve()
             cr.set_source_rgba(*color, .4 * alpha)
@@ -1457,7 +1457,7 @@ class ChatView:
         """El aviso de que otra conversación que modifica el repo ya trabaja en
         esta carpeta, en el ámbar de los avisos."""
         r, g, b = mascot.rgba(paint.AMBER)[:3]
-        mascot.rrect(cr, left, y, width, CHAT_WARN_H - 4, 8)
+        mascot.box(cr, left, y, width, CHAT_WARN_H - 4, 8)
         cr.set_source_rgba(r, g, b, .14 * alpha)
         cr.fill()
         who = ', '.join(names)
@@ -1487,7 +1487,7 @@ class ChatView:
             lw, lh = layout.get_pixel_size()
             w = min(room, lw + 16 + (14 if closable else 0))
             over = self.over(x, y, w, CHAT_TABS_H - 4)
-            mascot.rrect(cr, x, y, w, CHAT_TABS_H - 4, 8)
+            mascot.box(cr, x, y, w, CHAT_TABS_H - 4, 8)
             cr.set_source_rgba(*(color if now else themes.hot()), (.28 if now else .12 if over else .05) * alpha)
             cr.fill()
             tone = (mascot.rgba(self.ink('bad'))[:3] if c.asking else mascot.rgba(self.ink('cmd'))[:3] if c.busy
@@ -1507,7 +1507,7 @@ class ChatView:
     def chat_layout(self, cr, index, entry, width):
         """Lo que mide y dibuja una cosa de la conversación, guardado mientras
         no cambie: (layout, alto que ocupa, papel, sus tablas ya medidas)."""
-        key = (index, entry.kind, entry.text, entry.images, width, self.chat_tech(), fonts.tired, fonts.TIRED_SCALE, fonts.current)
+        key = (index, entry.kind, entry.text, entry.images, width, self.chat_tech(), fonts.tired, fonts.TIRED_SCALE, fonts.current, fonts.techno)
         hit = self.chat_cache.get(key)
         if hit is not None:
             PangoCairo.update_layout(cr, hit[0])
@@ -1710,7 +1710,7 @@ class ChatView:
         degradado de ese color que se apaga hacia la izquierda: el de los bloques
         de código y el de la respuesta de un aviso."""
         r, g, b = color
-        mascot.rrect(cr, left, top, width, height, radius)
+        mascot.box(cr, left, top, width, height, radius)
         cr.save()
         cr.clip()
         cr.set_source_rgba(*themes.sink(), .34 * alpha)
@@ -1729,7 +1729,7 @@ class ChatView:
     @staticmethod
     def draw_outlined(cr, left, top, width, height, color, alpha, radius=4):
         """Un bloque de borde fino del color del agente sobre un fondo oscuro, sin degradado."""
-        mascot.rrect(cr, left, top, width, height, radius)
+        mascot.box(cr, left, top, width, height, radius)
         cr.set_source_rgba(*themes.sink(), .30 * alpha)
         cr.fill_preserve()
         fade = cairo.LinearGradient(left, 0, left + width, 0)
@@ -1765,7 +1765,7 @@ class ChatView:
             left, top = x + pos.x / Pango.SCALE, y + pos.y / Pango.SCALE + CHAT_TABLE_GAP
             width, height = sum(widths), sum(heights)
             cr.save()
-            mascot.rrect(cr, left, top, width, height, 6)
+            mascot.box(cr, left, top, width, height, 6)
             cr.clip()
             cr.set_source_rgba(*themes.sink(), .26 * alpha)
             cr.paint()
@@ -1798,7 +1798,7 @@ class ChatView:
                     self.tip_text(cr, cell, cell_x + pad_x, row_y + pad_y, tone, alpha, False)
                     cell_x += cell_w
             cr.restore()
-            mascot.rrect(cr, left + .5, top + .5, width - 1, height - 1, 6)
+            mascot.box(cr, left + .5, top + .5, width - 1, height - 1, 6)
             cr.set_source_rgba(r, g, b, .32 * alpha)
             cr.set_line_width(1)
             cr.stroke()
@@ -1908,7 +1908,7 @@ class ChatView:
         questions = self.chat.questions()
         q = questions[quiz['n']]
         color = self.chat_color()
-        mascot.rrect(cr, left, y, width, height, 12)
+        mascot.box(cr, left, y, width, height, 12)
         cr.set_source_rgba(*color, .10 * alpha)
         cr.fill_preserve()
         cr.set_source_rgba(*color, .45 * alpha)
@@ -1927,7 +1927,7 @@ class ChatView:
             key = f'chat-opt:{i}'
             self.buttons[key] = (left + 8, row, width - 16, CHAT_OPT_H)
             over = self.over(left + 8, row, width - 16, CHAT_OPT_H)
-            mascot.rrect(cr, left + 8, row, width - 16, CHAT_OPT_H, 8)
+            mascot.box(cr, left + 8, row, width - 16, CHAT_OPT_H, 8)
             cr.set_source_rgba(*(color if marked else themes.hot()), (.30 if marked else .12 if over else .05) * alpha)
             cr.fill()
             mark = ('☑ ' if marked else '☐ ') if q['multi'] else ''
@@ -1950,7 +1950,7 @@ class ChatView:
             return
         ask = self.chat.asking
         red = mascot.rgba(self.ink('bad'))[:3]
-        mascot.rrect(cr, left, y, width, CHAT_ASK_H, 12)
+        mascot.box(cr, left, y, width, CHAT_ASK_H, 12)
         cr.set_source_rgba(*red, .12 * alpha)
         cr.fill_preserve()
         cr.set_source_rgba(*red, .45 * alpha)
@@ -1977,7 +1977,7 @@ class ChatView:
         shown = found[first:first + CHAT_SUGGEST]
         hh = len(shown) * CHAT_SUGGEST_H + 8
         y = bottom - hh
-        mascot.rrect(cr, left, y, width, hh, 12)
+        mascot.box(cr, left, y, width, hh, 12)
         cr.set_source_rgba(*themes.get()['popup'], .97 * alpha)
         cr.fill_preserve()
         cr.set_source_rgba(*themes.glow(), .12 * alpha)
@@ -1987,7 +1987,7 @@ class ChatView:
         for i, (name, desc) in enumerate(shown):
             ry = y + 4 + i * CHAT_SUGGEST_H
             if first + i == pick:
-                mascot.rrect(cr, left + 4, ry, width - 8, CHAT_SUGGEST_H, 8)
+                mascot.box(cr, left + 4, ry, width - 8, CHAT_SUGGEST_H, 8)
                 cr.set_source_rgba(*themes.glow(), .09 * alpha)
                 cr.fill()
             layout = self._layout(cr, f'{sigil}{name}', FONT_YOU, width - 24)

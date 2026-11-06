@@ -42,6 +42,19 @@ def _role_rows():
 
 ROLE_ROWS = _role_rows()
 
+def tech_css():
+    """El estilo técnico: todo recto, sin sombras y con el filo a 1 px bien marcado."""
+    return f"""
+.elyares-segments, .elyares-segments button, .elyares-pill, .elyares-side row, .elyares-card,
+.elyares-btn, entry, textview, dropdown, button, popover, popover contents, scrollbar slider, switch, switch slider
+  {{ border-radius: 0; box-shadow: none; }}
+.elyares-segments, .elyares-card, .elyares-btn, .elyares-pill, .elyares-chathead
+  {{ border: 1px solid rgba({GLOW}, 0.22); }}
+.elyares-segments button:checked, .elyares-pill:checked, .elyares-side row:selected
+  {{ border-left: 2px solid {ACCENT}; }}
+"""
+
+
 def build_css():
     return f"""
 .elyares-slot {{ background: rgba({GLASS[0]}, 0.98); }}
@@ -91,7 +104,7 @@ def build_css():
 .elyares-pill:focus-visible, .elyares-card:focus-visible, entry:focus-within, textview:focus-within,
 dropdown:focus-within, switch:focus-visible, checkbutton:focus-visible, button:focus-visible {{
   outline: 2px solid {ACCENT}; outline-offset: 2px; }}
-"""
+{tech_css() if mascot.SQUARE else ''}"""
 
 CSS = build_css()
 _provider = None
