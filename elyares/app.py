@@ -515,7 +515,6 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.model.reap(actions.proc_alive, keep={c.session for c in self.all_chats() if c.session})
         if self.model.sessions:
             self.refresh()
-        self.pager.check(self.model.sessions, time.monotonic(), self.dnd)
         return GLib.SOURCE_CONTINUE
 
     def poll_dnd(self):
@@ -523,6 +522,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if dnd != self.dnd:
             self.dnd = dnd
             self.refresh()
+        self.pager.check(self.model.sessions, time.monotonic(), self.dnd)
         return GLib.SOURCE_CONTINUE
 
     def refresh(self):
@@ -1561,6 +1561,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.next_blink = now + 2 + random.random() * 3.5
         self.update_look(now)
         self.da.queue_draw()
+        if self.windowed and self.window_panels_stale():
+            self.window_fit(self.h, 0)      # algo cambió la vista sin despertar el tick
         return GLib.SOURCE_CONTINUE
 
     cursor_seen = None
