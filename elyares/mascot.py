@@ -94,6 +94,17 @@ def rrect(cr, x, y, w, h, r):
     cr.close_path()
 
 
+SQUARE = False      # el estilo técnico: las esquinas de la interfaz, rectas (la mascota no cambia)
+
+
+def box(cr, x, y, w, h, r):
+    """Un rectángulo de la interfaz: redondeado, o recto con el estilo técnico."""
+    if SQUARE:
+        cr.rectangle(x, y, w, h)
+    else:
+        rrect(cr, x, y, w, h, r)
+
+
 def balloon(cr, x, y, w, h, r, base, half, tx, ty):
     """Una burbuja con flecha, como un popover de macOS: un rectángulo
     redondeado con la flecha en el borde de arriba. La flecha nace en `base`

@@ -7,6 +7,7 @@ class Letra(unittest.TestCase):
     def tearDown(self):
         fonts.use(fonts.SYSTEM)
         fonts.use_tired(False)
+        fonts.use_techno(False)
         fonts.use_scale(125)
 
     def test_la_del_sistema_deja_todo_como_esta(self):
@@ -89,6 +90,17 @@ class Letra(unittest.TestCase):
         fonts.use_tired(True)
         for selector in ('entry:focus-within', 'dropdown:focus-within', 'textview:focus-within', 'switch:focus-visible'):
             self.assertIn(selector, fonts.css())
+
+    def test_el_estilo_tecnico_pone_todo_en_monoespaciada(self):
+        fonts.use('Garet')
+        fonts.use_techno(True)
+        self.assertEqual(fonts.pick('Sans Semi-Bold 11'), 'JetBrainsMono Nerd Font Semi-Bold 11')
+        self.assertEqual(fonts.pick('JetBrainsMono Nerd Font 9'), 'JetBrainsMono Nerd Font 9')
+        self.assertIn('JetBrainsMono Nerd Font', fonts.css())
+
+    def test_sin_estilo_tecnico_la_letra_elegida_manda(self):
+        fonts.use('Garet')
+        self.assertEqual(fonts.pick('Sans 11'), 'Garet Book 11')
 
 
 if __name__ == '__main__':

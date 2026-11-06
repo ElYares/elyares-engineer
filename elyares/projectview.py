@@ -206,7 +206,7 @@ class ProjectView:
     def draw_project(self, cr, p, x, y, w, alpha):
         """Un proyecto: su marca, su nombre y, a la derecha, cómo va su Claude."""
         if self.over(x - 4, y, w + 8, PROJ_ROW):
-            mascot.rrect(cr, x - 4, y, w + 8, PROJ_ROW, 6)
+            mascot.box(cr, x - 4, y, w + 8, PROJ_ROW, 6)
             cr.set_source_rgba(*themes.glow(), .08 * alpha)
             cr.fill()
         self.project_mark(cr, p, x + 10, y + PROJ_ROW / 2, alpha)

@@ -450,6 +450,8 @@ class WindowView:
                     ('compact', 'Modo compacto', bool(st['compact']), 'De la isla suelta; la ventana no lo usa.'),
                     ('pinned', 'Isla fijada', bool(st['pinned']), 'De la isla suelta; la ventana ya está abierta.'),
                     ('chat_tech', 'Chat técnico', bool(st['chat_tech']), 'Bloques y tablas con borde fino y títulos en mayúsculas.'),
+                    ('tech_style', 'Estilo técnico', bool(st['tech_style']),
+                     'Esquinas rectas, bordes de 1 px y toda la letra monoespaciada.'),
                     ('tired_eyes', 'Vista cansada', bool(st['tired_eyes']),
                      'Letra más grande y más gruesa, y textos apagados más claros (tamaño abajo).')]
             rows += [(key, f'Fuente: {label}', bool(st[key]), '') for key, label in sources.SOURCES if key != 'claude']
@@ -501,6 +503,15 @@ class WindowView:
         elif key == 'chat_tech':
             self.settings['chat_tech'] = not self.settings['chat_tech']
             settings.save(self.settings)
+            self.ensure_tick()
+            self.overlay.queue_draw()
+        elif key == 'tech_style':
+            self.set_techno(not self.settings['tech_style'])
+            self.settings['tech_style'] = fonts.techno
+            settings.save(self.settings)
+            windowframe.use_theme()          # el CSS recto se rehace
+            windowframe.load_fonts()
+            self.chat_theme()
             self.ensure_tick()
             self.overlay.queue_draw()
         elif key == 'tired_eyes':

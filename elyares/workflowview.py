@@ -973,7 +973,7 @@ class WorkflowView:
             i, ry = self.wf_scroll + n, y + n * WF_ROW
             mine = run is not None and run.w.name == w.name
             if self.over(left - 4, ry, width + 8, WF_ROW - 2):
-                mascot.rrect(cr, left - 4, ry, width + 8, WF_ROW - 2, 8)
+                mascot.box(cr, left - 4, ry, width + 8, WF_ROW - 2, 8)
                 cr.set_source_rgba(*themes.glow(), .05 * alpha)
                 cr.fill()
             x = left + width - 4
@@ -1005,11 +1005,11 @@ class WorkflowView:
         escribe, deja su sitio (`wf_box`) para la caja de texto de verdad,
         que es la que enseña el texto."""
         active = self.wf_field == field
-        mascot.rrect(cr, x, y, width, WF_FIELD_H, 8)
+        mascot.box(cr, x, y, width, WF_FIELD_H, 8)
         cr.set_source_rgba(*themes.glow(), (.10 if active else .06) * alpha)
         cr.fill()
         if active or bad:
-            mascot.rrect(cr, x + .5, y + .5, width - 1, WF_FIELD_H - 1, 8)
+            mascot.box(cr, x + .5, y + .5, width - 1, WF_FIELD_H - 1, 8)
             cr.set_source_rgba(*rgb(self.wf_ink('bad') if bad else mascot.accent(state.MAIN_ROLE)), .8 * alpha)
             cr.set_line_width(1)
             cr.stroke()
@@ -1028,7 +1028,7 @@ class WorkflowView:
         """Lo que se elige de un menú: su texto y su ▾, con su clic. Deja
         anotado dónde sale el menú si es el abierto."""
         over = self.over(x, y, width, WF_FIELD_H)
-        mascot.rrect(cr, x, y, width, WF_FIELD_H, 8)
+        mascot.box(cr, x, y, width, WF_FIELD_H, 8)
         cr.set_source_rgba(*themes.glow(), (.11 if over or opened else .06) * alpha)
         cr.fill()
         line = self._layout(cr, 'X', FONT_WF).get_pixel_size()[1]
@@ -1072,7 +1072,7 @@ class WorkflowView:
             layout = self._layout(cr, label, FONT_WF_HEAD)
             lw, lh = layout.get_pixel_size()
             over = self.over(x, y + 4, lw + 20, WF_FIELD_H - 2)
-            mascot.rrect(cr, x, y + 4, lw + 20, WF_FIELD_H - 2, (WF_FIELD_H - 2) / 2)
+            mascot.box(cr, x, y + 4, lw + 20, WF_FIELD_H - 2, (WF_FIELD_H - 2) / 2)
             tint = rgb(mascot.accent(state.MAIN_ROLE)) if chosen else themes.hot()
             cr.set_source_rgba(*tint, (.24 if chosen else .11 if over else .06) * alpha)
             cr.fill()
@@ -1167,7 +1167,7 @@ class WorkflowView:
     def draw_wf_bar(self, cr, left, y, width, alpha, text, note, buttons, bad):
         """Una barra al pie del panel: una pregunta, o lo que no se pudo
         guardar con su referencia, y sus botones. Devuelve dónde acaba."""
-        mascot.rrect(cr, left, y, width, WF_BAR, 12)
+        mascot.box(cr, left, y, width, WF_BAR, 12)
         cr.set_source_rgba(*(rgb(self.wf_ink('bad')) if bad else themes.hot()), (.13 if bad else .07) * alpha)
         cr.fill()
         x = left + width - 10
@@ -1204,7 +1204,7 @@ class WorkflowView:
         mh = len(shown) * WF_MENU_ROW + 8
         y = below if below + mh <= h - 6 else max(6, above - mh)
         y = max(6, min(y, h - mh - 6))
-        mascot.rrect(cr, x, y, width, mh, 10)
+        mascot.box(cr, x, y, width, mh, 10)
         # En vidrio el menú es translúcido como la burbuja de una fuente; con la isla opaca, casi opaco.
         cr.set_source_rgba(*themes.get()['popup'], (WF_GLASS_ALPHA if self.settings['glass'] else .98) * alpha)
         cr.fill_preserve()
@@ -1214,7 +1214,7 @@ class WorkflowView:
         for n, (label, chosen) in enumerate(shown):
             ry = y + 4 + n * WF_MENU_ROW
             if self.over(x + 4, ry, width - 8, WF_MENU_ROW):
-                mascot.rrect(cr, x + 4, ry, width - 8, WF_MENU_ROW, 7)
+                mascot.box(cr, x + 4, ry, width - 8, WF_MENU_ROW, 7)
                 cr.set_source_rgba(*themes.glow(), .08 * alpha)
                 cr.fill()
             tx, color = x + 10, TITLE if chosen else rgb(self.wf_ink('arg'))
