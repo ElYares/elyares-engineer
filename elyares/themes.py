@@ -8,6 +8,7 @@ acento y la paleta del texto resaltado (`paint.colors`). Los colores de aviso
 - `omarchy`: el de siempre; el acento y la paleta salen de `theme.py` (omarchy).
 - `moonfly`: el del nvim de Yared (`bluz71/vim-moonfly-colors`).
 - `undersea`: «Under The Sea», el de Ghostty y tmux de Yared.
+- `navidad`: de temporada; la base oscura de `omarchy` con acento dorado y paleta roja, verde y dorada.
 
 Cada texto debe contrastar 4.5:1 o más con cada superficie (HU-005); una prueba
 lo revisa para todos los temas.
@@ -53,6 +54,19 @@ THEMES = {
             'accent': '#4afcd6', 'foreground': '#e3f4f1',
             'color9': '#e0a070', 'color10': '#2aea5e', 'color11': '#8ed4fd',
             'color12': '#61d5ba', 'color13': '#5ab4ff', 'color14': '#98d028',
+        },
+    },
+    'navidad': {
+        'label': 'Navidad (rojo, verde y dorado)',
+        'island': '#050608',
+        'surface': ('#050608', '#10131a', '#1a1f2b'),
+        'ink': '#f2f5ff', 'muted': '#8f9ab8', 'accent': '#f5c542', 'danger': '#ff6b6b',
+        'island_muted': (.44, .49, .63, 1), 'island_tired': (.78, .82, .92, 1), 'tired': '#c9d2ea',
+        'popup': (.07, .08, .10), 'chat_ink': '#eef1f6',
+        'palette': {
+            'accent': '#f5c542', 'foreground': '#eef1f6',
+            'color9': '#ff6b6b', 'color10': '#5fd68a', 'color11': '#f5c542',
+            'color12': '#7fd0ff', 'color13': '#ff8fb1', 'color14': '#b8f0d8',
         },
     },
     'brasa': {

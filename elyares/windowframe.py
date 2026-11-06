@@ -55,6 +55,18 @@ def tech_css():
 """
 
 
+def season_css():
+    """El adorno de temporada de la ventana: con Navidad, una guirnalda roja, verde y dorada bajo la barra."""
+    if themes.current != 'navidad':
+        return ''
+    return """
+.elyares-bar { border-bottom: 3px solid transparent;
+  border-image: repeating-linear-gradient(90deg, #d63a3a 0 14px, #2f9e5b 14px 28px, #f5c542 28px 42px) 0 0 3 0 / 0 0 3px 0 stretch; }
+.elyares-sidebox { border-right: 2px solid #2f9e5b; }
+.elyares-btn.primary { background: #d63a3a; color: #ffffff; }
+"""
+
+
 def build_css():
     return f"""
 .elyares-slot {{ background: rgba({GLASS[0]}, 0.98); }}
@@ -104,7 +116,7 @@ def build_css():
 .elyares-pill:focus-visible, .elyares-card:focus-visible, entry:focus-within, textview:focus-within,
 dropdown:focus-within, switch:focus-visible, checkbutton:focus-visible, button:focus-visible {{
   outline: 2px solid {ACCENT}; outline-offset: 2px; }}
-{tech_css() if mascot.SQUARE else ''}"""
+{tech_css() if mascot.SQUARE else ''}{season_css()}"""
 
 CSS = build_css()
 _provider = None
@@ -133,6 +145,75 @@ def load_css():
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), _provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         load_fonts()
+
+
+class Lights(Gtk.DrawingArea):
+    """Las luces de Navidad: una tira de focos de colores por el borde del contenido, que parpadean.
+
+    Solo se ven con el tema `navidad`; el resto del tiempo está escondida y no repinta.
+    """
+    COLORS = ((.91, .23, .23), (.18, .72, .42), (.96, .77, .26), (.30, .60, 1.0))
+    STEP = 30           # px entre foco y foco
+    INSET = 6           # lo que la tira se separa del borde
+    BULB = 4            # radio del foco
+    BLINK_MS = 450
+
+    def __init__(self):
+        super().__init__()
+        self.set_can_target(False)          # los clics pasan de largo
+        self.set_can_focus(False)
+        self.set_hexpand(True)
+        self.set_vexpand(True)
+        self.set_draw_func(self.paint)
+        self.phase = 0
+        self.timer = 0
+        self.set_visible(False)
+        # El reloj corre aunque esté escondida (un widget escondido nunca se «mapea»): es lo que la muestra.
+        self.timer = GLib.timeout_add(self.BLINK_MS, self.tick)
+
+    def tick(self):
+        on = themes.current == 'navidad'
+        if on != self.get_visible():
+            self.set_visible(on)
+        if on:
+            self.phase += 1
+            self.queue_draw()
+        return True
+
+    @classmethod
+    def points(cls, w, h):
+        """Dónde van los focos: por todo el borde, empezando arriba a la izquierda y en sentido horario."""
+        a, b = cls.INSET, cls.INSET
+        right, bottom = w - cls.INSET, h - cls.INSET
+        out = []
+        for x in range(a, int(right), cls.STEP):
+            out.append((x, b))
+        for y in range(b, int(bottom), cls.STEP):
+            out.append((right, y))
+        for x in range(int(right), a, -cls.STEP):
+            out.append((x, bottom))
+        for y in range(int(bottom), b, -cls.STEP):
+            out.append((a, y))
+        return out
+
+    def paint(self, _area, cr, w, h):
+        if w < 4 * self.STEP or h < 4 * self.STEP:
+            return
+        i = self.INSET
+        cr.set_source_rgba(.05, .25, .12, .75)          # el cable
+        cr.set_line_width(1.5)
+        cr.rectangle(i, i, w - 2 * i, h - 2 * i)
+        cr.stroke()
+        for n, (x, y) in enumerate(self.points(w, h)):
+            r, g, b = self.COLORS[n % len(self.COLORS)]
+            lit = (n + self.phase) % 3 != 0             # un foco de cada tres está apagado, y va corriendo
+            if lit:
+                cr.set_source_rgba(r, g, b, .22)
+                cr.arc(x, y, self.BULB * 2.6, 0, 6.2832)
+                cr.fill()
+            cr.set_source_rgba(r, g, b, 1 if lit else .35)
+            cr.arc(x, y, self.BULB, 0, 6.2832)
+            cr.fill()
 
 
 class Frame:
@@ -206,7 +287,11 @@ class Frame:
 
     def attach(self, win):
         win.set_titlebar(self.header)
-        win.set_child(self.body)
+        dressed = Gtk.Overlay()         # encima del contenido, las luces de temporada
+        dressed.set_child(self.body)
+        self.lights = Lights()
+        dressed.add_overlay(self.lights)
+        win.set_child(dressed)
 
     def set_content(self, child):
         """Pone (o quita, con None) el contenido; nunca más de uno."""
