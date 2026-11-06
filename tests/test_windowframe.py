@@ -17,6 +17,31 @@ except (ImportError, ValueError):
 
 
 @unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
+class Temporada(unittest.TestCase):
+    def tearDown(self):
+        from elyares import themes
+        themes.use(themes.DEFAULT)
+        windowframe.use_theme()
+
+    def test_la_guirnalda_es_solo_de_navidad(self):
+        from elyares import themes
+        themes.use('navidad')
+        windowframe.use_theme()
+        self.assertIn('repeating-linear-gradient', windowframe.CSS)
+        themes.use('omarchy')
+        windowframe.use_theme()
+        self.assertNotIn('repeating-linear-gradient', windowframe.CSS)
+
+    def test_las_luces_rodean_el_borde_y_los_clics_pasan(self):
+        luces = windowframe.Lights()
+        puntos = windowframe.Lights.points(300, 200)
+        self.assertGreater(len(puntos), 20)
+        self.assertTrue(all(0 <= x <= 300 and 0 <= y <= 200 for x, y in puntos))
+        self.assertFalse(luces.get_can_target())
+        self.assertFalse(luces.get_visible())
+
+
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
 class Marco(unittest.TestCase):
 
     def setUp(self):
