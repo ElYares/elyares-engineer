@@ -361,6 +361,17 @@ class ModeloEsfuerzoPlan(ChatCase):
                             ('--permission-mode', 'plan')):
             self.assertEqual(cmd[cmd.index(flag) + 1], value)
 
+    def test_el_estilo_adhd_va_al_prompt_salvo_que_se_apague(self):
+        for on in (True, False):
+            with mock.patch.object(chat.settings, 'load', return_value={'adhd': on}):
+                self.c.send('hola')
+            cmd = self.procs[-1].args[0]
+            self.assertEqual('--append-system-prompt-file' in cmd, on)
+            if on:
+                self.assertEqual(cmd[cmd.index('--append-system-prompt-file') + 1], chat.STYLE_FILE)
+                self.assertTrue(os.path.isfile(chat.STYLE_FILE))
+            self.c.proc = None
+
     def test_el_modelo_y_el_plan_cambian_en_caliente(self):
         self.c.set_model('haiku')                   # sin Claude abierto: solo se apunta
         self.assertEqual(self.c.model, 'haiku')

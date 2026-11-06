@@ -52,11 +52,14 @@ import threading
 import time
 from dataclasses import dataclass
 
-from . import state
+from . import settings, state
 
 CMD = ['claude', '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
        '--include-partial-messages', '--permission-prompts', 'host', '--permission-prompt-tool', 'stdio',
        '--allow-dangerously-skip-permissions']
+# El estilo de respuesta (lector con TDAH); se agrega al prompt de cada chat.
+STYLE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rules', 'estilo',
+                          'respuesta-adhd.md')
 # En bypass, Claude no pide permiso para casi nada; lo poco que sigue
 # preguntando (escribir en settings, git o la configuración de herramientas)
 # llega a la isla por el stdio. El modo plan se prende encima y, al
@@ -259,6 +262,8 @@ class Chat:
         """Arranca el proceso de Claude; si ya hubo conversación, la retoma."""
         cmd = (CMD + ['--permission-mode', 'plan' if self.plan else BASE_MODE]
                + (['--agent', self.agent] if self.agent else [])
+               + (['--append-system-prompt-file', STYLE_FILE]
+                  if settings.load()['adhd'] and os.path.isfile(STYLE_FILE) else [])
                + (['--model', self.model] if self.model else [])
                + (['--effort', self.effort] if self.effort else [])
                + (['--resume', self.session] if self.session else []))
