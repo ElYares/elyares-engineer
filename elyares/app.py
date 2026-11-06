@@ -84,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, projectview, settings, sources, state, store, testrun, theme, themes, windowframe, windowview, workflowview)
+               preview, projectview, remote, settings, sources, state, store, testrun, theme, themes, windowframe, windowview, workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
 MAX_ROWS = 5          # filas de la lista de alertas, con la cabecera de siempre
@@ -273,6 +273,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.focus = None               # (sesión, personaje) del desglose abierto
         self.hits = []                  # (qué, cuál, x, y, ancho, alto) del tablero, del último dibujo
         self.dnd = False
+        self.pager = remote.Pager()
         self.hover = False
         self.settings = settings.load()
         fonts.use(self.settings['font'])
@@ -514,6 +515,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.model.reap(actions.proc_alive, keep={c.session for c in self.all_chats() if c.session})
         if self.model.sessions:
             self.refresh()
+        self.pager.check(self.model.sessions, time.monotonic(), self.dnd)
         return GLib.SOURCE_CONTINUE
 
     def poll_dnd(self):

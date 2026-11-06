@@ -702,6 +702,22 @@ las alertas se quedan asomadas (la mascota sí cambia de gesto, y con el ratón
 encima se abre como siempre). Al empezar el descanso avisa, y si algo se quedó
 esperando abre la lista. También avisa cuando el descanso se acaba.
 
+### Aviso al celular (Slack)
+
+Si una sesión lleva más de 2 minutos pidiendo permiso, terminada o esperándote,
+la isla manda un mensaje a un webhook de Slack. Solo lleva el proyecto y el
+motivo (nunca el comando). Se calla con el No molestar y avisa una vez por
+estado: otro turno vuelve a avisar.
+
+```bash
+install -m 600 /dev/null ~/.config/elyares-engineer/slack-webhook
+# pega la URL del incoming webhook (https://hooks.slack.com/…) en ese archivo
+```
+
+También vale `ELYARES_SLACK_WEBHOOK`. Sin webhook no se manda nada, y un
+archivo legible por otros usuarios se ignora. Usa un webhook propio, no el de
+DevHerd.
+
 ### Uso de Claude
 
 `install.sh` envuelve la barra de estado de Claude Code (`bin/elyares-statusline`
