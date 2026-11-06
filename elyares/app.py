@@ -84,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, projectview, settings, sources, state, store, testrun, theme, themes, windowframe, windowview, workflowview)
+               preview, projectview, remote, settings, sources, state, store, testrun, theme, themes, windowframe, windowview, workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
 MAX_ROWS = 5          # filas de la lista de alertas, con la cabecera de siempre
@@ -273,6 +273,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.focus = None               # (sesión, personaje) del desglose abierto
         self.hits = []                  # (qué, cuál, x, y, ancho, alto) del tablero, del último dibujo
         self.dnd = False
+        self.pager = remote.Pager()
         self.hover = False
         self.settings = settings.load()
         fonts.use(self.settings['font'])
@@ -521,6 +522,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if dnd != self.dnd:
             self.dnd = dnd
             self.refresh()
+        self.pager.check(self.model.sessions, time.monotonic(), self.dnd)
         return GLib.SOURCE_CONTINUE
 
     def refresh(self):
@@ -1559,6 +1561,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.next_blink = now + 2 + random.random() * 3.5
         self.update_look(now)
         self.da.queue_draw()
+        if self.windowed and self.window_panels_stale():
+            self.window_fit(self.h, 0)      # algo cambió la vista sin despertar el tick
         return GLib.SOURCE_CONTINUE
 
     cursor_seen = None

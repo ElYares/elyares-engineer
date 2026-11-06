@@ -166,13 +166,20 @@ class WindowView:
             self.toggle_projects()
         elif key == 'flows' and not self.wf_open:
             self.open_workflows()
+        self.ensure_tick()          # en reposo el tick está apagado y los paneles no se pondrían al día
+
+    def window_panels_key(self):
+        return (self.window_current(), self.focus, self.tab, self.chat_open, self.wf_open, self.wf_screen,
+                self.wf_confirm is not None, self.wf_error is not None)
+
+    def window_panels_stale(self):
+        return self.window_panels_key() != self.panels_key
 
     def window_panels_due(self, now):
         """Los paneles se ponen al día a lo más cada PANELS_EVERY: a 60 cuadros
         por segundo el texto no cambia más rápido. Si cambió de vista o de
         agente, de inmediato, para que un clic responda en el acto."""
-        key = (self.window_current(), self.focus, self.tab, self.chat_open, self.wf_open, self.wf_screen,
-               self.wf_confirm is not None, self.wf_error is not None)
+        key = self.window_panels_key()
         if key == self.panels_key and now - self.panels_at < PANELS_EVERY:
             return False
         self.panels_key, self.panels_at = key, now

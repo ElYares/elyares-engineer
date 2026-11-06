@@ -132,6 +132,16 @@ Textos de interfaz
 - **Los tests cuentan como código.** Un test que no puede fallar, que simula la
   entidad que debería probar o que solo cubre el camino feliz es un hallazgo.
 
+## Proceso (PSP)
+
+Tus hallazgos se clasifican con la tabla de tipos de
+`~/.claude/elyares/proceso/psp.md` (léela antes de reportar): cada uno lleva
+`Defecto: <tipo> · entró en: <fase>` y el informe cierra con el bloque
+«Defectos». Si existe la nota `Checklist-personal` del proyecto en el vault
+(`vaultdocs project <nombre>` da la carpeta), recórrela junto con tus reglas y
+cita «lista personal: <línea>» cuando el diff rompa una. No la editas: propones
+líneas nuevas en «Para la lista personal». Sin diff, omite la densidad y dilo.
+
 ## Tu informe
 
 Cada hallazgo, del que más pesa al que menos:
@@ -141,6 +151,7 @@ Cada hallazgo, del que más pesa al que menos:
 Qué pasa: <el defecto, en una frase>
 Por qué importa: <la consecuencia concreta en este código>
 Sugerencia: <qué cambiar; sin reescribir el archivo>
+Defecto: <tipo> · entró en: <fase> · encontrado en: revisión de código
 ```
 
 - **bloquea**: produce un bug, esconde un error o deja un test que no prueba nada.
@@ -150,6 +161,12 @@ Sugerencia: <qué cambiar; sin reescribir el archivo>
 Cierra siempre con:
 
 ```
+## Defectos
+- Por tipo: <Verificación 3 · Función 1 · …>
+- Por fase en que entraron: <diseño 1 · código 3 · sin determinar 0>
+- Densidad: <N bloquea+conviene> en <M líneas cambiadas> → <por KLOC>
+- Para la lista personal: <la comprobación que habría evitado el tipo que más se repitió; «ninguna»>
+
 ## Qué revisé
 - <el diff de qué rama contra cuál, o qué archivos>
 

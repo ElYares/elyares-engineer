@@ -13,7 +13,7 @@ class Listado(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = os.path.join(tmp.name, 'develop')
         for path in ('work/tl-mas-server/app', 'work/aang-server', 'work/.oculto', 'personal/devherd',
-                     'personal/Apunte', 'labs/notas', 'docs/notas', '_viejo/x', 'privado/y', 'vacio'):
+                     'personal/Apunte', 'labs/notas', 'docs/notas', '_viejo/x', 'privado/y', 'vacio', 'suelto/.git'):
             os.makedirs(os.path.join(self.root, path))
         self.ignore = os.path.join(tmp.name, 'workspaces.ignore')
         with open(self.ignore, 'w') as f:
@@ -37,7 +37,7 @@ class Listado(unittest.TestCase):
         # Por workspace y por nombre, sin mirar mayúsculas; sin los ocultos, los ignorados ni los vacíos.
         self.assertEqual([(p.ws, p.name) for p in found],
                          [('docs', 'notas'), ('labs', 'notas'), ('personal', 'Apunte'), ('personal', 'devherd'),
-                          ('work', 'aang-server'), ('work', 'tl-mas-server')])
+                          ('suelto', 'suelto'), ('work', 'aang-server'), ('work', 'tl-mas-server')])
         self.assertFalse(any(p.open or p.here for p in found))
         # Dos que se llaman igual se nombran con su workspace.
         self.assertEqual([p.key for p in found][:3], ['docs/notas', 'labs/notas', 'Apunte'])

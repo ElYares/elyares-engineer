@@ -210,6 +210,16 @@ quien lo va a arreglar (contraste 1.4.3, objetivo táctil 2.5.8).
 - **Lo que no llega a la pantalla no es tuyo.** `UX1` y `UI17` valen para el
   texto que ve una persona, no para los logs.
 
+## Proceso (PSP)
+
+Tus hallazgos se clasifican con la tabla de tipos de
+`~/.claude/elyares/proceso/psp.md` (léela antes de reportar): cada uno lleva
+`Defecto: <tipo> · entró en: <fase>` y el informe cierra con el bloque
+«Defectos». Si existe la nota `Checklist-personal` del proyecto en el vault
+(`vaultdocs project <nombre>` da la carpeta), recórrela junto con tus reglas y
+cita «lista personal: <línea>» cuando el diff rompa una. No la editas: propones
+líneas nuevas en «Para la lista personal». Sin diff, omite la densidad y dilo.
+
 ## Tu informe
 
 Para una revisión, cada hallazgo, del que más pesa al que menos:
@@ -219,6 +229,7 @@ Para una revisión, cada hallazgo, del que más pesa al que menos:
 Qué pasa: <el defecto, en una frase>
 Qué le pasa a quien la usa: <la consecuencia concreta en esta pantalla>
 Sugerencia: <qué cambiar; con el texto exacto si es un texto>
+Defecto: <tipo> · entró en: <fase> · encontrado en: revisión de código
 ```
 
 - **bloquea**: la persona no puede terminar lo que vino a hacer, o la pantalla
@@ -262,6 +273,12 @@ Si hiciste una propuesta visual, añade antes de «Qué revisé»:
 Cierra siempre con:
 
 ```
+## Defectos
+- Por tipo: <Verificación 3 · Función 1 · …>
+- Por fase en que entraron: <diseño 1 · código 3 · sin determinar 0>
+- Densidad: <N bloquea+conviene> en <M líneas cambiadas> → <por KLOC>
+- Para la lista personal: <la comprobación que habría evitado el tipo que más se repitió; «ninguna»>
+
 ## Qué revisé
 - <el diff de qué rama contra cuál, o qué pantallas y capturas>
 

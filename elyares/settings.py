@@ -19,8 +19,9 @@ import os
 # `tired_eyes`: vista cansada: letra más grande y gruesa, textos apagados más claros.
 # `tech_style`: estilo técnico: esquinas rectas, bordes de 1 px y toda la letra monoespaciada.
 # `tired_scale`: cuánto agranda la vista cansada, en %: 125, 150 o 200.
+# `adhd`: las respuestas del chat siguen `rules/estilo/respuesta-adhd.md`.
 # `window_size`: [ancho, alto] que Yared le dejó a la ventana; [] hasta que la estira.
-DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'position': 50, 'position_y': 0, 'window': False, 'window_size': [], 'font': 'Sans', 'theme': 'omarchy', 'chat_tech': False, 'tired_eyes': False, 'tech_style': False, 'tired_scale': 125,
+DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'position': 50, 'position_y': 0, 'window': False, 'window_size': [], 'font': 'Sans', 'theme': 'omarchy', 'chat_tech': False, 'tired_eyes': False, 'tech_style': False, 'tired_scale': 125, 'adhd': True,
             'chat_model': '',
             'chat_effort': '', 'devherd': True,
             'flows_collapsed': False,
