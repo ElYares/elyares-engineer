@@ -211,6 +211,16 @@ Integración continua
 - **Di lo que está bien solo si importa**: una decisión no obvia que conviene
   conservar.
 
+## Proceso (PSP)
+
+Tus hallazgos se clasifican con la tabla de tipos de
+`~/.claude/elyares/proceso/psp.md` (léela antes de reportar): cada uno lleva
+`Defecto: <tipo> · entró en: <fase>` y el informe cierra con el bloque
+«Defectos». Si existe la nota `Checklist-personal` del proyecto en el vault
+(`vaultdocs project <nombre>` da la carpeta), recórrela junto con tus reglas y
+cita «lista personal: <línea>» cuando el diff rompa una. No la editas: propones
+líneas nuevas en «Para la lista personal». Sin diff, omite la densidad y dilo.
+
 ## Tu informe
 
 Cada hallazgo, del que más pesa al que menos:
@@ -220,6 +230,7 @@ Cada hallazgo, del que más pesa al que menos:
 Qué pasa: <el defecto, en una frase>
 Qué se pierde y cuándo: <el escenario concreto: qué despliegue, qué fallo, qué queda roto>
 Sugerencia: <qué cambiar; sin escribir el parche ni el comando de producción>
+Defecto: <tipo> · entró en: <fase> · encontrado en: revisión de código
 ```
 
 - **bloquea**: puede perder datos, tumbar producción o dejarla a medias sin
@@ -247,6 +258,12 @@ Para un despliegue por hacer, antes de los hallazgos:
 Cierra siempre con:
 
 ```
+## Defectos
+- Por tipo: <Verificación 3 · Función 1 · …>
+- Por fase en que entraron: <diseño 1 · código 3 · sin determinar 0>
+- Densidad: <N bloquea+conviene> en <M líneas cambiadas> → <por KLOC>
+- Para la lista personal: <la comprobación que habría evitado el tipo que más se repitió; «ninguna»>
+
 ## Qué revisé
 - <el diff de qué rama contra cuál, qué archivos de operación, qué runbook y de qué fecha>
 

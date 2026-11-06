@@ -68,16 +68,19 @@ fi
 
 # Los agentes de la familia. Claude Code los lee de ~/.claude/agents al abrir
 # una sesión, y el auditor busca sus catálogos en ~/.claude/elyares/seguridad
-# (no en ~/.claude/rules: ahí se cargarían enteros en cada sesión).
+# (no en ~/.claude/rules: ahí se cargarían enteros en cada sesión). Las de
+# proceso (PSP) van en ~/.claude/elyares/proceso por lo mismo.
 # Copia y no enlace: son instrucciones para todas las sesiones, y enlazados
 # cambiarían solos con lo que haya en esta carpeta (otra rama, un cambio a
 # medias). Para actualizarlos se vuelve a correr install.sh. Son suyos por el
 # nombre: pisa los `elyares-*.md` que se llamen como los de agents/.
 agents_dir="$HOME/.claude/agents"
 rules_dir="$HOME/.claude/elyares/seguridad"
+process_dir="$HOME/.claude/elyares/proceso"
 shopt -s nullglob
 agents=("$here"/agents/elyares-*.md)
 rules=("$here"/rules/seguridad/*.md)
+process=("$here"/rules/proceso/*.md)
 shopt -u nullglob
 if [ ${#agents[@]} -gt 0 ]; then
   mkdir -p "$agents_dir"
@@ -98,6 +101,12 @@ if [ ${#rules[@]} -gt 0 ]; then
   mkdir -p "$rules_dir"
   install -m 644 "${rules[@]}" "$rules_dir/"
   echo "✓ catálogos del auditor en $rules_dir"
+fi
+if [ ${#process[@]} -gt 0 ]; then
+  [ -L "$process_dir" ] && rm -f "$process_dir"
+  mkdir -p "$process_dir"
+  install -m 644 "${process[@]}" "$process_dir/"
+  echo "✓ reglas de proceso (PSP) en $process_dir"
 fi
 
 if [ -f "$settings" ]; then

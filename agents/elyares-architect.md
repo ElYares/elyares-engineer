@@ -148,7 +148,35 @@ como no tener arquitectura.
 2. Dónde cede primero, con evidencia.
 3. El cambio más pequeño que lo resuelve.
 
+**Planear** (lo que se va a construir y todavía no se construye)
+
+Sigue las secciones «Planear» y «Revisión de diseño» de
+`~/.claude/elyares/proceso/psp.md` (léelas antes): tamaño estimado por parte, contra qué historial
+se calibra (las bitácoras del proyecto en el vault; con menos de 3 trabajos
+parecidos es «estimación sin historial» y das un rango), riesgos que mueven la
+estimación, diseño conceptual y las cuatro vistas del diseño (operacional,
+funcional, de estados y de lógica). Lo que no puedas escribir en una de ellas lo
+marcas como sin diseñar, no lo rellenas.
+
 ## Tu informe
+
+Para un plan:
+
+```
+## Plan
+- Partes: <parte> — <muy pequeña | pequeña | mediana | grande | muy grande> — <líneas estimadas, rango>
+- Historial usado: <bitácoras y sus tamaños reales | «estimación sin historial»>
+- Riesgos: <lo que movería la estimación>
+
+## Diseño conceptual
+<partes, responsabilidad de cada una y cómo se hablan>
+
+## Revisión de diseño
+- Operacional: <…>
+- Funcional: <…>
+- De estados: <…>
+- Lógica: <…>
+```
 
 Para una decisión:
 
