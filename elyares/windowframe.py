@@ -1075,10 +1075,29 @@ class FocusPanel(Gtk.ScrolledWindow):
         self.signature = None
         self.faces = []
         self.refs = {'steps': []}
+        self.picked = None              # el paso abierto abajo, con su texto entero
+        self.last = None                # (d, handlers) para rehacerlo al elegir otro paso
         self.set_visible(False)
 
     place = BoardPanel.place
     animate = BoardPanel.animate
+
+    def natural_h(self, width):
+        """Lo que mide el desglose a ese ancho: la ventana crece hasta ahí en vez de pedir scroll."""
+        root = self.get_child()
+        return 0 if root is None else root.measure(Gtk.Orientation.VERTICAL, max(1, int(width)))[1]
+
+    def _pick(self, index):
+        """Un clic en un paso lo abre abajo; otro clic en el mismo lo cierra."""
+        self.picked = None if self.picked == index else index
+        if self.last is not None:
+            self.signature = None
+            self.set_focus(*self.last)
+            self.last[1]['pick']()
+
+    @staticmethod
+    def _detail_head(index, spent):
+        return f'Paso {index + 1}' + (f' · {spent}' if spent else '')
 
     def _refresh(self, d):
         for key in ('label', 'summary'):
@@ -1090,13 +1109,23 @@ class FocusPanel(Gtk.ScrolledWindow):
                 t.set_label(text)
             if when.get_label() != spent:
                 when.set_label(spent)
+        if self.picked is not None and 'detail' in self.refs:
+            head, body = self.refs['detail']
+            _mark, _color, text, spent = d['steps'][self.picked]
+            if body.get_label() != text:
+                body.set_label(text)
+            if head.get_label() != self._detail_head(self.picked, spent):
+                head.set_label(self._detail_head(self.picked, spent))
 
     def set_focus(self, d, handlers):
         """`d`: role, name, color, pet, busy, label, summary, steps
         [(marca, color, texto, tiempo)], links [(tipo, clave, texto)], others
-        [(rol, pet, activo)], hidden, empty. `handlers`: face, link, other."""
+        [(rol, pet, activo)], hidden, empty. `handlers`: face, link, other, pick."""
+        self.last = (d, handlers)
+        if self.picked is not None and self.picked >= len(d['steps']):
+            self.picked = None
         shape = (d['role'], d['busy'], d['pet'], tuple(d['links']), tuple(d['others']),
-                 d['hidden'], d['empty'], len(d['steps']), tuple(s[0] for s in d['steps']))
+                 d['hidden'], d['empty'], len(d['steps']), tuple(s[0] for s in d['steps']), self.picked)
         if shape == self.signature:
             self._refresh(d)            # el mismo desglose: solo cambian los textos
             return
@@ -1141,9 +1170,15 @@ class FocusPanel(Gtk.ScrolledWindow):
             more = Gtk.Label(label=f'⋯ {d["hidden"]} paso{"" if d["hidden"] == 1 else "s"} antes', xalign=0)
             more.add_css_class('dim-label')
             mid.append(more)
-        for mark, color, text, spent in d['steps']:
+        for i, (mark, color, text, spent) in enumerate(d['steps']):
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
             row.add_css_class('elyares-card')
+            if i == self.picked:
+                row.add_css_class('raised')
+            row.set_cursor_from_name('pointer')
+            click = Gtk.GestureClick()
+            click.connect('released', lambda _g, _n, _x, _y, i=i: self._pick(i))
+            row.add_controller(click)
             m = Gtk.Label()
             m.set_markup(f'<span foreground="{color}">{GLib.markup_escape_text(mark)}</span>')
             t = Gtk.Label(label=text, xalign=0, wrap=True)
@@ -1159,6 +1194,19 @@ class FocusPanel(Gtk.ScrolledWindow):
             row.append(when)
             mid.append(row)
             self.refs['steps'].append((m, t, when))
+        if self.picked is not None:
+            _mark, _color, text, spent = d['steps'][self.picked]
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
+            box.add_css_class('elyares-card')
+            head = Gtk.Label(label=self._detail_head(self.picked, spent), xalign=0)
+            head.add_css_class('dim-label')
+            body = Gtk.Label(label=text, xalign=0, wrap=True, selectable=True)
+            body.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            body.set_max_width_chars(1)
+            box.append(head)
+            box.append(body)
+            mid.append(box)
+            self.refs['detail'] = (head, body)
         others = Gtk.FlowBox()              # envuelve: en una fila no cabrían en una ventana angosta
         others.set_selection_mode(Gtk.SelectionMode.NONE)
         others.set_max_children_per_line(8)

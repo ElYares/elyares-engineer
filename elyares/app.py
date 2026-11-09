@@ -1008,7 +1008,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         desglose, que con su mini chat mide un poco más."""
         if not self.focused():
             return max(BOARD_H, self.window_body) if self.windowed else BOARD_H
-        return FOCUS_H + (chatview.MINI_H if self.briefing() else 0)
+        grown = self.window_body if self.windowed else 0     # los pasos que no caben en FOCUS_H
+        return max(FOCUS_H, grown) + (chatview.MINI_H if self.briefing() else 0)
 
     def next_tab(self):
         """Pasa a la pestaña que sigue, y de la última a la primera."""

@@ -25,6 +25,7 @@ TITLE = 'Elyares Engineer'
 CLASS_RE = r'^(dev\.elyares\.Engineer)$'    # la `class` de la ventana, como regex de Hyprland
 MIN_W, MIN_H = 480, 320          # lo menos que se le deja a la ventana
 FIT_H = 100                      # lo que se le resta a la pantalla para que no la tape entera
+FOCUS_ROOM = 220                 # lo que un desglose deja a las barras y a lo que va debajo
 FIT_PAD = 12                     # aire bajo la isla
 FIT_STEP = 6                     # cambios de alto menores no mueven la ventana
 REMEMBER_SECS = 2                # cada cuánto se guarda el tamaño que Yared va dejando
@@ -275,9 +276,15 @@ class WindowView:
                  summary=(f'{n} paso{"" if n == 1 else "s"}{took}' if n or m.busy else 'libre'),
                  steps=steps, links=links, others=others, hidden=n - len(shown), empty=empty)
         panel = self.frame.focus
-        panel.set_focus(d, dict(face=self.window_face, link=self.window_link, other=self.window_card))
+        panel.set_focus(d, dict(face=self.window_face, link=self.window_link, other=self.window_card,
+                                pick=self.ensure_tick))
         panel.animate()
-        self.window_body = 0
+        # Sus pasos piden lo que miden: la ventana crece hasta donde cabe la pantalla.
+        width = panel.get_width() or self.app_win.get_width() or MIN_W
+        room = self.screen_h - FIT_H - FOCUS_ROOM if self.screen_h else 0
+        self.window_body = max(0, panel.natural_h(width) - app.TABS_H)
+        if room:
+            self.window_body = min(self.window_body, room)
         panel.place(app.TABS_H + self.body_h())
 
     def window_link(self, kind, key):
