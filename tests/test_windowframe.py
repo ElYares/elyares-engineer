@@ -500,6 +500,22 @@ class Desglose(unittest.TestCase):
         self.assertEqual(log, [('talk', 'elyares-auditor'), ('back', None), ('other', 'reviewer', False)])
         self.assertEqual(len(panel.faces), 1)       # solo el que trabaja se anima
 
+    def test_un_paso_se_abre_abajo_con_su_texto_entero(self):
+        panel = windowframe.FocusPanel()
+        picks = []
+        d = dict(role='auditor', name='auditor', color='#9a6bff', pet='working', busy=True,
+                 label='api · chat', summary='2 pasos', links=[], others=[], hidden=0, empty='',
+                 steps=[('✓', '#34d399', 'git status ' + 'x' * 300, '3 s'), ('›', '#f2f5ff', 'git add -A', 'ahora')])
+        panel.set_focus(d, dict(face=lambda *a: None, link=lambda *a: None, other=lambda *a: None,
+                                pick=lambda: picks.append(True)))
+        self.assertNotIn('detail', panel.refs)
+        panel._pick(0)
+        self.assertEqual(panel.refs['detail'][1].get_label(), d['steps'][0][2])
+        self.assertEqual(panel.refs['detail'][0].get_label(), 'Paso 1 · 3 s')
+        panel._pick(0)                              # el mismo clic lo cierra
+        self.assertNotIn('detail', panel.refs)
+        self.assertEqual(len(picks), 2)
+
 
 class CaraQuieta(unittest.TestCase):
     """La cara quieta se dibuja una vez y después solo se estampa."""
