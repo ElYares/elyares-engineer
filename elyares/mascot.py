@@ -24,6 +24,8 @@ los mismos gestos. Cada uno pone lo suyo en capas: lo que lleva en la cabeza
                 un cuaderno donde apunta lo que encuentra
     coach       pelo peinado, diadema con micrófono, corbata y un sobre con
                 el CV asomando
+    analyst     pelo revuelto con un lápiz detrás de la oreja y un bloque de
+                notas adhesivas con sus casillas
 """
 
 import math
@@ -43,16 +45,17 @@ COLORS = {
 DEFAULT_ACCENT = COLORS['accent']
 
 ROLES = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', 'devops', 'researcher',
-         'coach')
+         'coach', 'analyst')
 # El color de cada personaje: la antena mientras trabaja y su punto en la lista.
 # Ni ámbar, ni rojo, ni verde: esos ya dicen permiso, problema y terminado. Con
 # ocho ya no quedan tonos lejos de todos: el lima del devops y el naranja del
 # researcher van en los dos huecos más anchos que quedaban, entre el amarillo
 # y el verde y entre el rojo y el amarillo. El índigo del coach cae entre el
-# azul del tema y el morado del auditor.
+# azul del tema y el morado del auditor. El arena del analyst es el único tono
+# apagado: el color del papel, lejos del naranja y del ámbar de «pide permiso».
 ACCENTS = {'architect': '#22c7dd', 'auditor': '#9a6bff', 'reviewer': '#ff6fb5',
            'designer': '#e052f0', 'mobile': '#55b8ab', 'devops': '#a6e84a',
-           'researcher': '#ff8a4c', 'coach': '#7a86ff'}
+           'researcher': '#ff8a4c', 'coach': '#7a86ff', 'analyst': '#d9b38c'}
 
 
 def set_accent(color):
@@ -1650,20 +1653,73 @@ def _envelope(cr, t, motion):
     _hands(cr, t, motion * .6, (-44, 44), 116)
 
 
+# ── analyst ──────────────────────────────────────────────────────────────────
+
+def _messy_hair(cr):
+    """Pelo corto y despeinado, con un brillo en el flequillo."""
+    cr.new_path()
+    cr.move_to(-78, 8)
+    cr.curve_to(-92, -62, 92, -62, 78, 8)
+    quad(cr, 0, -16, -78, 8)
+    cr.close_path()
+    g = cairo.LinearGradient(0, -50, 0, 8)
+    g.add_color_stop_rgba(0, *rgba('#7a5a3c'))
+    g.add_color_stop_rgba(1, *rgba('#3d2c1e'))
+    cr.set_source(g)
+    cr.fill_preserve()
+    stroke(cr, 5)
+    cr.move_to(-30, -28)
+    quad(cr, 0, -38, 36, -24)
+    cr.set_source_rgba(1, 1, 1, .2)
+    cr.set_line_width(2.4)
+    cr.stroke()
+
+
+def _sticky_notes(cr, t, motion):
+    """Un bloque de notas adhesivas: una con su casilla marcada, otra por marcar."""
+    b = math.sin(t * 5) * 2 * motion
+    for i, (x, tilt) in enumerate(((-30, -.1), (-4, .06), (22, -.04))):
+        cr.save()
+        cr.translate(x + 14, 100 + b * (1 if i == 1 else .4))
+        cr.rotate(tilt)
+        cr.new_path()
+        rrect(cr, -17, -17, 34, 34, 3)
+        fill(cr, ACCENTS['analyst'] if i != 1 else 'face', preserve=True)
+        stroke(cr, 3)
+        cr.rectangle(-11, -10, 7, 7)
+        stroke(cr, 2, 'metal')
+        if i != 2:
+            cr.move_to(-10, -6)
+            cr.line_to(-7.5, -3)
+            cr.line_to(-2, -12)
+            stroke(cr, 2.4, 'metal')
+        cr.move_to(1, -6)
+        cr.line_to(12, -6)
+        cr.move_to(-11, 4)
+        cr.line_to(12, 4)
+        cr.move_to(-11, 10)
+        cr.line_to(5, 10)
+        stroke(cr, 2, 'metal')
+        cr.restore()
+    _hands(cr, t, motion * .6, (-40, 40), 116)
+
+
 # ── las capas de cada personaje ──────────────────────────────────────────────
 
 HATS = {'engineer': _cap, 'architect': _hardhat, 'auditor': _front_cap, 'reviewer': _eyeshade,
         'designer': _beret, 'mobile': _beanie, 'devops': _hood, 'researcher': _explorer_hat,
-        'coach': _headset}
+        'coach': _headset, 'analyst': _messy_hair}
 PROPS = {'engineer': _laptop, 'architect': _blueprint, 'auditor': _clipboard, 'reviewer': _magnifier,
-         'designer': _palette, 'mobile': _phone, 'devops': _terminal, 'researcher': _notebook, 'coach': _envelope}
+         'designer': _palette, 'mobile': _phone, 'devops': _terminal, 'researcher': _notebook, 'coach': _envelope,
+         'analyst': _sticky_notes}
 BACK = {'architect': lambda cr: _pencil(cr, 89, 4, 0.24, 'yellow'),
         'auditor': _collar,
         'reviewer': lambda cr: _pencil(cr, -89, 4, -0.24, 'red'),
         'designer': _brush,
         'devops': _jacket,
         'researcher': _neckerchief,
-        'coach': _tie}
+        'coach': _tie,
+        'analyst': lambda cr: _pencil(cr, 89, 4, 0.24, '#d9b38c')}
 FRONT = {'reviewer': _visor, 'designer': _dabs, 'devops': _glow}
 # Grosor del armazón de las gafas, sobre el de siempre: discreto o de pasta.
 FRAMES = {'auditor': .64, 'mobile': 1.3}
