@@ -11,7 +11,7 @@ Uso, con el payload del hook por stdin (install.sh lo copia como `elyares-guard`
                                y entrar a un servidor por `ssh` a leer (el
                                comando remoto pasa por las mismas reglas)
   elyares-guard solo-docs      el Edit y el Write de un agente que solo documenta
-                               (el architect, el researcher, el coach): nada que no sea
+                               (el architect, el researcher, el coach, el analyst): nada que no sea
                                documentación
   elyares-guard config         el Edit y el Write de cualquier sesión: pregunta
                                antes de tocar la configuración de un linter, un
