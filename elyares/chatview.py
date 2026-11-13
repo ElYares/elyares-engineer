@@ -88,7 +88,7 @@ import cairo
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
-from . import chat, fonts, mascot, paint, projects, settings, state, store, themes
+from . import chat, fonts, mascot, paint, pomodoro, projects, settings, state, store, themes
 
 CHAT_W, CHAT_H = 600, 620     # el panel: ancho de la isla con vista previa, y alto
 CHAT_PAD = 16                 # margen por dentro
@@ -178,6 +178,7 @@ class ChatView:
     subió desde el final), `chat_pick` (el comando elegido de la lista),
     `chat_menu` (el menú abierto: 'model', 'effort' o None), `chat_images`
     (lo pegado, en PNG) y `chat_cache` (lo ya medido de la conversación)."""
+    pomo_repo = ''          # la carpeta del chat abierto con «Con agente» (lo fija la vista Pomodoro)
 
     def chat_init(self):
         self.chat = None
@@ -802,7 +803,19 @@ class ChatView:
                            'ttl': CHAT_REPLY_SECS, 'where': c.name, 'note': chat.model_name(c.model_id),
                            'tint': state.AGENT_ROLES.get(c.agent, state.MAIN_ROLE),
                            'lines': lines[:CHAT_REPLY_LINES],
-                           'actions': [{'label': 'Ver respuesta', 'chat': c.session or True, 'after': 'clear'}]})
+                           'actions': [{'label': 'Ver respuesta', 'chat': c.session or True, 'after': 'clear'}]
+                           + self.pomodoro_done(c)})
+
+    def pomodoro_done(self, c):
+        """Si este chat se abrió con «Con agente» y su pomodoro sigue en foco, el
+        botón que da la tarea por hecha. No se hace solo: que la respuesta esté
+        no quiere decir que la tarea lo esté."""
+        if not (self.pomo_repo and c.cwd == self.pomo_repo):
+            return []
+        status = pomodoro.describe(pomodoro.snapshot())     # fresco: la vista Pomodoro quizá nunca se abrió
+        if not (status and status['phase'] in pomodoro.FOCUS_PHASES):
+            return []
+        return [{'label': 'Tarea hecha', 'cmd': ['coffe', 'done'], 'after': 'clear'}]
 
     def chat_show(self, which):
         """El botón de un aviso del chat: abre la conversación de esa sesión;
