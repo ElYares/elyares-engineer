@@ -1,7 +1,6 @@
-"""Lo que el editor muestra de un repositorio: qué cambió, su diff y el archivo.
+"""Lo que el editor muestra de un repositorio: la rama y qué archivos cambiaron.
 
-Solo lee. Nunca escribe en el repositorio ni en los archivos: el editor es un
-visor de lo que está haciendo el agente (o tú desde otro sitio).
+Solo lee: nunca escribe en el repositorio. Abrir y editar el archivo es cosa de nvim.
 """
 
 import os
@@ -11,9 +10,8 @@ import time
 from collections import namedtuple
 
 EVERY = 2.0               # cada cuánto se mira `git status` mientras el editor está a la vista
-MAX_BYTES = 1_000_000     # un archivo más grande se avisa, no se carga
 MAX_FILES = 200
-State = namedtuple('State', 'branch files root chosen text note diff', defaults=('', None, '', '', '', '', ''))
+State = namedtuple('State', 'branch files root chosen', defaults=('', None, '', ''))
 LABELS = {'M': 'modificado', 'A': 'nuevo', 'D': 'borrado', 'R': 'renombrado', '?': 'sin seguir', 'U': 'en conflicto'}
 
 
@@ -56,74 +54,38 @@ def changed(root):
     return None if out is None else parse_status(out)
 
 
-def diff(root, path, code='M'):
-    """El diff de un archivo contra HEAD. Un archivo sin seguir se muestra entero como añadido."""
-    if code == '?':
-        try:
-            out = subprocess.run(['git', '-C', root, 'diff', '--no-index', '--', '/dev/null', path],
-                                 capture_output=True, text=True, timeout=10)
-        except (OSError, subprocess.SubprocessError):
-            return ''
-        return out.stdout           # `--no-index` sale con 1 cuando hay diferencias
-    return _git(root, 'diff', 'HEAD', '--', path) or ''
-
-
-def read(root, path):
-    """(texto, nota): el contenido del archivo, o '' y por qué no se muestra."""
-    full = os.path.realpath(os.path.join(root, path))
-    if not full.startswith(os.path.realpath(root) + os.sep):
-        return '', 'Fuera del proyecto'
-    try:
-        if os.path.getsize(full) > MAX_BYTES:
-            return '', 'Archivo muy grande para mostrarlo'
-        with open(full, 'rb') as fh:
-            data = fh.read()
-    except OSError:
-        return '', 'El archivo ya no existe'
-    if b'\0' in data:
-        return '', 'Archivo binario'
-    return data.decode('utf-8', 'replace'), ''
-
-
 class Watcher:
-    """Mira `git status` y el archivo elegido en un hilo: el dibujo nunca espera
-    a un subproceso. `read()` devuelve un `State`; `files` es None si la carpeta
-    no es un repositorio. Si el archivo elegido ya no está entre los cambios, se
-    elige el primero."""
+    """Mira `git status` en un hilo: el dibujo nunca espera a un subproceso.
+    `read()` devuelve un `State`; `files` es None si la carpeta no es un repositorio.
+    `chosen` es el último archivo en el que se hizo clic (la lista lo marca)."""
 
     def __init__(self):
-        self.root = self.chosen = ''
+        self.root = ''
         self.state = State()
         self.at = 0.0
         self.busy = False
 
     def watch(self, root):
         if root != self.root:
-            self.root, self.chosen, self.state, self.at = root, '', State(root=root), 0.0
+            self.root, self.state, self.at = root, State(root=root), 0.0
 
     def choose(self, path):
-        if path != self.chosen:
-            self.chosen, self.at = path, 0.0
+        self.state = self.state._replace(chosen=path)
 
     def read(self):
         now = time.monotonic()
         if self.root and not self.busy and now - self.at >= EVERY:
             self.busy, self.at = True, now
-            threading.Thread(target=self._fetch, args=(self.root, self.chosen), daemon=True).start()
+            threading.Thread(target=self._fetch, args=(self.root,), daemon=True).start()
         return self.state
 
     def refresh(self):
         self.at = 0.0
 
-    def _fetch(self, root, chosen):
+    def _fetch(self, root):
         try:
             files, name = changed(root), branch(root)
-            paths = [path for _code, path in files or []]
-            chosen = chosen if chosen in paths else (paths[0] if paths else '')
-            code = next((c for c, path in files or [] if path == chosen), 'M')
-            text, note = read(root, chosen) if chosen else ('', '')
             if root == self.root:
-                self.chosen = chosen
-                self.state = State(name, files, root, chosen, text, note, diff(root, chosen, code) if chosen else '')
+                self.state = State(name, files, root, self.state.chosen)
         finally:
             self.busy = False
