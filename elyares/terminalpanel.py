@@ -18,11 +18,31 @@ gi.require_version('Vte', '3.91')
 
 from gi.repository import Gdk, GLib, Gtk, Pango, Vte
 
-from . import fonts, terminal, theme, themes
+from . import fonts, settings, terminal, theme, themes
 from .windowframe import SPACE
 
 QUICK_EXIT = 2.0          # un cliente que se va antes de esto no se relanza solo: algo falla
 FONT_SIZE = 11
+FONT_MIN, FONT_MAX = 7, 28
+_panels = []              # todas las terminales vivas: el tamaño es de todas (Terminal, Editor y Taller)
+
+
+def font_size():
+    try:
+        return max(FONT_MIN, min(FONT_MAX, int(settings.load().get('term_font') or FONT_SIZE)))
+    except (TypeError, ValueError):
+        return FONT_SIZE
+
+
+def set_font_size(size):
+    """Guarda el tamaño y lo aplica a todas las terminales abiertas. 0 = el de fábrica."""
+    size = FONT_SIZE if not size else max(FONT_MIN, min(FONT_MAX, size))
+    values = settings.load()
+    values['term_font'] = size
+    settings.save(values)
+    for panel in _panels:
+        panel.apply_font()
+    return size
 
 
 def _rgba(color):
@@ -52,7 +72,12 @@ class TerminalPanel(Gtk.Box):
         self.term.set_vexpand(True)
         self.term.set_hexpand(True)
         self.term.set_scrollback_lines(10000)
-        self.term.set_font(Pango.FontDescription.from_string(f'{fonts.MONO} {FONT_SIZE}'))
+        self.apply_font()
+        _panels.append(self)
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect('key-pressed', self._key)
+        self.term.add_controller(keys)
         self.term.connect('child-exited', self._exited)
         self.note = Gtk.Label(xalign=0, wrap=True)
         self.note.add_css_class('dim-label')
@@ -62,10 +87,36 @@ class TerminalPanel(Gtk.Box):
         self.again.set_halign(Gtk.Align.START)
         self.again.set_margin_start(SPACE[1])
         self.again.connect('clicked', lambda _b: self.open(self.root))
-        for widget in (self.head, self.note, self.again, self.term):
+        bar = Gtk.Box(spacing=SPACE[0])
+        self.head.set_hexpand(True)
+        bar.append(self.head)
+        for label, step, tip in (('A−', -1, 'Texto más chico (Ctrl+−)'), ('A+', 1, 'Texto más grande (Ctrl++)')):
+            btn = Gtk.Button(label=label)
+            btn.add_css_class('elyares-btn')
+            btn.set_tooltip_text(tip)
+            btn.connect('clicked', lambda _b, d=step: set_font_size(font_size() + d))
+            bar.append(btn)
+        for widget in (bar, self.note, self.again, self.term):
             self.append(widget)
         self._say('')
         self.set_visible(False)
+
+    def apply_font(self):
+        self.term.set_font(Pango.FontDescription.from_string(f'{fonts.MONO} {font_size()}'))
+
+    def _key(self, _ctl, keyval, _code, state):
+        """Ctrl+− / Ctrl++ / Ctrl+0: el tamaño del texto, solo con el foco en la terminal."""
+        if not state & Gdk.ModifierType.CONTROL_MASK or state & Gdk.ModifierType.ALT_MASK:
+            return False
+        if keyval in (Gdk.KEY_minus, Gdk.KEY_KP_Subtract):
+            set_font_size(font_size() - 1)
+        elif keyval in (Gdk.KEY_plus, Gdk.KEY_equal, Gdk.KEY_KP_Add):
+            set_font_size(font_size() + 1)
+        elif keyval in (Gdk.KEY_0, Gdk.KEY_KP_0):
+            set_font_size(0)
+        else:
+            return False
+        return True
 
     def set_terminal(self, root, visible):
         """Lo llama la ventana en cada vuelta de los paneles: barato si nada cambió."""
