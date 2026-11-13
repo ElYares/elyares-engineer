@@ -11,6 +11,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 
 import os
+import math
 import re
 import time
 
@@ -22,6 +23,7 @@ from .windowframe import SPACE
 LIST_W = 470
 GREEN, GREY, RED, AMBER = '#4ade80', '#8f9ab8', '#ff6b6b', '#f5c542'
 CORES = os.cpu_count() or 1
+PULSE_SECS = 1.3          # lo que tarda el esqueleto en latir una vez
 RESULT_SECS = 8            # cuánto se queda a la vista «Levantado» o el error de una orden
 WORDS = {'up': 'Levantando', 'stop-project': 'Parando', 'stop': 'Parando', 'start': 'Iniciando'}
 DONE = {'up': 'Levantado', 'stop-project': 'Parado', 'stop': 'Parado', 'start': 'Iniciado'}
@@ -57,6 +59,7 @@ CSS = f"""
 .cbox-job {{ border-radius: 6px; padding: 6px 8px; background: alpha({AMBER}, 0.14); }}
 .cbox-job.ok {{ background: alpha({GREEN}, 0.16); }}
 .cbox-job.bad {{ background: alpha({RED}, 0.18); }}
+.cbox-skel {{ background: rgba(128, 128, 128, 0.28); border-radius: 6px; color: transparent; }}
 .cbox-logs {{ background: alpha(black, 0.35); border-radius: 8px; font-size: 12px; }}
 .cbox-logs text {{ background: none; }}
 """
@@ -154,6 +157,8 @@ class ContainersPanel(Gtk.Box):
         self.only_down = False
         self.picked = ''            # nombre del contenedor elegido
         self.sig = None
+        self.skeleton = []          # lo que late mientras carga: bloques sueltos, textos y barras
+        self.pulse_id = 0
         self.jobs = {}              # (orden, destino) → lo que va de una orden en curso o recién acabada
         self.cards = {}             # carpeta del proyecto → su franja de avance
         self.rows = {}              # nombre → (fila, cpu, memoria): el consumo se pone sin rehacer la lista
@@ -271,19 +276,99 @@ class ContainersPanel(Gtk.Box):
             label.set_text(f'{WORDS[key[0]]}… {seconds} s{tail}')
             bar.pulse()
 
+    def _block(self, width, height):
+        block = Gtk.Box()
+        block.add_css_class('cbox-skel')
+        block.set_size_request(width, height)
+        self.skeleton.append(block)
+        return block
+
+    def _show_skeleton(self):
+        """Antes de la primera respuesta: tres recuadros y varias tarjetas grises que laten, con la forma
+        de lo que va a llegar. Se pone una sola vez."""
+        if self.sig == 'skeleton':
+            return
+        self.sig = 'skeleton'
+        self.skeleton = []
+        self.filter_btn.set_sensitive(False)
+        for big, note, bar in ((self.up_big, self.up_note, self.up_bar), (self.cpu_big, self.cpu_note, self.cpu_bar),
+                               (self.mem_big, self.mem_note, self.mem_bar)):
+            big.set_text('0000')
+            note.set_text('cargando…')
+            set_bar(bar, 0.0, '')
+            for label in (big, note):
+                label.add_css_class('cbox-skel')
+                self.skeleton.append(label)
+        while (child := self.page.get_first_child()) is not None:
+            self.page.remove(child)
+        for rows, widths in ((6, (90, 140, 110, 160, 120, 100)), (3, (130, 100, 150)), (4, (110, 150, 90, 130))):
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+            card.add_css_class('elyares-card')
+            card.add_css_class('cbox-card')
+            head = Gtk.Box(spacing=SPACE[1])
+            head.append(self._block(150, 18))
+            head.append(self._block(36, 18))
+            card.append(head)
+            for i in range(rows):
+                row = Gtk.Box(spacing=SPACE[1])
+                row.set_margin_end(SPACE[0])
+                row.append(self._block(10, 10))
+                row.append(self._block(widths[i % len(widths)], 14))
+                spacer = Gtk.Box(hexpand=True)
+                row.append(spacer)
+                row.append(self._block(44, 14))
+                row.append(self._block(60, 14))
+                row.append(self._block(26, 26))
+                card.append(row)
+            self.page.append(card)
+        self.empty.set_label('Cargando contenedores…')
+        if not self.pulse_id:
+            self.pulse_id = GLib.timeout_add(50, self._pulse)
+
+    def _pulse(self):
+        """El latido: la opacidad de lo gris sube y baja. Se apaga sola al salir del esqueleto."""
+        if self.sig != 'skeleton':
+            self.pulse_id = 0
+            return GLib.SOURCE_REMOVE
+        level = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(time.monotonic() * 2 * math.pi / PULSE_SECS))
+        for widget in self.skeleton:
+            widget.set_opacity(level)
+        return GLib.SOURCE_CONTINUE
+
+    def _hide_skeleton(self):
+        if self.sig != 'skeleton':
+            return
+        self.sig = None                 # fuerza rehacer la lista con lo de verdad
+        self.filter_btn.set_sensitive(True)
+        for widget in self.skeleton:
+            widget.set_opacity(1.0)
+            widget.remove_css_class('cbox-skel')
+        self.skeleton = []
+        self.empty.set_label('Elige un contenedor para ver su consumo y su log.')
+
     def _filter(self, btn):
         self.only_down = btn.get_active()
         self.sig = None
         if self.data is not None:
             self.set_data(self.data, self.handlers)
 
-    def set_data(self, data, handlers):
-        """`data`: lo que da `containers.snapshot()` (None si docker no contesta). Rehace la lista solo si
-        cambió la estructura; el consumo se pone en su sitio."""
+    def set_data(self, data, handlers, loading=False):
+        """`data`: lo que da `containers.snapshot()` (None si docker no contesta). `loading`: docker aún no
+        ha contestado ni una vez: se muestra un esqueleto que late. Rehace la lista solo si cambió la
+        estructura; el consumo se pone en su sitio."""
         self.handlers, self.data = handlers, data
+        if loading and data is None:
+            self._show_skeleton()
+            return
+        self._hide_skeleton()
         if data is None:
-            self.up_big.set_text('—')
+            for big, note in ((self.up_big, self.up_note), (self.cpu_big, self.cpu_note), (self.mem_big, self.mem_note)):
+                big.set_text('—')
+                note.set_text('')
             self.up_note.set_text('Docker no contesta (¿está corriendo?)')
+            if self.sig != 'down':
+                self.sig = 'down'
+                self._rebuild([])
             return
         self._summary(data['totals'])
         projects = [p for p in data['projects'] if not self.only_down or p['running'] < max(p['total'], 1)]
@@ -327,7 +412,7 @@ class ContainersPanel(Gtk.Box):
         while (child := self.page.get_first_child()) is not None:
             self.page.remove(child)
         if not projects:
-            note = Gtk.Label(label='Todo está arriba.' if self.only_down else 'No hay proyectos de DevHerd.',
+            note = Gtk.Label(label='Todo está arriba.' if self.only_down else 'Sin datos todavía: se vuelve a intentar solo.' if self.data is None else 'No hay proyectos de DevHerd.',
                              xalign=0)
             note.add_css_class('dim-label')
             self.page.append(note)
