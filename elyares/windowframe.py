@@ -267,6 +267,7 @@ class Frame:
         self.alerts = AlertsPanel()
         self.tmux = TmuxPanel()
         self.pomodoro = PomodoroPanel()
+        self.extra = []                 # paneles que monta la ventana (el editor y la terminal importan de este módulo)
         self.settings = SettingsPanel()
         self.sidebar = Gtk.ListBox()
         self.sidebar.set_size_request(SIDEBAR_W, -1)
@@ -396,7 +397,7 @@ class Frame:
         self.focus.place(0)
         self.flows.set_visible(False)
         self.chat_head.place(0)
-        for panel in (self.sources, self.alerts, self.settings):
+        for panel in (self.sources, self.alerts, self.settings, self.tmux, self.pomodoro, *self.extra):
             panel.set_visible(False)
 
     def set_glass(self, on):

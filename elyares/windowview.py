@@ -150,6 +150,7 @@ class WindowView:
         self.frame.editor = editorpanel.EditorPanel()      # en su archivo: importa de windowframe, no al revés
         self.overlay.add_overlay(self.frame.editor)
         self.frame.terminal = terminalpanel.TerminalPanel()
+        self.frame.extra += [self.frame.editor, self.frame.terminal]     # `hide_panels` los esconde con los demás
         self.overlay.add_overlay(self.frame.terminal)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win

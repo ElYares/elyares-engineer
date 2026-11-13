@@ -11,6 +11,11 @@ import os
 import threading
 import time
 
+import gi
+
+gi.require_version('Gtk', '4.0')
+gi.require_version('Vte', '3.91')
+
 from gi.repository import Gdk, GLib, Gtk, Pango, Vte
 
 from . import fonts, terminal, themes
