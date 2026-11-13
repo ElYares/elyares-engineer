@@ -474,7 +474,8 @@ class WindowView:
                                                             agent=self.window_pomodoro_agent))
         frame.containers.set_visible(self.panel_open == 'containers')
         if self.panel_open == 'containers':
-            frame.containers.set_data(self.box_watch.read(), dict(act=self.window_containers))
+            data = self.box_watch.read()
+            frame.containers.set_data(data, dict(act=self.window_containers), loading=not self.box_watch.loaded)
         else:
             frame.containers.leave()
         if self.panel_open == 'alerts':

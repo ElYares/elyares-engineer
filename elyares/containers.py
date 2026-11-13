@@ -164,6 +164,7 @@ class Watcher:
 
     def __init__(self):
         self.data = None
+        self.loaded = False             # ya contestó docker una vez (bien o mal): antes de eso, la vista muestra un esqueleto
         self.at = 0.0
         self.busy = False
 
@@ -181,6 +182,7 @@ class Watcher:
         try:
             self.data = snapshot()
         finally:
+            self.loaded = True
             self.busy = False
 
 
