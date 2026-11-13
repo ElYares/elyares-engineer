@@ -100,7 +100,9 @@ class Ayudas:
         return found
 
     def state(self, **over):
-        base = dict(branch='main', files=[('M', 'a.py'), ('?', 'b.py')], root='/p/x', chosen='a.py')
+        base = dict(branch='main', files=[('M', 'a.py'), ('?', 'b.py')], root='/p/x', chosen='a.py',
+                    paths=['a.py', 'b.py', 'c.py', 'src/m.py', 'src/deep/n.py'],
+                    stats={'a.py': (3, 1)})
         return gitview.State(**{**base, **over})
 
 
@@ -110,32 +112,37 @@ class Lista(Ayudas, unittest.TestCase):
         self.log = []
         self.panel = editorpanel.FileList()
 
-    def test_un_boton_por_archivo_y_el_clic_lo_elige(self):
+    def test_el_arbol_muestra_archivos_y_carpetas_cerradas_y_el_clic_elige(self):
         self.panel.set_files(self.state(), self.log.append)
-        self.assertEqual(len(self.buttons(self.panel)), 2)
-        self.buttons(self.panel)[1].emit('clicked')
+        self.assertEqual(len(self.buttons(self.panel)), 4)      # src (cerrada) + a, b, c
+        self.buttons(self.panel)[2].emit('clicked')             # b.py
         self.assertEqual(self.log, ['b.py'])
 
-    def test_sin_repositorio_o_sin_cambios_no_hay_botones(self):
+    def test_una_carpeta_se_abre_y_se_cierra(self):
+        self.panel.set_files(self.state(), self.log.append)
+        self.buttons(self.panel)[0].emit('clicked')             # src
+        self.assertEqual(len(self.buttons(self.panel)), 6)      # + deep y m.py
+        self.buttons(self.panel)[0].emit('clicked')
+        self.assertEqual(len(self.buttons(self.panel)), 4)
+
+    def test_la_primera_vez_se_abren_las_carpetas_con_cambios(self):
+        self.panel.set_files(self.state(files=[('M', 'src/deep/n.py')]), self.log.append)
+        self.assertEqual(len(self.buttons(self.panel)), 7)      # src, deep, n.py y a, b, c, m.py
+
+    def test_cerrar_y_abrir_todo(self):
+        self.panel.set_files(self.state(), self.log.append)
+        self.panel.expand_all()
+        self.assertEqual(len(self.buttons(self.panel)), 7)
+        self.panel.collapse_all()
+        self.assertEqual(len(self.buttons(self.panel)), 4)
+
+    def test_sin_repositorio_no_hay_botones(self):
         self.panel.set_files(self.state(files=None, chosen=''), self.log.append)
         self.assertEqual(self.buttons(self.panel), [])
-        self.panel.set_files(self.state(files=[], chosen=''), self.log.append)
-        self.assertEqual(self.buttons(self.panel), [])
 
-    def test_los_tocados_por_el_agente_van_arriba_y_abren_igual(self):
-        self.panel.set_files(self.state(), self.log.append, ['x/z.py'])
-        self.assertEqual(len(self.buttons(self.panel)), 3)
-        self.buttons(self.panel)[0].emit('clicked')
-        self.assertEqual(self.log, ['x/z.py'])
-
-    def test_sin_tocados_no_hay_seccion(self):
-        self.panel.set_files(self.state(), self.log.append)
-        self.assertEqual(len(self.buttons(self.panel)), 2)
-
-    def test_un_tocado_nuevo_reconstruye_la_lista(self):
-        self.panel.set_files(self.state(), self.log.append)
-        self.panel.set_files(self.state(), self.log.append, ['n.py'])
-        self.assertEqual(len(self.buttons(self.panel)), 3)
+    def test_un_tocado_por_el_agente_se_marca_y_abre_sus_carpetas(self):
+        self.panel.set_files(self.state(files=[]), self.log.append, ['src/m.py'])
+        self.assertEqual(len(self.buttons(self.panel)), 6)
 
     def test_sin_cambios_no_reconstruye_los_botones(self):
         self.panel.set_files(self.state(), self.log.append)
@@ -224,3 +231,51 @@ class Taller(Ayudas, unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Arbol(unittest.TestCase):
+    PATHS = ['README.md', 'src/app.py', 'src/lib/util.py', 'docs/a.md']
+
+    def names(self, rows):
+        return [(r['depth'], r['name']) for r in rows]
+
+    def test_carpetas_primero_y_cerradas_por_defecto(self):
+        rows = gitview.tree_rows(self.PATHS, {}, set())
+        self.assertEqual(self.names(rows), [(0, 'docs'), (0, 'src'), (0, 'README.md')])
+
+    def test_abrir_una_carpeta_muestra_su_contenido(self):
+        rows = gitview.tree_rows(self.PATHS, {}, {'src'})
+        self.assertEqual(self.names(rows), [(0, 'docs'), (0, 'src'), (1, 'lib'), (1, 'app.py'), (0, 'README.md')])
+
+    def test_una_carpeta_cerrada_cuenta_sus_cambios(self):
+        rows = gitview.tree_rows(self.PATHS, {'src/lib/util.py': 'M', 'src/app.py': 'A'}, set())
+        src = next(r for r in rows if r['name'] == 'src')
+        self.assertEqual(src['count'], 2)
+
+    def test_un_borrado_sigue_en_el_arbol(self):
+        rows = gitview.tree_rows(['a.py'], {'gone.py': 'D'}, set())
+        gone = next(r for r in rows if r['name'] == 'gone.py')
+        self.assertEqual(gone['code'], 'D')
+
+    def test_parents(self):
+        self.assertEqual(gitview.parents(['a/b/c.py', 'x.py']), {'a', 'a/b'})
+
+    def test_numstat(self):
+        self.assertEqual(gitview.parse_numstat('3\t1\ta.py\n-\t-\timg.png\n'),
+                         {'a.py': (3, 1), 'img.png': (0, 0)})
+
+
+class RaizDelEditor(unittest.TestCase):
+    """Elegir una sesión en la barra lateral cambia el proyecto de Editor, Terminal y Taller."""
+
+    def root(self, **over):
+        from types import SimpleNamespace
+        from elyares import windowview
+        me = SimpleNamespace(**{'code_root': '', 'chat': SimpleNamespace(cwd='/p/chat'), 'project_here': lambda: None, **over})
+        return windowview.WindowView.window_editor_root(me)
+
+    def test_sin_eleccion_manda_el_chat(self):
+        self.assertEqual(self.root(), '/p/chat')
+
+    def test_la_sesion_elegida_manda_sobre_el_chat(self):
+        self.assertEqual(self.root(code_root='/p/otro'), '/p/otro')

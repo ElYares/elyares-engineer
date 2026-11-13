@@ -55,6 +55,7 @@ class WindowView:
     hypr_async = True               # las pruebas lo apagan: el pedido sale en el acto
     window_body = 0                 # alto extra que piden las tarjetas del tablero (lo usa body_h)
     sources_pick = 'claude'         # la fuente que muestra
+    code_root = ''                  # la carpeta de la sesión elegida en la barra lateral: manda en Editor, Terminal y Taller
     panel_open = ''                 # 'alerts', 'settings', 'tmux', 'pomodoro', 'containers', 'editor', 'terminal' o 'taller' cuando una de esas vistas está a la vista
     help_win = None
     frame = None                    # el marco de widgets (windowframe.Frame); None sin ventana real
@@ -552,7 +553,10 @@ class WindowView:
         return max(MIN_H, min(EDITOR_H, room))
 
     def window_editor_root(self):
-        """La carpeta que muestra el editor: la del chat que se tiene, o la del proyecto de tmux."""
+        """La carpeta que muestra el editor: la de la sesión que se eligió en la barra lateral, o la del
+        chat que se tiene, o la del proyecto de tmux."""
+        if self.code_root:
+            return self.code_root
         if self.chat is not None and self.chat.cwd:
             return self.chat.cwd
         here = self.project_here()
@@ -745,6 +749,8 @@ class WindowView:
         if sid != self.tab:
             self.tab, self.focus = sid, None
             self.tab_manual = True
+        picked = next((c for c in self.claude() if c.sid == sid), None)
+        self.code_root = self.tab_place(self.host(picked)) if picked is not None else ''
 
     def window_rows(self):
         """Las filas de la barra lateral: nombre, punto y estado en texto."""

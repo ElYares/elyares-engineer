@@ -474,6 +474,7 @@ class ChatView:
         """Abre el panel con esa conversación. Lo escrito y no enviado se queda de
         borrador en la que se deja y vuelve al regresar a ella; con `keep` se lleva."""
         carry = not keep and c is not self.chat and self.chat is not None and self.chat_whom == 'chat'
+        self.code_root = ''             # abrir un chat vuelve a mandar su carpeta en Editor, Terminal y Taller
         if c is not self.chat:
             if not keep:
                 self.chat_stash()       # el borrador se queda en la conversación que se deja
