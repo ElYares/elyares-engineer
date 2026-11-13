@@ -15,6 +15,7 @@ VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
          ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'), ('containers', 'Contenedores'),
          ('editor', 'Editor'), ('terminal', 'Terminal'), ('taller', 'Taller'),
          ('sources', 'Fuentes'), ('settings', 'Ajustes'))
+HIDDEN_VIEWS = ('flows', 'tmux')       # sin botón en la barra por ahora: el código sigue ahí
 SIDEBAR_W = 180
 FOLD_W = 640                    # más angosta que esto, la barra lateral se pliega y el texto conserva su tamaño
 
@@ -242,6 +243,7 @@ class Frame:
             else:
                 btn.set_group(first)
             btn.connect('toggled', self._toggled, key)
+            btn.set_visible(key not in HIDDEN_VIEWS)
             nav.append(btn)
             self.buttons[key] = btn
         self.none = Gtk.ToggleButton()      # nadie del grupo marcado: la bandeja no es una de las vistas
