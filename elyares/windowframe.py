@@ -578,6 +578,7 @@ class ChatHead(Gtk.Box):
         self.set_halign(Gtk.Align.FILL)
         self.signature = None
         self.info = None
+        self.files_btn = None           # el botón «Archivos · N», si hay archivos tocados
         self.set_visible(False)
 
     def place(self, height):
@@ -588,6 +589,8 @@ class ChatHead(Gtk.Box):
     def _refresh(self, info):
         where = f' · {info["where"]}' if info['where'] else ''
         now = (info['name'], info['project'], info['status'], where)
+        if self.files_btn is not None:
+            self.files_btn.set_label(f'Archivos · {info.get("edited", 0)}')
         if now != self.last:
             self.last = now
             self.title.set_markup(f'<span foreground="{info["color"]}" weight="bold">'
@@ -600,7 +603,7 @@ class ChatHead(Gtk.Box):
         """`info`: role, pet, name, color, project, status, where, busy,
         can_split. `handlers`: face(cr, role, pet, w, h, moving), act(key)."""
         self.info = info                # la cara lee siempre lo último
-        shape = (info['role'], info['busy'], info['can_split'])
+        shape = (info['role'], info['busy'], info['can_split'], bool(info.get('edited')))
         if shape == self.signature:
             self._refresh(info)         # mismos botones: solo cambian los textos
             return
@@ -627,10 +630,15 @@ class ChatHead(Gtk.Box):
         text.set_hexpand(True)
         self.append(text)
         self.title, self.status, self.last = title, status, (info['name'], info['project'], info['status'], where)
-        links = [('split', 'Otra')] if info['can_split'] else []
+        links = [('files', f'Archivos · {info["edited"]}')] if info.get('edited') else []
+        links += [('split', 'Otra')] if info['can_split'] else []
         links += [('new', 'Nuevo')] + ([('stop', 'Detener')] if info['busy'] else []) + [('close', 'Cerrar')]
+        self.files_btn = None
         for key, label in links:
             btn = Gtk.Button(label=label)
+            if key == 'files':
+                self.files_btn = btn
+                btn.update_property([Gtk.AccessibleProperty.LABEL], ['Archivos que tocó el agente, en el Editor'])
             btn.add_css_class('elyares-btn')
             btn.add_css_class('compact')
             if key == 'stop':

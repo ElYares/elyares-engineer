@@ -27,6 +27,17 @@ def _git(root, *args):
     return out.stdout if out.returncode == 0 else None
 
 
+def inside(root, paths):
+    """De unas rutas absolutas, las que están dentro de `root`, como rutas relativas y en el mismo orden."""
+    base = os.path.realpath(root)
+    found = []
+    for path in paths:
+        rel = os.path.relpath(os.path.realpath(path), base)
+        if rel != '.' and not rel.startswith(os.pardir + os.sep) and rel != os.pardir and rel not in found:
+            found.append(rel)
+    return found
+
+
 def branch(root):
     """La rama (o el hash corto si está suelta); '' si la carpeta no es un repositorio."""
     name = _git(root, 'rev-parse', '--abbrev-ref', 'HEAD')

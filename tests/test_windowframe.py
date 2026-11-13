@@ -276,7 +276,7 @@ class CabeceraDelChat(unittest.TestCase):
     @staticmethod
     def info(**kw):
         base = dict(role='architect', pet='idle', name='elyares-architect', color='#22c7dd',
-                    project='api', status='Listo', where='~/api', busy=False, can_split=True)
+                    project='api', status='Listo', where='~/api', busy=False, can_split=True, edited=0)
         return {**base, **kw}
 
     def labels(self):
@@ -289,6 +289,23 @@ class CabeceraDelChat(unittest.TestCase):
     def test_detener_solo_si_trabaja_y_otra_solo_si_cabe(self):
         self.head.set_info(self.info(busy=True, can_split=False), self.handlers)
         self.assertEqual(self.labels(), ['Nuevo', 'Detener', 'Cerrar'])
+
+    def test_con_archivos_tocados_sale_su_boton_con_la_cuenta(self):
+        self.head.set_info(self.info(edited=3), self.handlers)
+        self.assertEqual(self.labels(), ['Archivos · 3', 'Otra', 'Nuevo', 'Cerrar'])
+        _buttons(self.head)[0].emit('clicked')
+        self.assertEqual(self.log, ['files'])
+
+    def test_la_cuenta_de_archivos_se_retoca_sin_reconstruir(self):
+        self.head.set_info(self.info(edited=1), self.handlers)
+        first = _buttons(self.head)[0]
+        self.head.set_info(self.info(edited=2), self.handlers)
+        self.assertIs(_buttons(self.head)[0], first)
+        self.assertEqual(first.get_label(), 'Archivos · 2')
+
+    def test_sin_archivos_tocados_no_hay_boton(self):
+        self.head.set_info(self.info(edited=0), self.handlers)
+        self.assertNotIn('Archivos · 0', self.labels())
 
     def test_un_enlace_avisa_con_su_clave(self):
         self.head.set_info(self.info(), self.handlers)
