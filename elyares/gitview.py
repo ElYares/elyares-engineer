@@ -16,9 +16,12 @@ LABELS = {'M': 'modificado', 'A': 'nuevo', 'D': 'borrado', 'R': 'renombrado', '?
 
 
 def _git(root, *args):
-    """La salida de `git -C root …`, o None si falla o no hay git."""
+    """La salida de `git -C root …`, o None si falla o no hay git. Un repositorio que llega de fuera
+    puede traer `core.fsmonitor` en su config, que ejecuta un comando en cada `status`: se apaga.
+    Y sin bloqueos opcionales: este `status` cada 2 s no le quita el índice a un commit del agente."""
     try:
-        out = subprocess.run(['git', '-C', root, *args], capture_output=True, text=True, timeout=10)
+        out = subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', root, *args], capture_output=True,
+                             text=True, timeout=10, env={**os.environ, 'GIT_OPTIONAL_LOCKS': '0'})
     except (OSError, subprocess.SubprocessError):
         return None
     return out.stdout if out.returncode == 0 else None

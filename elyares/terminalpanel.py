@@ -116,7 +116,7 @@ class TerminalPanel(Gtk.Box):
         return GLib.SOURCE_REMOVE
 
     def spawn(self, root, name):
-        env = [f'{k}={v}' for k, v in os.environ.items()] + ['COLORTERM=truecolor']
+        env = [f'{k}={v}' for k, v in terminal.clean_env().items()] + ['COLORTERM=truecolor']
         self.term.spawn_async(Vte.PtyFlags.DEFAULT, root, terminal.attach_argv(name), env,
                               GLib.SpawnFlags.DEFAULT, None, None, -1, None, None)
 

@@ -48,6 +48,16 @@ class Repositorio(unittest.TestCase):
         self.assertEqual(gitview.branch(self.root), 'main')
         self.assertEqual(sorted(gitview.changed(self.root)), [('?', 'b.py'), ('M', 'a.py')])
 
+    def test_git_corre_sin_fsmonitor_y_sin_bloqueos_opcionales(self):
+        # Un repositorio de fuera puede traer `core.fsmonitor` (ejecuta un comando en cada `status`).
+        from unittest import mock
+        with mock.patch.object(gitview.subprocess, 'run') as run:
+            run.return_value = mock.Mock(returncode=0, stdout='')
+            gitview.changed(self.root)
+        args, kwargs = run.call_args
+        self.assertIn('core.fsmonitor=false', args[0])
+        self.assertEqual(kwargs['env']['GIT_OPTIONAL_LOCKS'], '0')
+
     def test_sin_repositorio_no_hay_cambios(self):
         with tempfile.TemporaryDirectory() as plain:
             self.assertIsNone(gitview.changed(plain))

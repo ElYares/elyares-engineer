@@ -13,6 +13,27 @@ from elyares import terminal
 HAVE_TMUX = shutil.which('tmux') is not None
 
 
+class Entorno(unittest.TestCase):
+    def test_la_terminal_no_hereda_lo_del_servicio(self):
+        base = {'PATH': '/usr/bin', 'HOME': '/h', 'PYTHONPATH': '/repo', 'LD_PRELOAD': '/lib/x.so',
+                'INVOCATION_ID': 'abc', 'JOURNAL_STREAM': '1:2'}
+        self.assertEqual(terminal.clean_env(base), {'PATH': '/usr/bin', 'HOME': '/h'})
+
+
+class NadieEscribeEnLaTerminal(unittest.TestCase):
+    """La regla de diseño: la app nunca teclea en la terminal ni en nvim; lo que corre ahí lo teclea Yared."""
+
+    def test_ningun_modulo_manda_texto_a_un_pty_ni_a_tmux(self):
+        root = os.path.join(os.path.dirname(__file__), '..', 'elyares')
+        for name in sorted(os.listdir(root)):
+            if not name.endswith('.py'):
+                continue
+            with open(os.path.join(root, name), encoding='utf-8') as fh:
+                text = fh.read()
+            for banned in ('feed_child', 'send-keys', 'paste-buffer', 'run-shell', '--remote-send', '--remote-expr'):
+                self.assertNotIn(banned, text, f'{name} usa {banned}')
+
+
 class Nombres(unittest.TestCase):
     def test_un_nombre_que_tmux_acepta(self):
         name = terminal.session_name('/home/yo/mi proyecto.v2/api')
@@ -46,6 +67,10 @@ class Sesion(unittest.TestCase):
 
     def tearDown(self):
         subprocess.run(['tmux', '-L', terminal.SOCKET, 'kill-server'], capture_output=True)
+        try:
+            os.remove(f'/tmp/tmux-{os.getuid()}/{terminal.SOCKET}')     # `kill-server` deja el archivo del socket
+        except OSError:
+            pass
         self.sock.stop()
         self.tmp.cleanup()
 
@@ -72,6 +97,7 @@ class Sesion(unittest.TestCase):
         name, why = terminal.ensure(self.tmp.name, terminal.NVIM)
         self.assertEqual(why, '')
         sock = terminal.nvim_socket(name)
+        self.addCleanup(lambda: os.path.exists(sock) and os.remove(sock))
         for _ in range(60):                 # nvim tarda un instante en crear su socket
             if os.path.exists(sock):
                 break
@@ -83,6 +109,26 @@ class Sesion(unittest.TestCase):
         got = subprocess.run(['nvim', '--server', sock, '--remote-expr', 'expand("%:p")'],
                              capture_output=True, text=True).stdout.strip()
         self.assertEqual(os.path.realpath(got), os.path.realpath(target))
+
+    def test_un_comando_en_el_nombre_de_la_carpeta_no_se_ejecuta(self):
+        # tmux pasa lo de `-c` por sus formatos: `#(comando)` en la ruta se ejecutaba (tmux 3.8).
+        marca = f'MARCA-{os.getpid()}'
+        carpeta = os.path.join(self.tmp.name, f'a#(touch {marca})')
+        os.mkdir(carpeta)
+        name, why = terminal.ensure(carpeta)
+        self.assertEqual(why, '')
+        self.assertTrue(terminal.has(name))
+        time.sleep(0.5)
+        for donde in (carpeta, self.tmp.name, os.getcwd(), os.path.expanduser('~')):
+            self.assertFalse(os.path.exists(os.path.join(donde, marca)), f'se ejecutó en {donde}')
+
+    def test_no_abre_un_enlace_que_sale_del_proyecto(self):
+        os.symlink('/etc', os.path.join(self.tmp.name, 'enlace'))
+        self.assertEqual(terminal.open_in_nvim(self.tmp.name, 'enlace/passwd'), (False, 'Fuera del proyecto'))
+
+    def test_no_abre_un_nombre_con_caracteres_de_control(self):
+        for name in ('a\nb.py', 'a\rb.py', 'a\x00b.py'):
+            self.assertEqual(terminal.open_in_nvim(self.tmp.name, name), (False, 'Nombre de archivo no válido'))
 
     def test_no_abre_nada_fuera_del_proyecto(self):
         ok, why = terminal.open_in_nvim(self.tmp.name, '../etc/passwd')

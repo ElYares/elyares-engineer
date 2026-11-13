@@ -17,6 +17,10 @@ import shutil
 import subprocess
 
 SOCKET = 'elyares'
+# Lo del servicio que no debe llegar a la terminal ni a nvim: `PYTHONPATH` haría que todo `python` que
+# se corra ahí importe primero del repo de la isla, y `LD_PRELOAD` carga la librería de la capa.
+DROP_ENV = ('PYTHONPATH', 'LD_PRELOAD', 'INVOCATION_ID', 'JOURNAL_STREAM', 'MEMORY_PRESSURE_WATCH',
+            'MEMORY_PRESSURE_WRITE', 'NOTIFY_SOCKET', 'WATCHDOG_USEC', 'WATCHDOG_PID')
 NVIM = 'nvim'                         # el tipo de sesión que corre nvim en vez de un shell
 SIZE = ('-x', '200', '-y', '50')      # tamaño con el que nace la sesión; el cliente la ajusta al engancharse
 
@@ -28,6 +32,11 @@ def session_name(root, kind=''):
     root = os.path.realpath(root)
     base = re.sub(r'[^A-Za-z0-9_-]+', '-', os.path.basename(root.rstrip('/')) or 'raiz').strip('-') or 'raiz'
     return f'{base}-{hashlib.sha1(root.encode()).hexdigest()[:6]}' + (f'-{kind}' if kind == NVIM else '')
+
+
+def clean_env(base=None):
+    """El entorno del servicio sin lo que no debe heredar la terminal (`DROP_ENV`)."""
+    return {k: v for k, v in (os.environ if base is None else base).items() if k not in DROP_ENV}
 
 
 def nvim_socket(name):
@@ -58,7 +67,9 @@ def ensure(root, kind=''):
         return name, 'La carpeta del proyecto ya no existe'
     if has(name):
         return name, ''
-    cmd = ['tmux', '-L', SOCKET, 'new-session', '-d', '-s', name, '-c', root, *SIZE]
+    # La carpeta va por `cwd=`, no por `-c`: tmux pasa lo de `-c` por sus formatos y un `#(comando)` en el
+    # nombre de la carpeta se ejecutaría (probado con tmux 3.8).
+    cmd = ['tmux', '-L', SOCKET, 'new-session', '-d', '-s', name, *SIZE]
     if kind == NVIM:
         sock = nvim_socket(name)
         try:
@@ -70,7 +81,7 @@ def ensure(root, kind=''):
         # Con scope propio: el servidor no cuelga del servicio y sobrevive al reload.
         cmd = ['systemd-run', '--user', '--scope', '--quiet', f'--unit=elyares-tmux-{os.getpid()}-{name}', *cmd]
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15, cwd=root, env=clean_env())
     except (OSError, subprocess.SubprocessError) as err:
         return name, str(err)
     if out.returncode != 0:
@@ -86,6 +97,8 @@ def attach_argv(name):
 def open_in_nvim(root, path):
     """Pide al nvim de esa carpeta que abra un archivo del proyecto. Lo manda el clic de Yared
     en la lista; no escribe en la terminal: habla con nvim por su socket. (ok, por qué no)."""
+    if any(ord(c) < 32 or ord(c) == 127 for c in path):
+        return False, 'Nombre de archivo no válido'       # un salto de línea parte el nombre en nvim
     full = os.path.realpath(os.path.join(root, path))
     if not full.startswith(os.path.realpath(root) + os.sep):
         return False, 'Fuera del proyecto'
