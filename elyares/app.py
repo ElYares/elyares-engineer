@@ -84,7 +84,8 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, projectview, remote, settings, sources, state, store, testrun, theme, themes, windowframe, windowview, workflowview)
+               preview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
+               workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
 MAX_ROWS = 5          # filas de la lista de alertas, con la cabecera de siempre
@@ -422,6 +423,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         github.watch(emit, lambda: self.settings['github'],
                      lambda: self.settings['github_accounts'])
         GLib.timeout_add_seconds(3, self.poll_dnd)
+        GLib.timeout_add_seconds(terminal.SAVE_EVERY, self.on_terminal_save)
         # "Terminó" y "esperando" caducan solos aunque no lleguen más eventos.
         GLib.timeout_add_seconds(1, self.on_second)
         if self.model.sessions:
@@ -515,6 +517,11 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.model.reap(actions.proc_alive, keep={c.session for c in self.all_chats() if c.session})
         if self.model.sessions:
             self.refresh()
+        return GLib.SOURCE_CONTINUE
+
+    def on_terminal_save(self):
+        """Cada cierto rato guarda las sesiones de la terminal de la app, para restaurarlas tras un reinicio."""
+        threading.Thread(target=terminal.save, daemon=True, name='terminal-save').start()
         return GLib.SOURCE_CONTINUE
 
     def poll_dnd(self):
