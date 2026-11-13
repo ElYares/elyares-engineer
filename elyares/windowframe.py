@@ -12,7 +12,7 @@ from . import fonts, mascot, themes
 
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
-         ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'),
+         ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'), ('containers', 'Contenedores'),
          ('editor', 'Editor'), ('terminal', 'Terminal'), ('taller', 'Taller'),
          ('sources', 'Fuentes'), ('settings', 'Ajustes'))
 SIDEBAR_W = 180
