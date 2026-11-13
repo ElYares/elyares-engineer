@@ -81,19 +81,63 @@ class FileList(Gtk.ScrolledWindow):
 
 class EditorPanel(Gtk.Paned):
     """La lista de archivos a un lado y nvim al otro, con un divisor que se arrastra:
-    nvim se queda con todo lo que la ventana gane o pierda."""
+    nvim se queda con todo lo que la ventana gane o pierda. La lista se pliega con ««» y
+    vuelve con «»»; plegada, nvim ocupa todo el ancho. Quién guarda esa preferencia lo decide
+    `on_fold` (la ventana: la comparten el Editor y el Taller)."""
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL)
         self.add_css_class('elyares-sources')
+        self.on_fold = lambda folded: None
+        self.folded = False
         self.files = FileList()
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        title = Gtk.Label(label='ARCHIVOS', xalign=0)
+        title.add_css_class('elyares-section')
+        title.set_hexpand(True)
+        title.set_margin_start(SPACE[1])
+        self.fold_btn = self._button('«', 'Ocultar la lista de archivos', lambda: self.set_folded(True, notify=True))
+        head.append(title)
+        head.append(self.fold_btn)
+        self.side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.side.append(head)
+        self.side.append(self.files)
+        self.files.set_vexpand(True)
         self.nvim = TerminalPanel(kind=terminal.NVIM)
         self.nvim.set_visible(True)         # solo se ve cuando se ve el panel entero
         self.nvim.set_size_request(LIST_MIN, -1)
-        self.set_start_child(self.files)
-        self.set_end_child(self.nvim)
+        self.nvim.set_hexpand(True)
+        self.unfold_btn = self._button('»', 'Mostrar la lista de archivos', lambda: self.set_folded(False, notify=True))
+        self.unfold_btn.set_valign(Gtk.Align.START)
+        self.unfold_btn.set_visible(False)
+        right = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        right.append(self.unfold_btn)
+        right.append(self.nvim)
+        self.set_start_child(self.side)
+        self.set_end_child(right)
         self.set_position(LIST_W)
         self.set_resize_start_child(False)
         self.set_shrink_start_child(False)
         self.set_shrink_end_child(False)
         self.set_visible(False)
+
+    @staticmethod
+    def _button(text, said, call):
+        btn = Gtk.Button(label=text)
+        btn.add_css_class('elyares-btn')
+        btn.add_css_class('compact')
+        btn.update_property([Gtk.AccessibleProperty.LABEL], [said])
+        btn.set_tooltip_text(said)
+        btn.connect('clicked', lambda _b: call())
+        return btn
+
+    def set_folded(self, folded, notify=False):
+        """Pliega o despliega la lista. `notify`: lo pidió un clic (y hay que guardarlo); la ventana
+        solo sincroniza el estado sin avisar."""
+        if folded == self.folded:
+            return
+        self.folded = folded
+        self.side.set_visible(not folded)
+        self.unfold_btn.set_visible(folded)
+        if notify:
+            self.on_fold(folded)
