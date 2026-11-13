@@ -140,5 +140,29 @@ class Panes(unittest.TestCase):
         self.assertEqual(live, {'/vivo': {('10', '%1'), ('10', '%2')}, '/muerto': set()})
 
 
+class NoMolestar(unittest.TestCase):
+    def dnd(self, salida, instalado=True):
+        which = (lambda name: '/usr/bin/' + name) if instalado else (lambda name: None)
+        with mock.patch.object(actions.shutil, 'which', which), \
+                mock.patch.object(actions, '_run', return_value=salida) as run:
+            return actions.do_not_disturb(), run
+
+    def test_activo(self):
+        dnd, run = self.dnd('true')
+        self.assertTrue(dnd)
+        run.assert_called_once_with('elyares-notify', 'dnd', 'status')
+
+    def test_inactivo(self):
+        self.assertFalse(self.dnd('false')[0])
+
+    def test_sin_elyares_notify_no_molestar_esta_apagado(self):
+        dnd, run = self.dnd('true', instalado=False)
+        self.assertFalse(dnd)
+        run.assert_not_called()
+
+    def test_si_el_comando_falla_esta_apagado(self):
+        self.assertFalse(self.dnd('')[0])
+
+
 if __name__ == '__main__':
     unittest.main()

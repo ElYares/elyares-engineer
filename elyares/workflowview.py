@@ -59,7 +59,7 @@ gi.require_version('Gtk', '4.0')
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import mascot, paint, projects, settings, state, workflows  # noqa: E402
+from . import mascot, paint, projects, settings, state, themes, workflows  # noqa: E402
 
 WF_W = 600                    # la isla de los flujos, abierta: el ancho del chat y del tablero
 WF_WIN_H = 760                # alto de su ventana: lo más alto que llega (el editor con diez pasos)
@@ -613,7 +613,7 @@ class WorkflowView:
         cr.restore()
         if edge:
             cr.append_path(edge)
-            cr.set_source_rgba(1, 1, 1, WF_GLASS_EDGE)
+            cr.set_source_rgba(*themes.glow(), WF_GLASS_EDGE)
             cr.set_line_width(1)
             cr.stroke()
         self.wf_place_entry(h)
@@ -625,7 +625,7 @@ class WorkflowView:
         soft = rgb(self.wf_ink('text', .62))
         if self.over(x0, 0, w, h):
             cr.rectangle(x0, 0, w, h)
-            cr.set_source_rgba(1, 1, 1, .06 * alpha)
+            cr.set_source_rgba(*themes.glow(), .06 * alpha)
             cr.fill()
         if run is not None and run.running:
             tone, note = 'cmd', f'paso {run.index + 1}/{len(run.w.steps)}'
@@ -878,14 +878,14 @@ class WorkflowView:
         y rojo en lo que salió o falló, ámbar en lo que falta guardar."""
         colors = self.colors
         if role == 'cmd':
-            return mascot.accent(state.MAIN_ROLE)
+            return paint.legible(mascot.accent(state.MAIN_ROLE))
         if role == 'flag':
-            return colors['pct2']
+            return paint.legible(colors['pct2'])
         if role == 'head':
-            return paint.mix(colors['text'], '#ffffff', .4)
+            return paint.mix(colors['text'], themes.strong(), .4)
         if role == 'text':
-            return colors['text'] if light is not None and light < .66 else paint.mix(colors['text'], '#ffffff', .35)
-        return colors[role]
+            return colors['text'] if light is not None and light < .66 else paint.mix(colors['text'], themes.strong(), .35)
+        return paint.legible(colors[role])
 
     def wf_put(self, cr, text, font, x, y, color, alpha, width=None, align=0.0, lines=1):
         """`put` del panel: en modo vidrio, con la sombra de la burbuja debajo
@@ -905,7 +905,7 @@ class WorkflowView:
         if right:
             x -= lw
         over = on and self.over(x - 4, y - 4, lw + 8, lh + 8)
-        color = (1, 1, 1) if over else tone or rgb(self.wf_ink('text', .7))
+        color = themes.hot() if over else tone or rgb(self.wf_ink('text', .7))
         self.tip_text(cr, layout, x, y, color, alpha * (1 if on else .35), self.settings['glass'])
         if on:
             self.hits.append(('wf', key, x - 4, y - 4, lw + 8, lh + 8))
@@ -943,7 +943,7 @@ class WorkflowView:
         tw = self.wf_put(cr, title, FONT_WF_TITLE, left, 14, TITLE, alpha, width=x - left - 120)
         if note:
             self.wf_put(cr, note, FONT_WF_NOTE, left + tw + 12, 17, soft, alpha, width=x - left - tw - 24)
-        cr.set_source_rgba(1, 1, 1, .07 * alpha)
+        cr.set_source_rgba(*themes.glow(), .07 * alpha)
         cr.rectangle(left, WF_HEAD - 8, width, 1)
         cr.fill()
         draw = {'edit': self.draw_wf_editor, 'run': self.draw_wf_run, 'list': self.draw_wf_list}[screen]
@@ -973,8 +973,8 @@ class WorkflowView:
             i, ry = self.wf_scroll + n, y + n * WF_ROW
             mine = run is not None and run.w.name == w.name
             if self.over(left - 4, ry, width + 8, WF_ROW - 2):
-                mascot.rrect(cr, left - 4, ry, width + 8, WF_ROW - 2, 8)
-                cr.set_source_rgba(1, 1, 1, .05 * alpha)
+                mascot.box(cr, left - 4, ry, width + 8, WF_ROW - 2, 8)
+                cr.set_source_rgba(*themes.glow(), .05 * alpha)
                 cr.fill()
             x = left + width - 4
             x -= self.wf_link(cr, f'delete:{i}', 'borrar', x, ry + 8, alpha, right=True,
@@ -1005,18 +1005,18 @@ class WorkflowView:
         escribe, deja su sitio (`wf_box`) para la caja de texto de verdad,
         que es la que enseña el texto."""
         active = self.wf_field == field
-        mascot.rrect(cr, x, y, width, WF_FIELD_H, 8)
-        cr.set_source_rgba(1, 1, 1, (.10 if active else .06) * alpha)
+        mascot.box(cr, x, y, width, WF_FIELD_H, 8)
+        cr.set_source_rgba(*themes.glow(), (.10 if active else .06) * alpha)
         cr.fill()
         if active or bad:
-            mascot.rrect(cr, x + .5, y + .5, width - 1, WF_FIELD_H - 1, 8)
+            mascot.box(cr, x + .5, y + .5, width - 1, WF_FIELD_H - 1, 8)
             cr.set_source_rgba(*rgb(self.wf_ink('bad') if bad else mascot.accent(state.MAIN_ROLE)), .8 * alpha)
             cr.set_line_width(1)
             cr.stroke()
         line = self._layout(cr, 'X', FONT_WF_FIELD).get_pixel_size()[1]
         tx, ty, tw = x + WF_FIELD_INSET, y + (WF_FIELD_H - line) / 2, width - 2 * WF_FIELD_INSET
         if not text:
-            self.wf_put(cr, hint, FONT_WF, tx, ty + 1, (1, 1, 1), .34 * alpha, width=tw)
+            self.wf_put(cr, hint, FONT_WF, tx, ty + 1, themes.hot(), .34 * alpha, width=tw)
         elif not active:
             self.wf_put(cr, text, FONT_WF_FIELD, tx, ty, rgb(self.wf_ink('arg')), alpha, width=tw)
         if active:
@@ -1028,8 +1028,8 @@ class WorkflowView:
         """Lo que se elige de un menú: su texto y su ▾, con su clic. Deja
         anotado dónde sale el menú si es el abierto."""
         over = self.over(x, y, width, WF_FIELD_H)
-        mascot.rrect(cr, x, y, width, WF_FIELD_H, 8)
-        cr.set_source_rgba(1, 1, 1, (.11 if over or opened else .06) * alpha)
+        mascot.box(cr, x, y, width, WF_FIELD_H, 8)
+        cr.set_source_rgba(*themes.glow(), (.11 if over or opened else .06) * alpha)
         cr.fill()
         line = self._layout(cr, 'X', FONT_WF).get_pixel_size()[1]
         self.wf_put(cr, text, FONT_WF, x + WF_FIELD_INSET, y + (WF_FIELD_H - line) / 2,
@@ -1072,8 +1072,8 @@ class WorkflowView:
             layout = self._layout(cr, label, FONT_WF_HEAD)
             lw, lh = layout.get_pixel_size()
             over = self.over(x, y + 4, lw + 20, WF_FIELD_H - 2)
-            mascot.rrect(cr, x, y + 4, lw + 20, WF_FIELD_H - 2, (WF_FIELD_H - 2) / 2)
-            tint = rgb(mascot.accent(state.MAIN_ROLE)) if chosen else (1, 1, 1)
+            mascot.box(cr, x, y + 4, lw + 20, WF_FIELD_H - 2, (WF_FIELD_H - 2) / 2)
+            tint = rgb(mascot.accent(state.MAIN_ROLE)) if chosen else themes.hot()
             cr.set_source_rgba(*tint, (.24 if chosen else .11 if over else .06) * alpha)
             cr.fill()
             self.tip_text(cr, layout, x + 10, y + 4 + (WF_FIELD_H - 2 - lh) / 2, TITLE if chosen else soft, alpha, self.settings['glass'])
@@ -1086,7 +1086,7 @@ class WorkflowView:
             self.wf_put(cr, problem or blocker, FONT_WF_NOTE, left, y + 4, rgb(self.wf_ink('bad')) if problem else soft,
                      alpha, width=width)
         y += WF_LINE
-        cr.set_source_rgba(1, 1, 1, .07 * alpha)
+        cr.set_source_rgba(*themes.glow(), .07 * alpha)
         cr.rectangle(left, y, width, 1)
         cr.fill()
         by = y + (WF_FOOT - BUTTON_H) / 2 + 2
@@ -1134,7 +1134,7 @@ class WorkflowView:
             self.wf_put(cr, self.workflow_trouble(bad) + ' Ábrelo y reintenta desde ese paso.', FONT_WF, left, y + 4,
                      rgb(self.wf_ink('bad')), alpha, width=width, lines=2)
             y += WF_TROUBLE_H
-        cr.set_source_rgba(1, 1, 1, .07 * alpha)
+        cr.set_source_rgba(*themes.glow(), .07 * alpha)
         cr.rectangle(left, y, width, 1)
         cr.fill()
         by = y + (WF_FOOT - BUTTON_H) / 2 + 2
@@ -1167,8 +1167,8 @@ class WorkflowView:
     def draw_wf_bar(self, cr, left, y, width, alpha, text, note, buttons, bad):
         """Una barra al pie del panel: una pregunta, o lo que no se pudo
         guardar con su referencia, y sus botones. Devuelve dónde acaba."""
-        mascot.rrect(cr, left, y, width, WF_BAR, 12)
-        cr.set_source_rgba(*(rgb(self.wf_ink('bad')) if bad else (1, 1, 1)), (.13 if bad else .07) * alpha)
+        mascot.box(cr, left, y, width, WF_BAR, 12)
+        cr.set_source_rgba(*(rgb(self.wf_ink('bad')) if bad else themes.hot()), (.13 if bad else .07) * alpha)
         cr.fill()
         x = left + width - 10
         for key, label, primary in reversed(buttons):
@@ -1204,18 +1204,18 @@ class WorkflowView:
         mh = len(shown) * WF_MENU_ROW + 8
         y = below if below + mh <= h - 6 else max(6, above - mh)
         y = max(6, min(y, h - mh - 6))
-        mascot.rrect(cr, x, y, width, mh, 10)
+        mascot.box(cr, x, y, width, mh, 10)
         # En vidrio el menú es translúcido como la burbuja de una fuente; con la isla opaca, casi opaco.
-        cr.set_source_rgba(.07, .08, .10, (WF_GLASS_ALPHA if self.settings['glass'] else .98) * alpha)
+        cr.set_source_rgba(*themes.get()['popup'], (WF_GLASS_ALPHA if self.settings['glass'] else .98) * alpha)
         cr.fill_preserve()
-        cr.set_source_rgba(1, 1, 1, .12 * alpha)
+        cr.set_source_rgba(*themes.glow(), .12 * alpha)
         cr.set_line_width(1)
         cr.stroke()
         for n, (label, chosen) in enumerate(shown):
             ry = y + 4 + n * WF_MENU_ROW
             if self.over(x + 4, ry, width - 8, WF_MENU_ROW):
-                mascot.rrect(cr, x + 4, ry, width - 8, WF_MENU_ROW, 7)
-                cr.set_source_rgba(1, 1, 1, .08 * alpha)
+                mascot.box(cr, x + 4, ry, width - 8, WF_MENU_ROW, 7)
+                cr.set_source_rgba(*themes.glow(), .08 * alpha)
                 cr.fill()
             tx, color = x + 10, TITLE if chosen else rgb(self.wf_ink('arg'))
             if faces:

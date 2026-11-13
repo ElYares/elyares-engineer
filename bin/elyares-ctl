@@ -28,12 +28,17 @@ Uso: elyares-ctl <orden>
     pin       fija la isla abierta con todo a la vista; otra vez, la suelta
     tab       pasa a la pestaña (la sesión) que sigue en el tablero
     steps     abre el desglose de uno de los cuatro; otra vez, el del que sigue
-    theme     vuelve a leer el color de acento del tema de omarchy
+    theme [n] vuelve a leer los colores del tema; con un nombre (omarchy, moonfly, undersea) cambia de tema
     reload    vuelve a arrancar la isla con el código de su carpeta, sin perder
               las sesiones ni los chats; con un turno en curso, al acabar
     glass     prende o apaga el modo vidrio
     allow     permite lo que pide el permiso que la isla tiene a la vista
     deny      lo deniega, y corta el turno como el No de la terminal
+    sessions [--line [sesión]]
+              lista las sesiones de tmux (tus proyectos), sus ventanas y el
+              Claude de cada una. Con --line, una sola línea corta para la
+              barra de tmux (`#(elyares-ctl sessions --line #S)`); vacía si no
+              hay ningún Claude trabajando ni esperando
     status    lista las fuentes de elyares-engineer y cómo está cada una
     toggle <fuente>
               prende o apaga una fuente: devherd, coffe, github, terminal, usage
@@ -46,12 +51,28 @@ import sys
 import time
 
 ORDERS = ('open', 'chat', 'window', 'projects', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
-          'glass', 'allow', 'deny', 'status', 'toggle')
-REPLIES = ('allow', 'deny', 'status', 'reload')    # las que esperan a que elyares-engineer conteste
+          'glass', 'allow', 'deny', 'status', 'sessions', 'toggle')
+REPLIES = ('allow', 'deny', 'status', 'sessions', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
 AGENTS = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', 'devops', 'researcher')
 PLACES = ('left', 'right', 'center', 'up', 'down', 'reset')
+SESSION_STATES = {'permission': 'pide permiso', 'waiting': 'espera respuesta', 'working': 'trabaja',
+                  'done': 'terminó', 'idle': 'en reposo'}
+LINE_MARKS = {'permission': '!', 'waiting': '▲', 'working': '●'}
 STATES = {'on': 'conectada', 'off': 'apagada', 'bad': 'con problemas', 'unknown': 'sin datos'}
+
+
+def status_line(sessions, only=''):
+    """Lo que cabe en la barra de tmux: cuántas ventanas piden permiso, esperan
+    o trabajan, de la sesión `only` (o de todas). Vacío si nada necesita atención."""
+    count = {}
+    for sess in sessions:
+        if only and sess['name'] != only:
+            continue
+        for win in sess['windows']:
+            if win['state'] in LINE_MARKS:
+                count[win['state']] = count.get(win['state'], 0) + 1
+    return ' '.join(f"{LINE_MARKS[k]}{count[k]}" for k in LINE_MARKS if k in count)
 
 
 def wake(path):
@@ -80,6 +101,9 @@ def wake(path):
 
 def main():
     args = sys.argv[1:]
+    line = '--line' in args
+    if line:
+        args.remove('--line')
     folder = None
     if '--dir' in args:
         at = args.index('--dir')
@@ -93,7 +117,7 @@ def main():
     if order == 'move' and source not in PLACES and not (source.isdigit() and int(source) <= 100):
         print(__doc__.strip(), file=sys.stderr)
         return 2
-    if order not in ORDERS or (order == 'toggle' and source not in SOURCES) or (
+    if order not in ORDERS or (order == 'theme' and source not in ('', 'omarchy', 'moonfly', 'undersea')) or (order == 'toggle' and source not in SOURCES) or (
             order == 'chat' and source and source not in AGENTS) or (
             order == 'window' and source not in ('', 'toggle')):
         print(__doc__.strip(), file=sys.stderr)
@@ -105,6 +129,8 @@ def main():
         msg['agent'] = source
     if order == 'move':
         msg['where'] = source
+    if order == 'theme' and source:
+        msg['name'] = source
     if order == 'window' and source:
         msg['how'] = source
     if folder:
@@ -133,6 +159,18 @@ def main():
         print('elyares-ctl: elyares-engineer no está corriendo', file=sys.stderr)
         return 1
     answer = json.loads(data or b'{}')
+    if order == 'sessions' and line:
+        print(status_line(answer.get('sessions', []), source))
+        return 0
+    if order == 'sessions':
+        for sess in answer.get('sessions', []):
+            n = sess['claudes']
+            print(f"{sess['name']}  ({'sin Claude' if not n else f'{n} Claude'})")
+            for win in sess['windows']:
+                state = SESSION_STATES.get(win['state'], '')
+                crew = f" [{', '.join(win['agents'])}]" if win.get('agents') else ''
+                print(f"  {win['index']} {win['name']:<12}{state}{crew}".rstrip())
+        return 0
     if order != 'status':
         if not answer.get('ok'):
             print(f"elyares-ctl: {answer.get('why') or 'elyares-engineer no contestó'}", file=sys.stderr)

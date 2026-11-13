@@ -22,6 +22,8 @@ los mismos gestos. Cada uno pone lo suyo en capas: lo que lleva en la cabeza
                 en las gafas y una terminal
     researcher  sombrero de explorador con su brújula, pañoleta al cuello y
                 un cuaderno donde apunta lo que encuentra
+    coach       pelo peinado, diadema con micrófono, corbata y un sobre con
+                el CV asomando
 """
 
 import math
@@ -40,15 +42,17 @@ COLORS = {
 
 DEFAULT_ACCENT = COLORS['accent']
 
-ROLES = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', 'devops', 'researcher')
+ROLES = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', 'devops', 'researcher',
+         'coach')
 # El color de cada personaje: la antena mientras trabaja y su punto en la lista.
 # Ni ámbar, ni rojo, ni verde: esos ya dicen permiso, problema y terminado. Con
 # ocho ya no quedan tonos lejos de todos: el lima del devops y el naranja del
 # researcher van en los dos huecos más anchos que quedaban, entre el amarillo
-# y el verde y entre el rojo y el amarillo.
+# y el verde y entre el rojo y el amarillo. El índigo del coach cae entre el
+# azul del tema y el morado del auditor.
 ACCENTS = {'architect': '#22c7dd', 'auditor': '#9a6bff', 'reviewer': '#ff6fb5',
            'designer': '#e052f0', 'mobile': '#55b8ab', 'devops': '#a6e84a',
-           'researcher': '#ff8a4c'}
+           'researcher': '#ff8a4c', 'coach': '#7a86ff'}
 
 
 def set_accent(color):
@@ -58,8 +62,9 @@ def set_accent(color):
 
 
 def accent(role):
-    """El color de un personaje, en hexadecimal: el suyo, o el del tema si es el engineer."""
-    return ACCENTS.get(role, COLORS['accent'])
+    """El color de un personaje, en hexadecimal: el suyo, o el de la gorra si es el engineer
+    (la antena sigue el tema: `COLORS['accent']`)."""
+    return ACCENTS.get(role, COLORS['mesh'])
 
 
 def rgba(color, alpha=1.0):
@@ -87,6 +92,17 @@ def rrect(cr, x, y, w, h, r):
     cr.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
     cr.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
     cr.close_path()
+
+
+SQUARE = False      # el estilo técnico: las esquinas de la interfaz, rectas (la mascota no cambia)
+
+
+def box(cr, x, y, w, h, r):
+    """Un rectángulo de la interfaz: redondeado, o recto con el estilo técnico."""
+    if SQUARE:
+        cr.rectangle(x, y, w, h)
+    else:
+        rrect(cr, x, y, w, h, r)
 
 
 def balloon(cr, x, y, w, h, r, base, half, tx, ty):
@@ -1533,18 +1549,121 @@ def _notebook(cr, t, motion):
     stroke(cr, 3.5)
 
 
+# ── coach ────────────────────────────────────────────────────────────────────
+
+def _tie(cr):
+    """Cuello de camisa blanco y corbata del color del coach."""
+    for g in (-1, 1):
+        cr.new_path()
+        cr.move_to(g * 40, 88)
+        cr.line_to(0, 99)
+        cr.line_to(g * 19, 121)
+        cr.line_to(g * 54, 103)
+        cr.close_path()
+        fill(cr, '#f4f7ff', preserve=True)
+        stroke(cr, 4)
+    cr.new_path()
+    cr.move_to(-7, 104)
+    cr.line_to(7, 104)
+    cr.line_to(11, 124)
+    cr.line_to(0, 133)
+    cr.line_to(-11, 124)
+    cr.close_path()
+    fill(cr, ACCENTS['coach'], preserve=True)
+    stroke(cr, 3.5)
+    cr.new_path()
+    rrect(cr, -8, 94, 16, 13, 4)
+    fill(cr, ACCENTS['coach'], preserve=True)
+    stroke(cr, 3.5)
+
+
+def _headset(cr):
+    """Pelo peinado, diadema con sus dos auriculares y el micrófono al frente."""
+    cr.new_path()
+    cr.move_to(-76, 6)
+    cr.curve_to(-90, -60, 90, -60, 76, 6)
+    quad(cr, 0, -12, -76, 6)
+    cr.close_path()
+    g = cairo.LinearGradient(0, -50, 0, 6)
+    g.add_color_stop_rgba(0, *rgba('#4a5370'))
+    g.add_color_stop_rgba(1, *rgba('#1b1e27'))
+    cr.set_source(g)
+    cr.fill_preserve()
+    stroke(cr, 5)
+    cr.move_to(-30, -30)
+    quad(cr, 0, -40, 40, -26)
+    cr.set_source_rgba(1, 1, 1, .26)
+    cr.set_line_width(2.4)
+    cr.stroke()
+    # la diadema
+    cr.new_path()
+    cr.move_to(-82, 30)
+    cr.curve_to(-96, -84, 96, -84, 82, 30)
+    stroke(cr, 12, preserve=True)
+    stroke(cr, 7, ACCENTS['coach'])
+    # los auriculares
+    for g in (-1, 1):
+        cr.new_path()
+        rrect(cr, g * 86 - 10, 20, 20, 36, 9)
+        fill(cr, ACCENTS['coach'], preserve=True)
+        stroke(cr, 4)
+        ellipse(cr, g * 86, 38, 4, 8)
+        fill(cr, 'face', .85)
+    # el micrófono
+    cr.new_path()
+    cr.move_to(-88, 54)
+    cr.curve_to(-84, 84, -70, 92, -50, 84)
+    stroke(cr, 5, preserve=True)
+    stroke(cr, 2.4, 'metal')
+    ellipse(cr, -48, 84, 7, 5)
+    fill(cr, '#4a5370', preserve=True)
+    stroke(cr, 3)
+
+
+def _envelope(cr, t, motion):
+    """El sobre de la postulación, con el CV asomando y su sello."""
+    b = math.sin(t * 6) * 2.2 * motion
+    cr.new_path()
+    rrect(cr, -23, 76 + b, 46, 34, 3)
+    fill(cr, 'face', preserve=True)
+    stroke(cr, 3)
+    for i in range(3):
+        cr.move_to(-16, 84 + b + i * 6)
+        cr.line_to(16 - i * 6, 84 + b + i * 6)
+    stroke(cr, 2.2, 'metal')
+    cr.new_path()
+    rrect(cr, -36, 90, 72, 36, 5)
+    fill(cr, '#dfe6f7', preserve=True)
+    stroke(cr, 3.5)
+    cr.move_to(-35, 92)
+    cr.line_to(0, 112)
+    cr.line_to(35, 92)
+    stroke(cr, 3)
+    cr.new_path()
+    cr.arc(0, 112, 6.5, 0, TAU)
+    fill(cr, ACCENTS['coach'], preserve=True)
+    stroke(cr, 2.6)
+    cr.move_to(-3, 112)
+    cr.line_to(-0.8, 114.4)
+    cr.line_to(3.4, 109.6)
+    stroke(cr, 2, 'face')
+    _hands(cr, t, motion * .6, (-44, 44), 116)
+
+
 # ── las capas de cada personaje ──────────────────────────────────────────────
 
 HATS = {'engineer': _cap, 'architect': _hardhat, 'auditor': _front_cap, 'reviewer': _eyeshade,
-        'designer': _beret, 'mobile': _beanie, 'devops': _hood, 'researcher': _explorer_hat}
+        'designer': _beret, 'mobile': _beanie, 'devops': _hood, 'researcher': _explorer_hat,
+        'coach': _headset}
 PROPS = {'engineer': _laptop, 'architect': _blueprint, 'auditor': _clipboard, 'reviewer': _magnifier,
-         'designer': _palette, 'mobile': _phone, 'devops': _terminal, 'researcher': _notebook}
+         'designer': _palette, 'mobile': _phone, 'devops': _terminal, 'researcher': _notebook, 'coach': _envelope}
 BACK = {'architect': lambda cr: _pencil(cr, 89, 4, 0.24, 'yellow'),
         'auditor': _collar,
         'reviewer': lambda cr: _pencil(cr, -89, 4, -0.24, 'red'),
         'designer': _brush,
         'devops': _jacket,
-        'researcher': _neckerchief}
+        'researcher': _neckerchief,
+        'coach': _tie}
 FRONT = {'reviewer': _visor, 'designer': _dabs, 'devops': _glow}
 # Grosor del armazón de las gafas, sobre el de siempre: discreto o de pasta.
 FRAMES = {'auditor': .64, 'mobile': 1.3}

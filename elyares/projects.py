@@ -60,11 +60,18 @@ def _dirs(path):
 
 
 def scan(root=ROOT, ignore=IGNORE):
-    """Los proyectos de `root`: [(workspace, carpeta)]."""
+    """Los proyectos de `root`: [(workspace, carpeta)]. Una carpeta de primer
+    nivel con `.git` es un proyecto que hace de su propio workspace."""
     root, skip = os.path.expanduser(root), _ignored(ignore)
-    return [(ws, os.path.join(root, ws, name))
-            for ws in _dirs(root) if not ws.startswith('_') and ws not in skip
-            for name in _dirs(os.path.join(root, ws))]
+    out = []
+    for ws in _dirs(root):
+        if ws.startswith('_') or ws in skip:
+            continue
+        top = os.path.join(root, ws)
+        if os.path.exists(os.path.join(top, '.git')):
+            out.append((ws, top))
+        out += [(ws, os.path.join(top, name)) for name in _dirs(top)]
+    return out
 
 
 def listing(root=ROOT, ignore=IGNORE, tmux=None):

@@ -88,7 +88,7 @@ import cairo
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
-from . import chat, mascot, paint, projects, settings, state, store
+from . import chat, fonts, mascot, paint, pomodoro, projects, settings, state, store, themes
 
 CHAT_W, CHAT_H = 600, 620     # el panel: ancho de la isla con vista previa, y alto
 CHAT_PAD = 16                 # margen por dentro
@@ -141,7 +141,7 @@ textview.elyares-chat, textview.elyares-chat text, scrolledwindow.elyares-chat {
   background: transparent; border: none; box-shadow: none; outline: none;
 }
 textview.elyares-chat, textview.elyares-chat text {
-  color: #eef1f6; caret-color: %s; font-family: "JetBrainsMono Nerd Font"; font-size: 10pt;
+  color: %s; caret-color: %s; font-family: "JetBrainsMono Nerd Font"; font-size: %s;
 }
 '''
 
@@ -178,6 +178,7 @@ class ChatView:
     subió desde el final), `chat_pick` (el comando elegido de la lista),
     `chat_menu` (el menú abierto: 'model', 'effort' o None), `chat_images`
     (lo pegado, en PNG) y `chat_cache` (lo ya medido de la conversación)."""
+    pomo_repo = ''          # la carpeta del chat abierto con «Con agente» (lo fija la vista Pomodoro)
 
     def chat_init(self):
         self.chat = None
@@ -197,6 +198,7 @@ class ChatView:
         self.chat_quiz = None         # la pregunta de opciones en curso: {id, n, answers, marked}
         self.chat_extra = {}          # las otras conversaciones de un agente de solo lectura: clave -> [Chat]
         self.entry = self.entry_box = None
+        self.chat_drafts = {}         # de cada conversación, lo escrito y no enviado: (texto, imágenes)
 
     def chat_widgets(self, overlay):
         """La caja de texto: un Gtk.TextView de verdad, dentro de su scroll,
@@ -235,7 +237,7 @@ class ChatView:
     def chat_theme(self):
         """El cursor de la caja, en el color de acento del tema."""
         if getattr(self, 'chat_css', None) is not None:
-            self.chat_css.load_from_string(CSS % mascot.accent('engineer'))
+            self.chat_css.load_from_string(CSS % (themes.get()['chat_ink'], mascot.accent('engineer'), f'{fonts.scaled("10")}pt'))
 
     def chat_text(self):
         if self.entry is None:
@@ -275,13 +277,32 @@ class ChatView:
             end += 1
         return text[start], text[start + 1:cursor], start, end
 
+    def chat_stash(self):
+        """Guarda lo escrito y no enviado en la conversación a la vista: la caja
+        es una sola, pero cada conversación (cada proyecto) conserva su borrador."""
+        if self.chat is not None and self.chat_whom == 'chat':
+            self.chat_drafts[self.chat] = (self.chat_text(), list(self.chat_images))
+
+    def chat_recall(self):
+        """Pone en la caja el borrador de la conversación a la vista."""
+        if self.chat is None:
+            return
+        text, images = self.chat_drafts.pop(self.chat, ('', []))     # ya está en la caja: no se repone dos veces
+        self.chat_images = list(images)
+        if self.chat_text() != text:
+            self.chat_set_text(text)
+
     def chat_claim(self, whom):
-        """La caja es una sola: lo que quedó escrito para otro (en el chat o
-        en el mini chat de un agente) no se le manda a este."""
+        """La caja es una sola: lo que quedó escrito para otro (en el mini chat
+        de un agente) no se le manda a este. El del chat se guarda en su
+        conversación y vuelve al regresar."""
         if whom != self.chat_whom:
+            self.chat_stash()
             self.chat_whom = whom
             self.chat_images = []
-            if self.chat_text():
+            if whom == 'chat':
+                self.chat_recall()
+            elif self.chat_text():
                 self.chat_set_text('')
 
     # ── abrir, cerrar y el teclado ──────────────────────────────────────────
@@ -402,13 +423,14 @@ class ChatView:
         if gone is self.chat:
             self.show_chat(family[i - 1], typing=True)
 
-    def open_chat(self, typing=False, agent=None, cwd=None):
+    def open_chat(self, typing=False, agent=None, cwd=None, keep=False):
         """Abre el chat. Sin `cwd`, con el tablero a la vista, el de la
         pestaña elegida: su conversación o, si no tiene, la de su proyecto.
         Sin tablero, en el proyecto de la sesión de tmux en la que estás y,
         sin tmux, en el que se tenía a la vista. Con el panel ya abierto se
         sigue en el que está. Sin `agent`, con el mismo de la última vez (''
-        es el engineer)."""
+        es el engineer). Con `keep`, lo escrito en la caja se lleva a esa conversación
+        en vez de quedarse de borrador en la que se deja."""
         s = self.tab_session() if not cwd and not self.chat_open and self.target() == 'board' else None
         if s is not None:
             own = s.main_agent if s.owner != state.MAIN_ROLE else ''
@@ -421,7 +443,7 @@ class ChatView:
         if not cwd:
             here = '' if self.chat_open else self.chat_here()
             cwd = here or last or os.path.expanduser('~')
-        self.show_chat(self.chat_for(agent, cwd), typing)
+        self.show_chat(self.chat_for(agent, cwd), typing, keep)
 
     def chat_here(self):
         """La carpeta del proyecto de la sesión de tmux en la que estás, mirada
@@ -448,15 +470,21 @@ class ChatView:
         return next((c for key, c in self.chats.items()
                      if key[0] == agent and self.chat_hosts.get(key) == s.sid), None)
 
-    def show_chat(self, c, typing=False):
-        """Abre el panel con esa conversación."""
+    def show_chat(self, c, typing=False, keep=False):
+        """Abre el panel con esa conversación. Lo escrito y no enviado se queda de
+        borrador en la que se deja y vuelve al regresar a ella; con `keep` se lleva."""
+        carry = not keep and c is not self.chat and self.chat is not None and self.chat_whom == 'chat'
         if c is not self.chat:
+            if not keep:
+                self.chat_stash()       # el borrador se queda en la conversación que se deja
             self.chat = c
             self.chat_cache.clear()
             self.chat_scroll, self.chat_menu = 0.0, None
         self.chat_open, self.off = True, False
         self.projects_open = False
         self.chat_claim('chat')
+        if carry:
+            self.chat_recall()          # y la caja muestra el de la que se abre (vacío si no tiene)
         if self.chat.session:
             # Ya se está leyendo: su aviso sobra.
             self.model.sessions.pop(f'chat:{self.chat.session}', None)
@@ -775,7 +803,19 @@ class ChatView:
                            'ttl': CHAT_REPLY_SECS, 'where': c.name, 'note': chat.model_name(c.model_id),
                            'tint': state.AGENT_ROLES.get(c.agent, state.MAIN_ROLE),
                            'lines': lines[:CHAT_REPLY_LINES],
-                           'actions': [{'label': 'Ver respuesta', 'chat': c.session or True, 'after': 'clear'}]})
+                           'actions': [{'label': 'Ver respuesta', 'chat': c.session or True, 'after': 'clear'}]
+                           + self.pomodoro_done(c)})
+
+    def pomodoro_done(self, c):
+        """Si este chat se abrió con «Con agente» y su pomodoro sigue en foco, el
+        botón que da la tarea por hecha. No se hace solo: que la respuesta esté
+        no quiere decir que la tarea lo esté."""
+        if not (self.pomo_repo and c.cwd == self.pomo_repo):
+            return []
+        status = pomodoro.describe(pomodoro.snapshot())     # fresco: la vista Pomodoro quizá nunca se abrió
+        if not (status and status['phase'] in pomodoro.FOCUS_PHASES):
+            return []
+        return [{'label': 'Tarea hecha', 'cmd': ['coffe', 'done'], 'after': 'clear'}]
 
     def chat_show(self, which):
         """El botón de un aviso del chat: abre la conversación de esa sesión;
@@ -870,7 +910,7 @@ class ChatView:
             path = next((p.path for p in self.projects if p.key == name), '')
             self.chat_set_text(text[:start] + text[end:].lstrip(' '), start)
             if path:
-                self.open_chat(typing=True, cwd=path)
+                self.open_chat(typing=True, cwd=path, keep=True)     # lo escrito se va con él
             return
         head = f'{text[:start]}{sigil}{name} '
         self.chat_set_text(head + text[end:].lstrip(' '), len(head))
@@ -1140,7 +1180,7 @@ class ChatView:
 
     def chat_color(self):
         """El color del agente con el que se habla."""
-        return mascot.rgba(mascot.accent(self.chat_role()))[:3]
+        return mascot.rgba(paint.legible(mascot.accent(self.chat_role())))[:3]
 
     def chat_pet(self):
         c = self.chat
@@ -1220,8 +1260,8 @@ class ChatView:
         deja ver el vidrio), un degradado suave del color del agente que nace en
         su borde derecho, y ahí mismo su barra, más fuerte si se está escribiendo."""
         r, g, b = color
-        mascot.rrect(cr, left, y, width, ih, 10)
-        cr.set_source_rgba(1, 1, 1, (.09 if typing else .05) * alpha)
+        mascot.box(cr, left, y, width, ih, 10)
+        cr.set_source_rgba(*themes.glow(), (.09 if typing else .05) * alpha)
         cr.fill_preserve()
         cr.save()
         cr.clip()
@@ -1245,7 +1285,7 @@ class ChatView:
             name = self.chat.name if self.chat is not None else state.MAIN_AGENT
             hint = (PLACEHOLDER.format(agent=name) if self.chat_typing
                     else 'Clic aquí, o elyares-ctl chat, para escribir')
-            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, (1, 1, 1), .38 * alpha,
+            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, themes.hot(), .38 * alpha,
                      width=width - CHAT_INPUT_INSET - 12)
 
     def draw_chat_status(self, cr, left, y, width, alpha):
@@ -1268,11 +1308,11 @@ class ChatView:
             layout = self._layout(cr, text, FONT_STEP)
             tw, th = layout.get_pixel_size()
             if key == 'plan' and plan:
-                mascot.rrect(cr, x - 6, y - 2, tw + 12, th + 4, (th + 4) / 2)
+                mascot.box(cr, x - 6, y - 2, tw + 12, th + 4, (th + 4) / 2)
                 cr.set_source_rgba(*color, .18 * alpha)
                 cr.fill()
             over = key is not None and self.over(x - 4, y - 3, tw + 8, th + 6)
-            self.tip_text(cr, layout, x, y, (1, 1, 1) if over else color, alpha, False)
+            self.tip_text(cr, layout, x, y, themes.hot() if over else color, alpha, False)
             if key is not None:
                 self.hits.append(('chat', key, x - 4, y - 3, tw + 8, th + 6))
                 anchors[key] = x
@@ -1307,17 +1347,17 @@ class ChatView:
         width = 200 if faces else 170
         hh = len(items) * CHAT_SUGGEST_H + 8
         y = bottom - hh
-        mascot.rrect(cr, x - 8, y, width, hh, 10)
-        cr.set_source_rgba(.07, .08, .10, .97 * alpha)
+        mascot.box(cr, x - 8, y, width, hh, 10)
+        cr.set_source_rgba(*themes.get()['popup'], .97 * alpha)
         cr.fill_preserve()
-        cr.set_source_rgba(1, 1, 1, .12 * alpha)
+        cr.set_source_rgba(*themes.glow(), .12 * alpha)
         cr.set_line_width(1)
         cr.stroke()
         for i, (key, text, chosen) in enumerate(items):
             ry = y + 4 + i * CHAT_SUGGEST_H
             if self.over(x - 4, ry, width - 8, CHAT_SUGGEST_H):
-                mascot.rrect(cr, x - 4, ry, width - 8, CHAT_SUGGEST_H, 7)
-                cr.set_source_rgba(1, 1, 1, .08 * alpha)
+                mascot.box(cr, x - 4, ry, width - 8, CHAT_SUGGEST_H, 7)
+                cr.set_source_rgba(*themes.glow(), .08 * alpha)
                 cr.fill()
             color = self.chat_color() if chosen else mascot.rgba(self.ink('arg'))[:3]
             tx = x + 4
@@ -1338,7 +1378,7 @@ class ChatView:
             layout = self._layout(cr, text, FONT_LINK)
             tw, th = layout.get_pixel_size()
             cw = tw + 20
-            mascot.rrect(cr, x, y, cw, CHAT_CHIP_H, CHAT_CHIP_H / 2)
+            mascot.box(cr, x, y, cw, CHAT_CHIP_H, CHAT_CHIP_H / 2)
             cr.set_source_rgba(*color, .18 * alpha)
             cr.fill_preserve()
             cr.set_source_rgba(*color, .4 * alpha)
@@ -1392,7 +1432,7 @@ class ChatView:
                              int(ih - 2 * CHAT_INPUT_PAD))
         if not text:
             hint = f'Dile a {agent} qué hacer' if typing else f'Clic aquí para encargarle algo a {agent}'
-            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, (1, 1, 1), .38 * alpha,
+            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, themes.hot(), .38 * alpha,
                      width=text_w)
         soft = mascot.rgba(self.ink('text', .66))[:3]
         c = self.chats.get(self.chat_key(agent, self.tab_place(s)))
@@ -1423,7 +1463,7 @@ class ChatView:
         pick_x = left + width - self.chat_links_w(cr, links) - 18
         project = self.chat.project if self.chat is not None else state.project_name(chat.active_cwd())
         name = self.chat.name if self.chat is not None else state.MAIN_AGENT
-        text, markup = self.who(name, project, mascot.accent(role))
+        text, markup = self.who(name, project, paint.legible(mascot.accent(role)))
         tx = left + CHAT_FACE + 10
         room = pick_x - tx - 12
         self.put(cr, text, 'Sans Semi-Bold 11', tx, mid - 17, TITLE, alpha, width=room, markup=markup)
@@ -1435,7 +1475,7 @@ class ChatView:
             layout = self._layout(cr, f'· {where} ▾', FONT_STEP, room - sw - 6)
             ww, wh = layout.get_pixel_size()
             over = self.over(tx + sw + 2, mid, ww + 8, wh + 6)
-            tone = (1, 1, 1) if over else mascot.rgba(self.ink('text', .62))[:3]
+            tone = themes.hot() if over else mascot.rgba(self.ink('text', .62))[:3]
             self.tip_text(cr, layout, tx + sw + 6, mid + 3, tone, alpha, False)
             self.hits.append(('chat', 'project', tx + sw + 2, mid, ww + 8, wh + 6))
         x = left + width
@@ -1445,11 +1485,11 @@ class ChatView:
             x -= lw
             over = self.over(x - 4, mid - lh / 2 - 3, lw + 8, lh + 6)
             color = (mascot.rgba(self.ink('bad'))[:3] if key == 'stop'
-                     else (1, 1, 1) if over else mascot.rgba(self.ink('text', .7))[:3])
+                     else themes.hot() if over else mascot.rgba(self.ink('text', .7))[:3])
             self.tip_text(cr, layout, x, mid - lh / 2, color, alpha, False)
             self.hits.append(('chat', key, x - 4, mid - lh / 2 - 3, lw + 8, lh + 6))
             x -= CHAT_LINK_GAP
-        cr.set_source_rgba(1, 1, 1, .07 * alpha)
+        cr.set_source_rgba(*themes.glow(), .07 * alpha)
         cr.rectangle(left, CHAT_HEAD + 2, width, 1)
         cr.fill()
 
@@ -1457,7 +1497,7 @@ class ChatView:
         """El aviso de que otra conversación que modifica el repo ya trabaja en
         esta carpeta, en el ámbar de los avisos."""
         r, g, b = mascot.rgba(paint.AMBER)[:3]
-        mascot.rrect(cr, left, y, width, CHAT_WARN_H - 4, 8)
+        mascot.box(cr, left, y, width, CHAT_WARN_H - 4, 8)
         cr.set_source_rgba(r, g, b, .14 * alpha)
         cr.fill()
         who = ', '.join(names)
@@ -1487,15 +1527,15 @@ class ChatView:
             lw, lh = layout.get_pixel_size()
             w = min(room, lw + 16 + (14 if closable else 0))
             over = self.over(x, y, w, CHAT_TABS_H - 4)
-            mascot.rrect(cr, x, y, w, CHAT_TABS_H - 4, 8)
-            cr.set_source_rgba(*(color if now else (1, 1, 1)), (.28 if now else .12 if over else .05) * alpha)
+            mascot.box(cr, x, y, w, CHAT_TABS_H - 4, 8)
+            cr.set_source_rgba(*(color if now else themes.hot()), (.28 if now else .12 if over else .05) * alpha)
             cr.fill()
             tone = (mascot.rgba(self.ink('bad'))[:3] if c.asking else mascot.rgba(self.ink('cmd'))[:3] if c.busy
-                    else (1, 1, 1) if now or over else mascot.rgba(self.ink('text', .7))[:3])
+                    else themes.hot() if now or over else mascot.rgba(self.ink('text', .7))[:3])
             self.tip_text(cr, layout, x + 8, y + (CHAT_TABS_H - 4 - lh) / 2, tone, alpha, False)
             if closable:
                 gone = self.over(x + w - 20, y, 20, CHAT_TABS_H - 4)
-                self.put(cr, '×', FONT_LINK, x + w - 16, y + 3, (1, 1, 1) if gone else mascot.rgba(self.ink('text', .55))[:3],
+                self.put(cr, '×', FONT_LINK, x + w - 16, y + 3, themes.hot() if gone else mascot.rgba(self.ink('text', .55))[:3],
                          alpha)
                 self.hits.append(('chat', f'drop:{i}', x + w - 20, y, 20, CHAT_TABS_H - 4))
             self.hits.append(('chat', f'conv:{i}', x, y, w - (20 if closable else 0), CHAT_TABS_H - 4))
@@ -1507,7 +1547,7 @@ class ChatView:
     def chat_layout(self, cr, index, entry, width):
         """Lo que mide y dibuja una cosa de la conversación, guardado mientras
         no cambie: (layout, alto que ocupa, papel, sus tablas ya medidas)."""
-        key = (index, entry.kind, entry.text, entry.images, width)
+        key = (index, entry.kind, entry.text, entry.images, width, self.chat_tech(), fonts.tired, fonts.TIRED_SCALE, fonts.current, fonts.techno)
         hit = self.chat_cache.get(key)
         if hit is not None:
             PangoCairo.update_layout(cr, hit[0])
@@ -1560,9 +1600,13 @@ class ChatView:
         shade = paint.mix(paint.ISLAND, agent, .16)
         ink = {role: self.ink(role) for role in ('cmd', 'str', 'flag', 'num', 'dim', 'arg', 'path', 'var')}
         ink['cmd'] = tone          # el comando de un bloque y el código en línea, del color del agente
-        return paint.markdown(text, tone, self.ink('head'), bold='#ffffff',
+        return paint.markdown(text, tone, self.ink('head'), bold=themes.strong(),
                               dim=self.colors['text'], accent=agent,
-                              ink=ink, shade=shade, blocks=blocks, tables=tables)
+                              ink=ink, shade=shade, blocks=blocks, tables=tables, caps=self.chat_tech())
+
+    def chat_tech(self):
+        """¿El chat con bloques de borde fino y títulos en mayúsculas?"""
+        return bool(self.settings.get('chat_tech'))
 
     @staticmethod
     def chat_reads(markup):
@@ -1597,7 +1641,7 @@ class ChatView:
         con cabecera). La columna que cabe en su parte del ancho se queda con
         lo suyo; las demás se reparten lo que sobra y parten su texto. Se
         guarda: mientras Claude sigue escribiendo debajo, la tabla no cambia."""
-        key = (font, width, str(table))
+        key = (font, width, str(table), fonts.tired, fonts.TIRED_SCALE, fonts.current)
         if key in self.chat_cache:
             return self.chat_cache[key]
         rows, align, headed = table
@@ -1653,7 +1697,7 @@ class ChatView:
             if entry.kind in ('you', 'flow', 'plan'):
                 # Tu bloque: a todo lo ancho, teñido, con la barra del color del agente.
                 cr.rectangle(left, y, width, hh)
-                cr.set_source_rgba(1, 1, 1, .055 * alpha)
+                cr.set_source_rgba(*themes.glow(), .055 * alpha)
                 cr.fill()
                 cr.rectangle(left, y, CHAT_BAR, hh)
                 cr.set_source_rgba(*color, alpha)
@@ -1683,7 +1727,7 @@ class ChatView:
             y -= CHAT_GAP
         cr.restore()
         if self.chat_scroll > 0:
-            self.put(cr, '↓ más abajo', FONT_STEP, left + width, bottom - 14, (1, 1, 1), .45 * alpha, align=1.0)
+            self.put(cr, '↓ más abajo', FONT_STEP, left + width, bottom - 14, themes.hot(), .45 * alpha, align=1.0)
 
     @staticmethod
     def code_spans(layout):
@@ -1706,10 +1750,10 @@ class ChatView:
         degradado de ese color que se apaga hacia la izquierda: el de los bloques
         de código y el de la respuesta de un aviso."""
         r, g, b = color
-        mascot.rrect(cr, left, top, width, height, radius)
+        mascot.box(cr, left, top, width, height, radius)
         cr.save()
         cr.clip()
-        cr.set_source_rgba(0, 0, 0, .34 * alpha)
+        cr.set_source_rgba(*themes.sink(), .34 * alpha)
         cr.paint()
         fade = cairo.LinearGradient(left + width, 0, left, 0)
         fade.add_color_stop_rgba(0, r, g, b, .30 * alpha)
@@ -1722,12 +1766,29 @@ class ChatView:
         cr.fill()
         cr.restore()
 
+    @staticmethod
+    def draw_outlined(cr, left, top, width, height, color, alpha, radius=4):
+        """Un bloque de borde fino del color del agente sobre un fondo oscuro, sin degradado."""
+        mascot.box(cr, left, top, width, height, radius)
+        cr.set_source_rgba(*themes.sink(), .30 * alpha)
+        cr.fill_preserve()
+        fade = cairo.LinearGradient(left, 0, left + width, 0)
+        fade.add_color_stop_rgba(0, *color, .26 * alpha)
+        fade.add_color_stop_rgba(.6, *color, .08 * alpha)
+        fade.add_color_stop_rgba(1, *color, .02 * alpha)
+        cr.set_source(fade)
+        cr.fill_preserve()
+        cr.set_source_rgba(*color, .6 * alpha)
+        cr.set_line_width(1)
+        cr.stroke()
+
     def draw_code_backgrounds(self, cr, layout, left, right, y, alpha):
         """El fondo de cada bloque de código, como el de tus mensajes: a lo
         ancho, con la barra del agente a la derecha y un degradado de su color
         que se apaga hacia la izquierda."""
+        draw = self.draw_outlined if self.chat_tech() else self.draw_tinted
         for top, bottom in self.code_spans(layout):
-            self.draw_tinted(cr, left, y + top, right - left, bottom - top, self.chat_color(), alpha)
+            draw(cr, left, y + top, right - left, bottom - top, self.chat_color(), alpha)
 
     def draw_tables(self, cr, layout, grids, x, y, tone, alpha):
         """Las tablas de un texto, cada una en el hueco que le guarda: una caja
@@ -1744,14 +1805,24 @@ class ChatView:
             left, top = x + pos.x / Pango.SCALE, y + pos.y / Pango.SCALE + CHAT_TABLE_GAP
             width, height = sum(widths), sum(heights)
             cr.save()
-            mascot.rrect(cr, left, top, width, height, 6)
+            mascot.box(cr, left, top, width, height, 6)
             cr.clip()
-            cr.set_source_rgba(0, 0, 0, .26 * alpha)
+            cr.set_source_rgba(*themes.sink(), .26 * alpha)
             cr.paint()
             if headed:
                 cr.rectangle(left, top, width, heights[0])
-                cr.set_source_rgba(r, g, b, .20 * alpha)
+                if self.chat_tech():
+                    fade = cairo.LinearGradient(left, 0, left + width, 0)
+                    fade.add_color_stop_rgba(0, r, g, b, .30 * alpha)
+                    fade.add_color_stop_rgba(1, r, g, b, .04 * alpha)
+                    cr.set_source(fade)
+                else:
+                    cr.set_source_rgba(r, g, b, .20 * alpha)
                 cr.fill()
+                if self.chat_tech():
+                    cr.rectangle(left, top + heights[0] - 1, width, 1)
+                    cr.set_source_rgba(r, g, b, .5 * alpha)
+                    cr.fill()
             _, seen_top, _, seen_bottom = cr.clip_extents()
             tops = itertools.accumulate(heights, initial=top)
             for n, (row, row_h, row_y) in enumerate(zip(cells, heights, tops)):
@@ -1759,7 +1830,7 @@ class ChatView:
                     continue                # una fila que el scroll deja fuera
                 if n > int(headed):         # bajo la cabecera no: ahí ya cambia el fondo
                     cr.rectangle(left, row_y, width, 1)
-                    cr.set_source_rgba(1, 1, 1, .08 * alpha)
+                    cr.set_source_rgba(*themes.glow(), .08 * alpha)
                     cr.fill()
                 cell_x = left
                 for cell, cell_w in zip(row, widths):
@@ -1767,7 +1838,7 @@ class ChatView:
                     self.tip_text(cr, cell, cell_x + pad_x, row_y + pad_y, tone, alpha, False)
                     cell_x += cell_w
             cr.restore()
-            mascot.rrect(cr, left + .5, top + .5, width - 1, height - 1, 6)
+            mascot.box(cr, left + .5, top + .5, width - 1, height - 1, 6)
             cr.set_source_rgba(r, g, b, .32 * alpha)
             cr.set_line_width(1)
             cr.stroke()
@@ -1790,7 +1861,7 @@ class ChatView:
             lw, lh = link.get_pixel_size()
             x = right - lw - 10
             over = self.over(x - 4, line_y - 2, lw + 8, lh + 4)
-            color = mascot.rgba(self.ink('pass'))[:3] if copied else (1, 1, 1) if over else soft
+            color = mascot.rgba(self.ink('pass'))[:3] if copied else themes.hot() if over else soft
             self.tip_text(cr, link, x, line_y, color, alpha, False)
             self.hits.append(('chat', f'code:{index}:{n}', x - 4, line_y - 2, lw + 8, lh + 4))
 
@@ -1839,7 +1910,7 @@ class ChatView:
             x -= lw
             over = self.over(x - 4, y - 3, lw + 8, lh + 6)
             lit = label.endswith('copiado ✓')
-            color = mascot.rgba(self.ink('pass'))[:3] if lit else (1, 1, 1) if over else soft
+            color = mascot.rgba(self.ink('pass'))[:3] if lit else themes.hot() if over else soft
             self.tip_text(cr, layout, x, y, color, alpha, False)
             self.hits.append(('chat', key, x - 4, y - 3, lw + 8, lh + 6))
             x -= CHAT_LINK_GAP
@@ -1877,7 +1948,7 @@ class ChatView:
         questions = self.chat.questions()
         q = questions[quiz['n']]
         color = self.chat_color()
-        mascot.rrect(cr, left, y, width, height, 12)
+        mascot.box(cr, left, y, width, height, 12)
         cr.set_source_rgba(*color, .10 * alpha)
         cr.fill_preserve()
         cr.set_source_rgba(*color, .45 * alpha)
@@ -1896,11 +1967,11 @@ class ChatView:
             key = f'chat-opt:{i}'
             self.buttons[key] = (left + 8, row, width - 16, CHAT_OPT_H)
             over = self.over(left + 8, row, width - 16, CHAT_OPT_H)
-            mascot.rrect(cr, left + 8, row, width - 16, CHAT_OPT_H, 8)
-            cr.set_source_rgba(*(color if marked else (1, 1, 1)), (.30 if marked else .12 if over else .05) * alpha)
+            mascot.box(cr, left + 8, row, width - 16, CHAT_OPT_H, 8)
+            cr.set_source_rgba(*(color if marked else themes.hot()), (.30 if marked else .12 if over else .05) * alpha)
             cr.fill()
             mark = ('☑ ' if marked else '☐ ') if q['multi'] else ''
-            self.put(cr, mark + label, FONT_LINK, left + 18, row + 5, (1, 1, 1) if over or marked else ink, alpha,
+            self.put(cr, mark + label, FONT_LINK, left + 18, row + 5, themes.hot() if over or marked else ink, alpha,
                      width=width - 36)
             if desc:
                 self.put(cr, desc, FONT_STEP, left + 18, row + 21, soft, alpha, width=width - 36)
@@ -1919,7 +1990,7 @@ class ChatView:
             return
         ask = self.chat.asking
         red = mascot.rgba(self.ink('bad'))[:3]
-        mascot.rrect(cr, left, y, width, CHAT_ASK_H, 12)
+        mascot.box(cr, left, y, width, CHAT_ASK_H, 12)
         cr.set_source_rgba(*red, .12 * alpha)
         cr.fill_preserve()
         cr.set_source_rgba(*red, .45 * alpha)
@@ -1946,18 +2017,18 @@ class ChatView:
         shown = found[first:first + CHAT_SUGGEST]
         hh = len(shown) * CHAT_SUGGEST_H + 8
         y = bottom - hh
-        mascot.rrect(cr, left, y, width, hh, 12)
-        cr.set_source_rgba(.07, .08, .10, .97 * alpha)
+        mascot.box(cr, left, y, width, hh, 12)
+        cr.set_source_rgba(*themes.get()['popup'], .97 * alpha)
         cr.fill_preserve()
-        cr.set_source_rgba(1, 1, 1, .12 * alpha)
+        cr.set_source_rgba(*themes.glow(), .12 * alpha)
         cr.set_line_width(1)
         cr.stroke()
         cmd, soft = mascot.rgba(self.ink('cmd'))[:3], mascot.rgba(self.ink('text', .66))[:3]
         for i, (name, desc) in enumerate(shown):
             ry = y + 4 + i * CHAT_SUGGEST_H
             if first + i == pick:
-                mascot.rrect(cr, left + 4, ry, width - 8, CHAT_SUGGEST_H, 8)
-                cr.set_source_rgba(1, 1, 1, .09 * alpha)
+                mascot.box(cr, left + 4, ry, width - 8, CHAT_SUGGEST_H, 8)
+                cr.set_source_rgba(*themes.glow(), .09 * alpha)
                 cr.fill()
             layout = self._layout(cr, f'{sigil}{name}', FONT_YOU, width - 24)
             nw, nh = layout.get_pixel_size()

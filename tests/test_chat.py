@@ -259,6 +259,54 @@ class EntreReinicios(ChatCase):
         self.assertEqual((back.tokens, back.plan, back.session), (0, False, ''))
 
 
+class ArchivosTocados(ChatCase):
+    """Los archivos que Claude cambia en la conversación, para abrirlos en el editor."""
+
+    def tool(self, name, **tool_input):
+        self.c.feed({'type': 'assistant', 'message': {'content': [
+            {'type': 'tool_use', 'id': 't', 'name': name, 'input': tool_input}]}})
+
+    def test_apunta_lo_que_editan_las_herramientas_de_edicion(self):
+        self.tool('Edit', file_path='/x/proj/a.py', old_string='x', new_string='y')
+        self.tool('Write', file_path='/x/proj/b.py', content='')
+        self.tool('MultiEdit', file_path='/x/proj/c.py', edits=[])
+        self.tool('NotebookEdit', notebook_path='/x/proj/n.ipynb')
+        self.assertEqual(self.c.edited, ['/x/proj/n.ipynb', '/x/proj/c.py', '/x/proj/b.py', '/x/proj/a.py'])
+
+    def test_leer_o_buscar_no_cuenta(self):
+        self.tool('Read', file_path='/x/proj/a.py')
+        self.tool('Grep', pattern='x')
+        self.tool('Bash', command='rm a.py')
+        self.assertEqual(self.c.edited, [])
+
+    def test_un_archivo_repetido_pasa_al_frente_sin_duplicarse(self):
+        for path in ('/x/proj/a.py', '/x/proj/b.py', '/x/proj/a.py'):
+            self.tool('Edit', file_path=path)
+        self.assertEqual(self.c.edited, ['/x/proj/a.py', '/x/proj/b.py'])
+
+    def test_una_ruta_relativa_se_resuelve_con_la_carpeta_del_chat(self):
+        self.tool('Edit', file_path='src/../a.py')
+        self.assertEqual(self.c.edited, ['/x/proj/a.py'])
+
+    def test_lo_de_un_subagente_no_cuenta(self):
+        self.c.feed({'type': 'assistant', 'parent_tool_use_id': 'toolu_1', 'message': {'content': [
+            {'type': 'tool_use', 'id': 't', 'name': 'Edit', 'input': {'file_path': '/x/proj/a.py'}}]}})
+        self.assertEqual(self.c.edited, [])
+
+    def test_solo_se_recuerdan_los_ultimos(self):
+        for i in range(chat.MAX_EDITED + 5):
+            self.tool('Write', file_path=f'/x/proj/{i}.py')
+        self.assertEqual(len(self.c.edited), chat.MAX_EDITED)
+        self.assertEqual(self.c.edited[0], f'/x/proj/{chat.MAX_EDITED + 4}.py')
+
+    def test_se_guardan_entre_reinicios_y_lo_que_no_sirve_no_vuelve(self):
+        self.tool('Edit', file_path='/x/proj/a.py')
+        back = chat.Chat.restore(json.loads(json.dumps(self.c.dump())), None)
+        self.assertEqual(back.edited, ['/x/proj/a.py'])
+        back = chat.Chat.restore({'cwd': '/x', 'edited': ['/ok.py', 'relativo.py', 3, None]}, None)
+        self.assertEqual(back.edited, ['/ok.py'])
+
+
 class Permisos(ChatCase):
     """El chat trabaja sin pedir permiso, salvo en modo plan."""
 
@@ -361,6 +409,17 @@ class ModeloEsfuerzoPlan(ChatCase):
                             ('--permission-mode', 'plan')):
             self.assertEqual(cmd[cmd.index(flag) + 1], value)
 
+    def test_el_estilo_adhd_va_al_prompt_salvo_que_se_apague(self):
+        for on in (True, False):
+            with mock.patch.object(chat.settings, 'load', return_value={'adhd': on}):
+                self.c.send('hola')
+            cmd = self.procs[-1].args[0]
+            self.assertEqual('--append-system-prompt-file' in cmd, on)
+            if on:
+                self.assertEqual(cmd[cmd.index('--append-system-prompt-file') + 1], chat.STYLE_FILE)
+                self.assertTrue(os.path.isfile(chat.STYLE_FILE))
+            self.c.proc = None
+
     def test_el_modelo_y_el_plan_cambian_en_caliente(self):
         self.c.set_model('haiku')                   # sin Claude abierto: solo se apunta
         self.assertEqual(self.c.model, 'haiku')
@@ -459,12 +518,21 @@ class Markdown(unittest.TestCase):
         self.assertEqual(blocks, [('python', 'import os  # c\nx = 3'), ('', '$ ls -la')])
         self.assertEqual((out.count(paint.CODE_MARK), out.count(paint.CODE_END)), (2, 2))   # arriba y abajo de cada bloque
         self.assertEqual(out.count('background="#101010"'), 1)  # solo el inline: el fondo del bloque lo pinta la isla
-        self.assertIn('<span foreground="#aabbcc">import</span>', out)
+        moonfly = paint.MOONFLY
+        self.assertIn(f'<span foreground="{moonfly["keyword"]}">import</span>', out)   # los colores son los de nvim
+        self.assertIn(f'<span foreground="{moonfly["comment"]}" style="italic"># c</span>', out)
 
-    def test_un_papel_que_el_tema_no_trae_no_rompe_el_dibujo(self):
-        ink = {'cmd': '#111111', 'arg': '#222222'}
-        out = paint.markdown('```bash\ncd ~/x --f $HOME 3\n```', ink=ink, shade='#000000')
-        self.assertIn('foreground="#222222"', out)
+    def test_el_codigo_de_rust_sale_con_los_colores_de_nvim(self):
+        moonfly = paint.MOONFLY
+        colors = {text: color for text, color, _ in paint.code_colors('rust', 'pub fn run() -> i64 { println!("a") }')}
+        self.assertEqual(colors['pub'], moonfly['keyword'])
+        self.assertEqual(colors['run'], moonfly['func'])
+        self.assertEqual(colors['i64'], moonfly['type'])
+        self.assertEqual(colors['println'], moonfly['macro'])
+        self.assertEqual(colors['"a"'], moonfly['string'])
+
+    def test_un_bloque_sin_lenguaje_conocido_sale_en_blanco(self):
+        self.assertEqual(paint.code_colors('brainfuck', '+-[]'), [('+-[]', paint.MOONFLY['white'], False)])
 
     def test_un_bloque_sin_cerrar_tambien_se_copia(self):
         blocks = []

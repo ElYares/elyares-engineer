@@ -431,8 +431,8 @@ class Consulta(IslandCase):
     def test_agente_y_proyecto_con_el_agente_en_su_color(self):
         mascot = app.mascot
         cases = (('elyares-auditor', 'a & b', mascot.accent('auditor'), mascot.ACCENTS['auditor']),
-                 # El engineer va con el color del tema.
-                 (state.MAIN_AGENT, 'p', mascot.accent(state.MAIN_ROLE), mascot.COLORS['accent']),
+                 # El engineer va con el color de su gorra.
+                 (state.MAIN_AGENT, 'p', mascot.accent(state.MAIN_ROLE), mascot.COLORS['mesh']),
                  # Uno que no es de la familia va sin color propio, y su nombre llega de fuera.
                  ('a<b', 'p', None, None))
         for name, project, color, expected in cases:
@@ -514,6 +514,20 @@ class Tablero(Dibujo):
         self.isl.hover, self.isl.expanded = False, True
         self.assertEqual(self.isl.target(), 'board')
         self.assertEqual(self.isl.goal()[0], app.BOARD_W)
+
+    def test_cambiar_de_tema_repinta_la_isla_y_se_guarda(self):
+        self.isl.expanded = True
+        self.isl.overlay = mock.Mock()
+        with mock.patch.object(app.settings, 'save') as save:
+            self.isl.pick_theme('moonfly')
+        self.assertEqual(self.isl.settings['theme'], 'moonfly')
+        self.assertEqual(save.call_args.args[0]['theme'], 'moonfly')
+        self.assertEqual(app.ISLAND_BG[:3], app.themes.tuple_of(app.themes.THEMES['moonfly']['island']))
+        self.assertEqual(app.paint.ISLAND, app.themes.THEMES['moonfly']['island'])
+        self.draw()
+        with mock.patch.object(app.settings, 'save'):
+            self.isl.pick_theme('omarchy')
+        self.assertEqual(app.ISLAND_BG[:3], app.themes.tuple_of('#050608'))
 
     def reply(self, agent, tint, proj, at=0):
         self.isl.model.handle({'event': 'alert', 'session_id': f'chat:{agent}', 'name': proj, 'tone': 'ok',
@@ -621,9 +635,9 @@ class Tablero(Dibujo):
 
     def test_con_pocos_libres_la_banca_es_una_lista(self):
         self.isl.expanded = True
-        self.work('a', 'elyares-architect', 'elyares-auditor')
+        self.work('a', 'elyares-architect', 'elyares-auditor', 'elyares-reviewer')
         self.draw()
-        self.assertEqual(len(self.hit('member')), 3)
+        self.assertEqual(len(self.hit('member')), 4)
         # Cinco en la banca: uno debajo de otro, con su nombre y «libre».
         briefs = [x for kind, _, x, *_ in self.isl.hits if kind == 'brief']
         self.assertEqual((len(briefs), len(set(briefs))), (5, 1))
@@ -952,6 +966,51 @@ class Chat(Dibujo):
         self.isl.chat, self.isl.chat_open = c, True
         return c
 
+    def caja(self):
+        """Una caja de texto de mentira: lo escrito vive en un dict."""
+        box = {'t': ''}
+        self.isl.chat_text = lambda: box['t']
+        self.isl.chat_set_text = lambda text, cursor=None: box.__setitem__('t', text)
+        return box
+
+    def test_cada_proyecto_guarda_su_borrador_sin_enviar(self):
+        box = self.caja()
+        a = self.conversation()
+        self.isl.chat_whom = 'chat'
+        box['t'] = 'borrador de A'
+        b = self.isl.chat_make('', '/x/otro')
+        self.isl.show_chat(b)
+        self.assertEqual(box['t'], '')              # el texto de A no se va a B
+        box['t'] = 'borrador de B'
+        self.isl.show_chat(a)
+        self.assertEqual(box['t'], 'borrador de A')
+        self.isl.show_chat(b)
+        self.assertEqual(box['t'], 'borrador de B')
+
+    def test_un_borrador_repuesto_no_se_repone_otra_vez(self):
+        box = self.caja()
+        a = self.conversation()
+        self.isl.chat_whom = 'chat'
+        box['t'] = 'algo'
+        b = self.isl.chat_make('', '/x/otro')
+        self.isl.show_chat(b)
+        self.isl.show_chat(a)
+        box['t'] = ''                               # se envió
+        self.isl.show_chat(b)
+        self.isl.show_chat(a)
+        self.assertEqual(box['t'], '')
+
+    def test_el_borrador_sobrevive_a_un_mini_chat(self):
+        box = self.caja()
+        a = self.conversation()
+        self.isl.chat_whom = 'chat'
+        box['t'] = 'sin enviar'
+        self.isl.chat_claim('elyares-reviewer')     # la caja pasa a un mini chat
+        self.assertEqual(box['t'], '')
+        self.isl.chat_claim('chat')
+        self.assertEqual(box['t'], 'sin enviar')
+        self.assertIs(self.isl.chat, a)
+
     def test_con_la_orden_se_abre_y_se_cierra(self):
         self.isl.on_control('chat')
         self.assertTrue(self.isl.chat_open and self.isl.chat_typing)
@@ -1063,7 +1122,7 @@ class Chat(Dibujo):
             self.reviewer(agent)
             out = self.isl.chat_markdown(src)
             self.assertIn(f'foreground="{tones[role]}" background=', out)   # el código en línea
-            self.assertIn(f'foreground="{tones[role]}">git</span>', out)    # el comando del bloque
+            self.assertIn(f'foreground="{paint.MOONFLY["func"]}">git</span>', out)   # el bloque: colores de nvim
             self.assertNotIn(tones[other], out)
 
     def test_un_agente_de_solo_lectura_abre_otra_conversacion_sin_esperar(self):
@@ -3401,7 +3460,7 @@ class Ventana(Dibujo):
         surface.flush()
         data = surface.get_data()
         corner = bytes(data[0:4])
-        self.assertEqual(corner[3], round(app.GLASS_ALPHA * 255))   # deja ver (y desenfocar) lo de atrás
+        self.assertEqual(corner[3], round(app.WIN_GLASS_ALPHA * 255))   # deja ver (y desenfocar) lo de atrás
         self.assertLess(corner[3], 255)
         self.assertIsNone(isl.island_fill(self.cr, 0, 700, 400))     # sin el filo claro de la isla suelta
         isl.settings['glass'] = False                                # sin vidrio, entero como siempre

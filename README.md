@@ -400,7 +400,7 @@ no sirven aquí, porque la isla es una capa y no una ventana.
 
 ### La familia
 
-ElYares no trabaja solo. La sesión es el **engineer**, y hay siete subagentes de
+ElYares no trabaja solo. La sesión es el **engineer**, y hay ocho subagentes de
 Claude Code con su propio personaje: misma cara, mismas gafas y misma antena,
 pero cada uno con su atuendo, lo que trae en las manos al trabajar y su color.
 
@@ -414,6 +414,7 @@ pero cada uno con su atuendo, lo que trae en las manos al trabajar y su color.
 | mobile | `elyares-mobile` | gorro de lana caído, barba, bigote de manubrio y gafas de pasta | un teléfono y su café | café con leche |
 | devops | `elyares-devops` | capucha negra con `</>`, chamarra negra con sus cordones y código reflejado en las gafas | una terminal negra con el prompt esperando | lima |
 | researcher | `elyares-researcher` | sombrero de explorador con su brújula y pañoleta al cuello | un cuaderno donde apunta lo que encuentra | naranja |
+| coach | `elyares-coach` | pelo peinado, diadema con micrófono y corbata | un sobre con el CV asomando | índigo |
 
 Mientras trabaja un subagente de la familia, la mascota grande es ese
 personaje, con todos sus gestos (la antena sigue en rojo al pedir permiso y en
@@ -429,7 +430,7 @@ permiso" a la derecha.
 En el tablero cada uno tiene su tarjeta (ver "El tablero"). Con casi todos
 en la banca las caras se achican, y en una tarjeta estrecha el nombre es el
 del personaje (`designer`) en vez del del agente (`elyares-designer`). Con
-todos trabajando van en dos filas de cuatro, y libres también, porque los ocho
+todos trabajando van en dos filas, y libres también, porque los nueve
 ya no caben en una fila con su nombre. Con más de cinco en la banca, las caras
 van en cuadrícula y el pie dice el nombre del que tiene el cursor encima.
 
@@ -441,7 +442,7 @@ se calla 20 min se da por terminado.
 
 ### Los agentes
 
-Los siete subagentes están en `agents/` y `install.sh` los copia a
+Los ocho subagentes están en `agents/` y `install.sh` los copia a
 `~/.claude/agents/`, así que valen en cualquier proyecto. Son copias y no
 enlaces: enlazados cambiarían solos con lo que hubiera en esta carpeta (otra
 rama, un cambio a medias), y son instrucciones para todas las sesiones. Para
@@ -458,14 +459,16 @@ recargan con `/agents`.
 | `elyares-mobile` | Flutter y React Native: revisar un diff, diagnosticar un build, un permiso o una notificación, comprobar que un release está listo | lee, y escribe solo documentación cuando se le pide | `M1`–`M27` |
 | `elyares-devops` | la operación: revisar un diff, un repo entero o un despliegue antes de hacerlo (CI, contenedores, `Makefile` y scripts de despliegue, migraciones, respaldos, colas) | lee, entra a un servidor solo por `ssh` y solo a leer, y, cuando se le pide, entrega un cambio ya hecho (commit, push y PR) y escribe documentación | `D1`–`D25` |
 | `elyares-researcher` | investigar: una duda básica, un tema complejo, un repositorio ajeno, una comparación o una evaluación contra lo que ya tienes; y, cuando se le pide, documentarlo en la bitácora del proyecto en el vault | lee, busca en la web y escribe solo documentación | `R1`–`R14` |
+| `elyares-coach` | postulaciones de trabajo: redactar el correo, revisar el CV y el portafolio contra la vacante y armar el paquete que se envía; no envía nada. Cuando se le pide, documenta en el vault (bitácora o una nota por postulación) | lee, busca en la web y escribe solo documentación | `K1`–`K13` |
 
 Se usan solo cuando se piden: por nombre ("usa elyares-auditor sobre este
 diff") o con `@`. Su descripción le dice a la sesión que no los lance por
-iniciativa propia. Los siete devuelven un informe con formato fijo, que siempre
+iniciativa propia. Los ocho devuelven un informe con formato fijo, que siempre
 dice qué no revisaron y qué quedó sin verificar.
 
 Cada uno fija su modelo y su esfuerzo en su encabezado (`model`, `effort`): el
-auditor corre con Opus y los otros seis con Sonnet, los siete en `medium`.
+auditor corre con Opus y los otros siete con Sonnet, los ocho
+en `medium`.
 Sin esas líneas heredarían los de la sesión que los lanza.
 
 El researcher es el único que cambia de modelo según el encargo, porque su
@@ -491,6 +494,7 @@ También puedes decirlo tú: "usa elyares-researcher con opus".
   worker ajeno reiniciado en un servidor compartido, pruebas en verde que no
   corrieron, una suite que borró la base de desarrollo. Están en las bitácoras
   y los runbooks de cada proyecto.
+- Las reglas `K` son del coach y no están en el estándar: salen de lo que ve un reclutador (correo corto, evidencia en vez de adjetivos) y de la regla de no inventar (`G2`).
 - Las reglas `R` salen de la Parte B del estándar (`G2`: no inventar;
   `G23`: no afirmar lo que no se verificó).
 - El researcher documenta en el vault de Obsidian con el procedimiento de
@@ -524,7 +528,7 @@ e `install.sh` lo copia a `~/.local/bin/elyares-guard`). Tiene cuatro modos:
 |---|---|---|
 | `solo-lectura` | el Bash de los agentes (menos el devops), desde su encabezado | frena el comando que escribe: redirecciones fuera de `/tmp`, `rm`, `mv`, `sed -i`, cualquier `git` que no sea de lectura, instaladores (`npm install`, `composer install`, `flutter pub get`…), formateadores que reescriben, `--fix`, migraciones, `sudo`. Y el que sale de la máquina o toca lo desplegado: `ssh` y `scp`, un `make` que no sea de pruebas (sí deja `make -n`), un `gh` que no sea de consulta, y `kubectl`, `terraform`, `supervisorctl`, `crontab` o `certbot` cuando cambian algo. `git clone` solo pasa hacia `/tmp` |
 | `entrega` | el Bash del devops, en vez de `solo-lectura` | lo mismo, y además deja entregar un cambio: `git add` por ruta, `git commit`, `git push`, una rama nueva, `git fetch`, `gh pr create` o `edit` y `gh auth token`, para usar en un solo comando la cuenta que ve el repositorio (`GH_TOKEN=$(gh auth token --user X) gh …`) sin cambiar la de la máquina. Sigue frenando `add -A`, `--amend`, `--no-verify`, el push forzado o que borra ramas, `merge`, `rebase`, `reset` y mergear o cerrar un PR |
-| `solo-docs` | el `Edit` y el `Write` del architect y del researcher, y el `Write` de los otros cinco | solo deja escribir documentación (`.md`, `.mmd`, `.puml`, `.txt`…) |
+| `solo-docs` | el `Edit` y el `Write` del architect, del researcher y del coach, y el `Write` de los otros cinco | solo deja escribir documentación (`.md`, `.mmd`, `.puml`, `.txt`…) |
 | `config` | el `Edit` y el `Write` de cualquier sesión, desde `settings.json` | pregunta antes de tocar la configuración, ya existente, de lo que revisa el código: ESLint, Prettier, PHPStan y su baseline, Pint, PHPUnit, `analysis_options.yaml`, golangci, ruff, los workflows de GitHub |
 
 Los tres primeros bloquean y le dicen al agente por qué; el cuarto no bloquea,
@@ -697,6 +701,22 @@ pomodoro la isla solo se abre sola para un permiso: "terminó", "esperando" y
 las alertas se quedan asomadas (la mascota sí cambia de gesto, y con el ratón
 encima se abre como siempre). Al empezar el descanso avisa, y si algo se quedó
 esperando abre la lista. También avisa cuando el descanso se acaba.
+
+### Aviso al celular (Slack)
+
+Si una sesión lleva más de 2 minutos pidiendo permiso, terminada o esperándote,
+la isla manda un mensaje a un webhook de Slack. Solo lleva el proyecto y el
+motivo (nunca el comando). Se calla con el No molestar y avisa una vez por
+estado: otro turno vuelve a avisar.
+
+```bash
+install -m 600 /dev/null ~/.config/elyares-engineer/slack-webhook
+# pega la URL del incoming webhook (https://hooks.slack.com/…) en ese archivo
+```
+
+También vale `ELYARES_SLACK_WEBHOOK`. Sin webhook no se manda nada, y un
+archivo legible por otros usuarios se ignora. Usa un webhook propio, no el de
+DevHerd.
 
 ### Uso de Claude
 

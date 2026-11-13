@@ -205,6 +205,16 @@ escriben fuera del repositorio auditado, en `/tmp`.
 - **N2, activo** (nuclei, ZAP en modo activo, sqlmap): **nunca los ejecutas.**
   Los mencionas como paso posterior que decide el usuario.
 
+## Proceso (PSP)
+
+Tus hallazgos se clasifican con la tabla de tipos de
+`~/.claude/elyares/proceso/psp.md` (léela antes de reportar): cada uno lleva
+`Defecto: <tipo> · entró en: <fase>` y el informe cierra con el bloque
+«Defectos». Si existe la nota `Checklist-personal` del proyecto en el vault
+(`vaultdocs project <nombre>` da la carpeta), recórrela junto con tus reglas y
+cita «lista personal: <línea>» cuando el diff rompa una. No la editas: propones
+líneas nuevas en «Para la lista personal». Sin diff, omite la densidad y dilo.
+
 ## Tu informe
 
 Cada hallazgo, del más grave al menos:
@@ -215,6 +225,7 @@ Qué pasa: <el defecto, en una frase>
 Cómo se explota: <el escenario concreto: quién, con qué petición, qué obtiene>
 Evidencia: <el fragmento, el comando que corriste y lo que devolvió>
 Arreglo: <qué cambiar; sin escribir el parche>
+Defecto: <tipo> · entró en: <fase> · encontrado en: revisión de código
 ```
 
 Si no pudiste confirmar un candidato leyendo el código, va en «Sin verificar»,
@@ -224,6 +235,12 @@ la cambie; si la cambias, di por qué.
 Cierra siempre con:
 
 ```
+## Defectos
+- Por tipo: <Verificación 3 · Función 1 · …>
+- Por fase en que entraron: <diseño 1 · código 3 · sin determinar 0>
+- Densidad: <N bloquea+conviene> en <M líneas cambiadas> → <por KLOC>
+- Para la lista personal: <la comprobación que habría evitado el tipo que más se repitió; «ninguna»>
+
 ## Qué audité
 - <alcance: el diff de qué rama contra cuál, o qué carpetas>
 - <áreas del catálogo que cargué>

@@ -23,7 +23,7 @@ import threading
 
 from gi.repository import GLib
 
-from . import mascot, projects
+from . import mascot, projects, themes
 
 PROJECTS_SECS = 3             # cada cuánto se vuelve a mirar tmux y ~/develop
 PROJ_W = 600                  # el panel: el ancho del tablero
@@ -179,10 +179,10 @@ class ProjectView:
             lw, lh = layout.get_pixel_size()
             x -= lw
             over = self.over(x - 4, 10, lw + 8, lh + 8)
-            self.tip_text(cr, layout, x, 14, (1, 1, 1) if over else mascot.rgba(self.ink('text', .7))[:3], alpha, False)
+            self.tip_text(cr, layout, x, 14, themes.hot() if over else mascot.rgba(self.ink('text', .7))[:3], alpha, False)
             self.hits.append(('projects', key, x - 4, 10, lw + 8, lh + 8))
             x -= 14
-        cr.set_source_rgba(1, 1, 1, .07 * alpha)
+        cr.set_source_rgba(*themes.glow(), .07 * alpha)
         cr.rectangle(left, PROJ_HEAD - 8, width, 1)
         cr.fill()
         if not items:
@@ -206,8 +206,8 @@ class ProjectView:
     def draw_project(self, cr, p, x, y, w, alpha):
         """Un proyecto: su marca, su nombre y, a la derecha, cómo va su Claude."""
         if self.over(x - 4, y, w + 8, PROJ_ROW):
-            mascot.rrect(cr, x - 4, y, w + 8, PROJ_ROW, 6)
-            cr.set_source_rgba(1, 1, 1, .08 * alpha)
+            mascot.box(cr, x - 4, y, w + 8, PROJ_ROW, 6)
+            cr.set_source_rgba(*themes.glow(), .08 * alpha)
             cr.fill()
         self.project_mark(cr, p, x + 10, y + PROJ_ROW / 2, alpha)
         note = self.project_claude(p)
@@ -215,7 +215,7 @@ class ProjectView:
         if note:
             nw = self.put(cr, note[0], FONT_PROJ_NOTE, x + w, y + 4, mascot.rgba(self.ink(note[1]))[:3], alpha,
                           align=1.0) + 8
-        color = (1, 1, 1) if p.here else (.86, .88, .94) if p.open else (.5, .54, .66)
+        color = themes.hot() if p.here else (.86, .88, .94) if p.open else (.5, .54, .66)
         self.put(cr, p.name, FONT_PROJ, x + 22, y + 3, color, alpha, width=w - 22 - nw)
         self.hits.append(('project', p.path, x - 4, y, w + 8, PROJ_ROW))
 

@@ -8,9 +8,13 @@ arma los widgets; qué hace cada botón lo decide quien lo crea con `on_view`.
 
 from gi.repository import Gdk, GLib, Gtk, Pango
 
+from . import fonts, mascot, themes
+
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
-         ('projects', 'Proyectos'), ('sources', 'Fuentes'), ('settings', 'Ajustes'))
+         ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'),
+         ('editor', 'Editor'), ('terminal', 'Terminal'), ('taller', 'Taller'),
+         ('sources', 'Fuentes'), ('settings', 'Ajustes'))
 SIDEBAR_W = 180
 FOLD_W = 640                    # más angosta que esto, la barra lateral se pliega y el texto conserva su tamaño
 
@@ -23,51 +27,114 @@ SURFACE = ('#050608', '#10131a', '#1a1f2b')     # ventana, tarjeta, tarjeta elev
 INK, MUTED = '#f2f5ff', '#8f9ab8'               # sobre cualquiera de las tres
 ACCENT = '#6ea8ff'                              # foco y botón primario
 DANGER = '#ff6b6b'                              # el aviso rojo, no del tema
+GLASS = ('5, 6, 8', '16, 19, 26', '26, 31, 43')     # lo mismo en rgb, para el vidrio
+ACCENT_RGB = '110, 168, 255'
+GLOW = '255, 255, 255'                          # velos y filos: blanco en oscuro, negro en claro
 
-CSS = f"""
-.elyares-slot {{ background: rgba(5, 6, 8, 0.98); }}
-.elyares-slot.glass, .elyares-side.glass, .elyares-bar.glass, .elyares-sidebox.glass {{ background: rgba(5, 6, 8, 0.5); }}
+
+def _role_rows():
+    """El agente elegido en la barra lateral, con el fondo de su color."""
+    rows = []
+    for role in mascot.ROLES:
+        r, g, b = (round(c * 255) for c in mascot.rgba(mascot.accent(role))[:3])
+        rows.append(f'.elyares-side row.role-{role}:selected {{ background: rgba({r}, {g}, {b}, 0.28); }}')
+    return '\n'.join(rows) + '\n'
+
+
+ROLE_ROWS = _role_rows()
+
+def tech_css():
+    """El estilo técnico: todo recto, sin sombras y con el filo a 1 px bien marcado."""
+    return f"""
+.elyares-segments, .elyares-segments button, .elyares-pill, .elyares-side row, .elyares-card,
+.elyares-btn, entry, textview, dropdown, button, popover, popover contents, scrollbar slider, switch, switch slider
+  {{ border-radius: 0; box-shadow: none; }}
+.elyares-segments, .elyares-card, .elyares-btn, .elyares-pill, .elyares-chathead
+  {{ border: 1px solid rgba({GLOW}, 0.22); }}
+.elyares-segments button:checked, .elyares-pill:checked, .elyares-side row:selected
+  {{ border-left: 2px solid {ACCENT}; }}
+"""
+
+
+def season_css():
+    """El adorno de temporada de la ventana: con Navidad, una guirnalda roja, verde y dorada bajo la barra."""
+    if themes.current != 'navidad':
+        return ''
+    return """
+.elyares-bar { border-bottom: 3px solid transparent;
+  border-image: repeating-linear-gradient(90deg, #d63a3a 0 14px, #2f9e5b 14px 28px, #f5c542 28px 42px) 0 0 3 0 / 0 0 3px 0 stretch; }
+.elyares-sidebox { border-right: 2px solid #2f9e5b; }
+.elyares-btn.primary { background: #d63a3a; color: #ffffff; }
+"""
+
+
+def build_css():
+    return f"""
+.elyares-slot {{ background: rgba({GLASS[0]}, 0.98); }}
+.elyares-slot.glass, .elyares-side.glass, .elyares-bar.glass, .elyares-sidebox.glass {{ background: rgba({GLASS[0]}, {fonts.glass(.5)}); }}
+/* Con vidrio, también las tarjetas, pastillas y fuentes dejan pasar el fondo. */
+.glass .elyares-card, .glass .elyares-segments, .glass .elyares-pill {{ background: rgba({GLASS[1]}, {fonts.glass(.45)}); }}
+.glass .elyares-card:hover, .glass .elyares-card.raised, .glass .elyares-pill:hover, .glass .elyares-pill:checked,
+.glass .elyares-segments button:checked {{ background: rgba({GLASS[2]}, {fonts.glass(.6)}); }}
+.glass .elyares-sources, .glass .elyares-sources viewport, .glass .elyares-chathead {{ background: transparent; }}
 .elyares-bar {{ background: {SURFACE[0]}; color: {INK}; border: none; box-shadow: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06); }}
+  border-bottom: 1px solid rgba({GLOW}, 0.06); }}
 /* Las vistas, como el control segmentado de macOS: una pastilla con la activa elevada. */
 .elyares-segments {{ background: {SURFACE[1]}; border-radius: {RADIUS[0]}px; padding: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.06); }}
+  border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-segments button {{ background: transparent; color: {MUTED}; border: none; box-shadow: none;
-  padding: {SPACE[0]}px {SPACE[2]}px; border-radius: 6px; min-height: 0; }}
-.elyares-segments button:hover {{ background: rgba(255, 255, 255, 0.05); }}
+  padding: {SPACE[0]}px {SPACE[2]}px; border-radius: 6px; min-height: 24px; min-width: 24px; }}
+.elyares-segments button:hover {{ background: rgba({GLOW}, 0.05); }}
 .elyares-segments button:checked {{ background: {SURFACE[2]}; color: {INK};
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }}
 .elyares-pill {{ background: {SURFACE[1]}; color: {MUTED}; border: none;
-  box-shadow: none; padding: {SPACE[0]}px {SPACE[2]}px; border-radius: {RADIUS[0]}px; min-height: 0; }}
+  box-shadow: none; padding: {SPACE[0]}px {SPACE[2]}px; border-radius: {RADIUS[0]}px; min-height: 24px; min-width: 24px; }}
 .elyares-pill:checked {{ background: {SURFACE[2]}; color: {INK}; }}
 .elyares-pill:hover {{ background: {SURFACE[2]}; }}
 /* La barra lateral: sección en versalitas y la fila elegida con el acento, como en macOS. */
-.elyares-sidebox {{ background: {SURFACE[0]}; border-right: 1px solid rgba(255, 255, 255, 0.06); }}
+.elyares-sidebox {{ background: {SURFACE[0]}; border-right: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-section {{ color: {MUTED}; font-size: 11px; font-weight: 700; letter-spacing: 1px;
   padding: {SPACE[2]}px {SPACE[2]}px {SPACE[0]}px; }}
 .elyares-side {{ background: transparent; color: {INK}; padding: {SPACE[0]}px {SPACE[1]}px; }}
 .elyares-side row {{ border-radius: {RADIUS[0]}px; padding: {SPACE[1]}px {SPACE[1]}px; margin: 1px 0; }}
-.elyares-side row:hover {{ background: rgba(255, 255, 255, 0.05); }}
-.elyares-side row:selected {{ background: rgba(110, 168, 255, 0.22); color: {INK}; }}
-.elyares-card {{ background: {SURFACE[1]}; color: {INK}; border-radius: {RADIUS[1]}px;
-  padding: {SPACE[1]}px {SPACE[2]}px; border: 1px solid rgba(255, 255, 255, 0.06); }}
+.elyares-side row:hover {{ background: rgba({GLOW}, 0.05); }}
+.elyares-side row:selected {{ background: rgba({ACCENT_RGB}, 0.22); color: {INK}; }}
+{ROLE_ROWS}.elyares-card {{ background: {SURFACE[1]}; color: {INK}; border-radius: {RADIUS[1]}px;
+  padding: {SPACE[1]}px {SPACE[2]}px; border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-card:hover {{ background: {SURFACE[2]}; }}
 .elyares-card.raised {{ background: {SURFACE[2]}; }}
 .elyares-btn {{ background: {SURFACE[2]}; color: {INK}; border-radius: 6px;
-  padding: {SPACE[1]}px {SPACE[3]}px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: none; }}
+  padding: {SPACE[1]}px {SPACE[3]}px; border: 1px solid rgba({GLOW}, 0.08); box-shadow: none; }}
 .elyares-btn:disabled {{ opacity: 0.4; }}
-.elyares-btn:hover {{ background: rgba(255, 255, 255, 0.14); }}
-.elyares-btn.compact {{ padding: {SPACE[0]}px {SPACE[1]}px; min-height: 0; }}
+.elyares-btn:hover {{ background: rgba({GLOW}, 0.14); }}
+.elyares-btn.compact {{ padding: {SPACE[0]}px {SPACE[1]}px; min-height: 24px; min-width: 24px; }}
 .elyares-btn.primary {{ background: {ACCENT}; color: {SURFACE[0]}; border: none; }}
 .elyares-btn.danger {{ background: {DANGER}; color: {SURFACE[0]}; border: none; }}
 .elyares-sources, .elyares-sources viewport {{ background: {SURFACE[0]}; color: {INK}; }}
 .elyares-chathead {{ background: {SURFACE[0]}; color: {INK}; padding: {SPACE[1]}px {SPACE[2]}px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06); }}
-.elyares-segments button:focus-visible, .elyares-side row:focus-visible, .elyares-btn:focus-visible {{
+  border-bottom: 1px solid rgba({GLOW}, 0.06); }}
+.elyares-segments button:focus-visible, .elyares-side row:focus-visible, .elyares-btn:focus-visible,
+.elyares-pill:focus-visible, .elyares-card:focus-visible, entry:focus-within, textview:focus-within,
+dropdown:focus-within, switch:focus-visible, checkbutton:focus-visible, button:focus-visible {{
   outline: 2px solid {ACCENT}; outline-offset: 2px; }}
-"""
+{tech_css() if mascot.SQUARE else ''}{season_css()}"""
 
+CSS = build_css()
 _provider = None
+
+
+def use_theme():
+    """Toma los colores del tema de ahora; con los estilos ya puestos, los rehace en caliente."""
+    global SURFACE, INK, MUTED, ACCENT, DANGER, GLASS, ACCENT_RGB, GLOW, CSS
+    look = themes.get()
+    SURFACE, INK, MUTED = look['surface'], look['ink'], look['muted']
+    ACCENT, DANGER = look['accent'], look['danger']
+    GLASS = tuple(', '.join(str(c) for c in themes.rgb255(color)) for color in SURFACE)
+    ACCENT_RGB = ', '.join(str(c) for c in themes.rgb255(ACCENT))
+    GLOW = '0, 0, 0' if themes.is_light() else '255, 255, 255'
+    CSS = build_css()
+    if _provider is not None:
+        _provider.load_from_string(CSS)
 
 
 def load_css():
@@ -78,6 +145,76 @@ def load_css():
         _provider.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), _provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        load_fonts()
+
+
+class Lights(Gtk.DrawingArea):
+    """Las luces de Navidad: una tira de focos de colores por el borde del contenido, que parpadean.
+
+    Solo se ven con el tema `navidad`; el resto del tiempo está escondida y no repinta.
+    """
+    COLORS = ((.91, .23, .23), (.18, .72, .42), (.96, .77, .26), (.30, .60, 1.0))
+    STEP = 30           # px entre foco y foco
+    INSET = 6           # lo que la tira se separa del borde
+    BULB = 4            # radio del foco
+    BLINK_MS = 450
+
+    def __init__(self):
+        super().__init__()
+        self.set_can_target(False)          # los clics pasan de largo
+        self.set_can_focus(False)
+        self.set_hexpand(True)
+        self.set_vexpand(True)
+        self.set_draw_func(self.paint)
+        self.phase = 0
+        self.timer = 0
+        self.set_visible(False)
+        # El reloj corre aunque esté escondida (un widget escondido nunca se «mapea»): es lo que la muestra.
+        self.timer = GLib.timeout_add(self.BLINK_MS, self.tick)
+
+    def tick(self):
+        on = themes.current == 'navidad'
+        if on != self.get_visible():
+            self.set_visible(on)
+        if on:
+            self.phase += 1
+            self.queue_draw()
+        return True
+
+    @classmethod
+    def points(cls, w, h):
+        """Dónde van los focos: por todo el borde, empezando arriba a la izquierda y en sentido horario."""
+        a, b = cls.INSET, cls.INSET
+        right, bottom = w - cls.INSET, h - cls.INSET
+        out = []
+        for x in range(a, int(right), cls.STEP):
+            out.append((x, b))
+        for y in range(b, int(bottom), cls.STEP):
+            out.append((right, y))
+        for x in range(int(right), a, -cls.STEP):
+            out.append((x, bottom))
+        for y in range(int(bottom), b, -cls.STEP):
+            out.append((a, y))
+        return out
+
+    def paint(self, _area, cr, w, h):
+        if w < 4 * self.STEP or h < 4 * self.STEP:
+            return
+        i = self.INSET
+        cr.set_source_rgba(.05, .25, .12, .75)          # el cable
+        cr.set_line_width(1.5)
+        cr.rectangle(i, i, w - 2 * i, h - 2 * i)
+        cr.stroke()
+        for n, (x, y) in enumerate(self.points(w, h)):
+            r, g, b = self.COLORS[n % len(self.COLORS)]
+            lit = (n + self.phase) % 3 != 0             # un foco de cada tres está apagado, y va corriendo
+            if lit:
+                cr.set_source_rgba(r, g, b, .22)
+                cr.arc(x, y, self.BULB * 2.6, 0, 6.2832)
+                cr.fill()
+            cr.set_source_rgba(r, g, b, 1 if lit else .35)
+            cr.arc(x, y, self.BULB, 0, 6.2832)
+            cr.fill()
 
 
 class Frame:
@@ -128,6 +265,9 @@ class Frame:
         self.flows = FlowsPanel()
         self.sources = SourcesPanel()
         self.alerts = AlertsPanel()
+        self.tmux = TmuxPanel()
+        self.pomodoro = PomodoroPanel()
+        self.extra = []                 # paneles que monta la ventana (el editor y la terminal importan de este módulo)
         self.settings = SettingsPanel()
         self.sidebar = Gtk.ListBox()
         self.sidebar.set_size_request(SIDEBAR_W, -1)
@@ -150,7 +290,11 @@ class Frame:
 
     def attach(self, win):
         win.set_titlebar(self.header)
-        win.set_child(self.body)
+        dressed = Gtk.Overlay()         # encima del contenido, las luces de temporada
+        dressed.set_child(self.body)
+        self.lights = Lights()
+        dressed.add_overlay(self.lights)
+        win.set_child(dressed)
 
     def set_content(self, child):
         """Pone (o quita, con None) el contenido; nunca más de uno."""
@@ -196,6 +340,8 @@ class Frame:
         for sid, name, color, text, *role in rows:
             row = Gtk.ListBoxRow()
             row.sid = sid
+            if role:
+                row.add_css_class(f'role-{role[0]}')
             box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
             if role and face is not None:
                 dot = Gtk.DrawingArea()
@@ -251,7 +397,7 @@ class Frame:
         self.focus.place(0)
         self.flows.set_visible(False)
         self.chat_head.place(0)
-        for panel in (self.sources, self.alerts, self.settings):
+        for panel in (self.sources, self.alerts, self.settings, self.tmux, self.pomodoro, *self.extra):
             panel.set_visible(False)
 
     def set_glass(self, on):
@@ -432,6 +578,7 @@ class ChatHead(Gtk.Box):
         self.set_halign(Gtk.Align.FILL)
         self.signature = None
         self.info = None
+        self.files_btn = None           # el botón «Archivos · N», si hay archivos tocados
         self.set_visible(False)
 
     def place(self, height):
@@ -442,6 +589,8 @@ class ChatHead(Gtk.Box):
     def _refresh(self, info):
         where = f' · {info["where"]}' if info['where'] else ''
         now = (info['name'], info['project'], info['status'], where)
+        if self.files_btn is not None:
+            self.files_btn.set_label(f'Archivos · {info.get("edited", 0)}')
         if now != self.last:
             self.last = now
             self.title.set_markup(f'<span foreground="{info["color"]}" weight="bold">'
@@ -454,7 +603,7 @@ class ChatHead(Gtk.Box):
         """`info`: role, pet, name, color, project, status, where, busy,
         can_split. `handlers`: face(cr, role, pet, w, h, moving), act(key)."""
         self.info = info                # la cara lee siempre lo último
-        shape = (info['role'], info['busy'], info['can_split'])
+        shape = (info['role'], info['busy'], info['can_split'], bool(info.get('edited')))
         if shape == self.signature:
             self._refresh(info)         # mismos botones: solo cambian los textos
             return
@@ -481,10 +630,15 @@ class ChatHead(Gtk.Box):
         text.set_hexpand(True)
         self.append(text)
         self.title, self.status, self.last = title, status, (info['name'], info['project'], info['status'], where)
-        links = [('split', 'Otra')] if info['can_split'] else []
+        links = [('files', f'Archivos · {info["edited"]}')] if info.get('edited') else []
+        links += [('split', 'Otra')] if info['can_split'] else []
         links += [('new', 'Nuevo')] + ([('stop', 'Detener')] if info['busy'] else []) + [('close', 'Cerrar')]
+        self.files_btn = None
         for key, label in links:
             btn = Gtk.Button(label=label)
+            if key == 'files':
+                self.files_btn = btn
+                btn.update_property([Gtk.AccessibleProperty.LABEL], ['Archivos que tocó el agente, en el Editor'])
             btn.add_css_class('elyares-btn')
             btn.add_css_class('compact')
             if key == 'stop':
@@ -672,6 +826,197 @@ class AlertsPanel(Gtk.ScrolledWindow):
             self.page.append(card)
 
 
+class TmuxPanel(Gtk.ScrolledWindow):
+    """Las sesiones de tmux como proyectos: una tarjeta por sesión y, dentro,
+    un botón por ventana que salta a ella. Sin estado propio: la llena la isla."""
+
+    STATES = {'permission': ('●', 'pide permiso'), 'waiting': ('▲', 'espera respuesta'),
+              'working': ('●', 'trabaja'), 'done': ('○', 'terminó'), 'idle': ('○', 'en reposo')}
+    TONES = {'permission': 'red', 'waiting': 'yellow', 'working': 'green', 'done': 'metal', 'idle': 'metal'}
+
+    def __init__(self):
+        super().__init__()
+        self.add_css_class('elyares-sources')
+        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(self.page, f'set_margin_{side}')(SPACE[2])
+        self.set_child(self.page)
+        self.signature = None
+        self.set_visible(False)
+
+    def set_sessions(self, sessions, handlers):
+        """`sessions`: [dict(name, state, claudes, windows=[dict(index, name, state, path)])] o
+        None si tmux aún no contestó. `handlers`: jump(sesión, ventana)."""
+        sig = repr(sessions)
+        if sig == self.signature:
+            return
+        self.signature = sig
+        while (child := self.page.get_first_child()) is not None:
+            self.page.remove(child)
+        if sessions is None:
+            self._note('Buscando sesiones de tmux…')
+        elif not sessions:
+            self._note('tmux no está corriendo. Abre una sesión en la terminal y aparecerá aquí.')
+        for sess in sessions or []:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
+            card.add_css_class('elyares-card')
+            claudes = sess['claudes']
+            count = 'sin Claude' if not claudes else '1 Claude' if claudes == 1 else f'{claudes} Claude'
+            title = Gtk.Label(xalign=0)
+            title.set_markup(f'<b>{GLib.markup_escape_text(sess["name"])}</b>  '
+                             f'<span alpha="60%">{count}</span>')
+            card.append(title)
+            for win in sess['windows']:
+                card.append(self._window(sess['name'], win, handlers))
+            self.page.append(card)
+
+    def _note(self, text):
+        label = Gtk.Label(label=text, xalign=0, wrap=True)
+        label.add_css_class('dim-label')
+        self.page.append(label)
+
+    def _window(self, session, win, handlers):
+        mark, said = self.STATES.get(win['state'], ('', ''))
+        btn = Gtk.Button()
+        btn.add_css_class('elyares-btn')
+        btn.set_halign(Gtk.Align.FILL)
+        label = Gtk.Label(xalign=0)
+        color = mascot.COLORS.get(self.TONES.get(win['state'], 'metal'), '#8f9ab8')
+        dot = f'<span foreground="{color}">{mark}</span> ' if mark else ''
+        tail = f'  <span alpha="60%">{said}</span>' if said else ''
+        crew = ''.join(f' <span foreground="{mascot.accent(role)}">●</span>' for role in win.get('agents', ()))
+        label.set_markup(f'{dot}{win["index"]} · {GLib.markup_escape_text(win["name"])}{tail}{crew}')
+        btn.set_child(label)
+        btn.update_property([Gtk.AccessibleProperty.LABEL],
+                            [f'Ir a la ventana {win["name"]} de {session}' + (f', {said}' if said else '')
+                             + (f', con {len(win["agents"])} subagentes' if win.get('agents') else '')])
+        btn.connect('clicked', lambda _b: handlers['jump'](session, win['index']))
+        return btn
+
+
+class PomodoroPanel(Gtk.ScrolledWindow):
+    """El pomodoro de `coffe`: el reloj, la tarea en curso con sus botones y
+    las tareas pendientes para empezar una. Sin estado propio: la llena la isla."""
+
+    TONES = {'focus': 'green', 'overlearning': 'green', 'break': 'yellow', 'break-long': 'yellow'}
+
+    def __init__(self):
+        super().__init__()
+        self.add_css_class('elyares-sources')
+        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(self.page, f'set_margin_{side}')(SPACE[2])
+        self.set_child(self.page)
+        self.signature = None
+        self.clock = None               # el reloj se retoca en el sitio: reconstruir pierde foco y hover
+        self.set_visible(False)
+
+    def set_pomodoro(self, status, tasks, handlers):
+        """`status`: lo que da `pomodoro.describe` (None si el reloj no responde);
+        `tasks`: [dict(id, title, project)]. `handlers`: act(orden, *args)."""
+        if status is None:
+            sig = ('off',)
+        else:
+            sig = (status['phase'], status['task'], status['parked'], status['today'], status['cycle'],
+                   repr(tasks))
+        if sig != self.signature:
+            self.signature = sig
+            self._build(status, tasks, handlers)
+        if status is not None and self.clock is not None:
+            self.clock.set_markup(self._clock_markup(status))
+
+    @staticmethod
+    def _clock_markup(status):
+        color = mascot.COLORS.get(PomodoroPanel.TONES.get(status['phase'], 'metal'), '#8f9ab8')
+        return (f'<span size="xx-large" weight="bold" foreground="{color}">{status["clock"]}</span>  '
+                f'<span alpha="70%">{status["text"]}</span>')
+
+    def _build(self, status, tasks, handlers):
+        while (child := self.page.get_first_child()) is not None:
+            self.page.remove(child)
+        self.clock = None
+        if status is None:
+            note = Gtk.Label(label='El reloj de coffe no responde. Arráncalo con: systemctl --user start coffe',
+                             xalign=0, wrap=True)
+            note.add_css_class('dim-label')
+            self.page.append(note)
+            return
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        card.add_css_class('elyares-card')
+        self.clock = Gtk.Label(xalign=0)
+        card.append(self.clock)
+        task = Gtk.Label(xalign=0, wrap=True)
+        task.set_text(status['task'] or ('Tarea en el refri' if status['parked'] else 'Sin tarea en curso'))
+        card.append(task)
+        done = ' '.join('●' if i < status['cycle'] else '○' for i in range(status['cycle_of']))
+        count = Gtk.Label(xalign=0)
+        count.set_markup(f'<span alpha="60%">Hoy {status["today"]} · ciclo {done}</span>')
+        card.append(count)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+        if status['parked']:
+            row.append(self._button('Sacar del refri', lambda: handlers['act']('resume')))
+        if status['running']:
+            row.append(self._button('Al refri', lambda: handlers['act']('pause')))
+            row.append(self._button('Tirar pomodoro', lambda: handlers['act']('void')))
+            if status['task']:
+                row.append(self._button('Tarea hecha', lambda: handlers['act']('done')))
+        card.append(row)
+        self.page.append(card)
+        head = Gtk.Label(label='EMPEZAR UNA TAREA', xalign=0)
+        head.add_css_class('elyares-section')
+        self.page.append(head)
+        if not tasks:
+            self._note('Sin tareas pendientes.')
+        for t in tasks:
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[0])
+            btn = Gtk.Button()
+            btn.add_css_class('elyares-btn')
+            btn.set_hexpand(True)
+            label = Gtk.Label(xalign=0)
+            label.set_markup(f'{GLib.markup_escape_text(t["title"])}  '
+                             f'<span alpha="60%">{GLib.markup_escape_text(t["project"])}</span>')
+            btn.set_child(label)
+            btn.update_property([Gtk.AccessibleProperty.LABEL],
+                                [f'Empezar un pomodoro en {t["title"]}, de {t["project"]}'])
+            btn.connect('clicked', lambda _b, tid=t['id']: handlers['act']('start', tid))
+            line.append(btn)
+            if t.get('repo') and 'agent' in handlers:
+                with_agent = Gtk.Button(label='Con agente')
+                with_agent.add_css_class('elyares-btn')
+                with_agent.update_property([Gtk.AccessibleProperty.LABEL],
+                                           [f'Empezar un pomodoro en {t["title"]} y abrir el chat en su proyecto'])
+                with_agent.connect('clicked', lambda _b, t=t: handlers['agent'](t['id'], t['repo']))
+                line.append(with_agent)
+            self.page.append(line)
+
+    def _note(self, text):
+        label = Gtk.Label(label=text, xalign=0, wrap=True)
+        label.add_css_class('dim-label')
+        self.page.append(label)
+
+    @staticmethod
+    def _button(text, call):
+        btn = Gtk.Button(label=text)
+        btn.add_css_class('elyares-btn')
+        btn.connect('clicked', lambda _b: call())
+        return btn
+
+
+_font_provider = None
+
+
+def load_fonts():
+    """La letra de los widgets: un segundo estilo, encima del primero, que se rehace al cambiarla."""
+    global _font_provider
+    if _font_provider is None:
+        _font_provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), _font_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+    _font_provider.load_from_string(fonts.css())
+
+
 class SettingsPanel(Gtk.ScrolledWindow):
     """Ajustes: un interruptor por cada clave que hoy se cambia con una orden
     o un clic. Cada fila es (clave, texto, activo, nota)."""
@@ -688,10 +1033,10 @@ class SettingsPanel(Gtk.ScrolledWindow):
         self.position = None
         self.set_visible(False)
 
-    def set_rows(self, rows, position, handlers):
+    def set_rows(self, rows, position, handlers, family=fonts.SYSTEM, theme_key=themes.DEFAULT, tired_scale=125):
         """`rows`: [(clave, texto, activo, nota)]; `position`: 0..100 o None.
-        `handlers`: toggle(clave), move(valor), theme()."""
-        sig = repr((rows, position))
+        `handlers`: toggle(clave), move(valor), theme(), font(familia), pick_theme(clave), tired_scale(%)."""
+        sig = repr((rows, position, family, theme_key, tired_scale))
         if sig == self.signature:
             return
         self.signature = sig
@@ -722,7 +1067,36 @@ class SettingsPanel(Gtk.ScrolledWindow):
             scale.update_property([Gtk.AccessibleProperty.LABEL], ['Posición de la isla, de 0 a 100'])
             scale.connect('value-changed', lambda sc: sc.get_value() != position and handlers['move'](sc.get_value()))
             self.page.append(scale)
-        theme = Gtk.Button(label='Releer el color de acento del tema')
+        self.page.append(Gtk.Label(label='Tamaño de la vista cansada', xalign=0))
+        sizes = Gtk.DropDown.new_from_strings([f'{pct} %' for pct in fonts.TIRED_SCALES])
+        sizes.set_halign(Gtk.Align.START)
+        sizes.set_selected(fonts.TIRED_SCALES.index(tired_scale) if tired_scale in fonts.TIRED_SCALES else 0)
+        sizes.update_property([Gtk.AccessibleProperty.LABEL], ['Tamaño de la letra con la vista cansada'])
+        sizes.connect('notify::selected', lambda dd, _p: fonts.TIRED_SCALES[dd.get_selected()] != tired_scale
+                      and handlers['tired_scale'](fonts.TIRED_SCALES[dd.get_selected()]))
+        self.page.append(sizes)
+        self.page.append(Gtk.Label(label='Tema', xalign=0))
+        tema = Gtk.DropDown.new_from_strings([themes.label(key) for key in themes.keys()])
+        tema.set_halign(Gtk.Align.START)
+        tema.set_selected(themes.keys().index(themes.valid(theme_key)))
+        tema.update_property([Gtk.AccessibleProperty.LABEL], ['Tema de la isla y la app'])
+        tema.connect('notify::selected', lambda dd, _p: themes.keys()[dd.get_selected()] != theme_key
+                     and handlers['pick_theme'](themes.keys()[dd.get_selected()]))
+        self.page.append(tema)
+        self.page.append(Gtk.Label(label='Letra', xalign=0))
+        names = [choice[1] for choice in fonts.CHOICES]
+        pick = Gtk.DropDown.new_from_strings(names)
+        pick.set_halign(Gtk.Align.START)
+        pick.set_selected(next((i for i, choice in enumerate(fonts.CHOICES) if choice[0] == family), 0))
+        pick.update_property([Gtk.AccessibleProperty.LABEL], ['Letra de la app'])
+        pick.connect('notify::selected', lambda dd, _p: fonts.CHOICES[dd.get_selected()][0] != family
+                     and handlers['font'](fonts.CHOICES[dd.get_selected()][0]))
+        self.page.append(pick)
+        note = Gtk.Label(label='Vale para la isla y para la ventana; el código sigue en monoespaciada.',
+                         xalign=0, wrap=True)
+        note.add_css_class('dim-label')
+        self.page.append(note)
+        theme = Gtk.Button(label='Releer los colores del tema')
         theme.add_css_class('elyares-btn')
         theme.set_halign(Gtk.Align.START)
         theme.connect('clicked', lambda _b: handlers['theme']())
@@ -821,10 +1195,29 @@ class FocusPanel(Gtk.ScrolledWindow):
         self.signature = None
         self.faces = []
         self.refs = {'steps': []}
+        self.picked = None              # el paso abierto abajo, con su texto entero
+        self.last = None                # (d, handlers) para rehacerlo al elegir otro paso
         self.set_visible(False)
 
     place = BoardPanel.place
     animate = BoardPanel.animate
+
+    def natural_h(self, width):
+        """Lo que mide el desglose a ese ancho: la ventana crece hasta ahí en vez de pedir scroll."""
+        root = self.get_child()
+        return 0 if root is None else root.measure(Gtk.Orientation.VERTICAL, max(1, int(width)))[1]
+
+    def _pick(self, index):
+        """Un clic en un paso lo abre abajo; otro clic en el mismo lo cierra."""
+        self.picked = None if self.picked == index else index
+        if self.last is not None:
+            self.signature = None
+            self.set_focus(*self.last)
+            self.last[1]['pick']()
+
+    @staticmethod
+    def _detail_head(index, spent):
+        return f'Paso {index + 1}' + (f' · {spent}' if spent else '')
 
     def _refresh(self, d):
         for key in ('label', 'summary'):
@@ -836,13 +1229,23 @@ class FocusPanel(Gtk.ScrolledWindow):
                 t.set_label(text)
             if when.get_label() != spent:
                 when.set_label(spent)
+        if self.picked is not None and 'detail' in self.refs:
+            head, body = self.refs['detail']
+            _mark, _color, text, spent = d['steps'][self.picked]
+            if body.get_label() != text:
+                body.set_label(text)
+            if head.get_label() != self._detail_head(self.picked, spent):
+                head.set_label(self._detail_head(self.picked, spent))
 
     def set_focus(self, d, handlers):
         """`d`: role, name, color, pet, busy, label, summary, steps
         [(marca, color, texto, tiempo)], links [(tipo, clave, texto)], others
-        [(rol, pet, activo)], hidden, empty. `handlers`: face, link, other."""
+        [(rol, pet, activo)], hidden, empty. `handlers`: face, link, other, pick."""
+        self.last = (d, handlers)
+        if self.picked is not None and self.picked >= len(d['steps']):
+            self.picked = None
         shape = (d['role'], d['busy'], d['pet'], tuple(d['links']), tuple(d['others']),
-                 d['hidden'], d['empty'], len(d['steps']), tuple(s[0] for s in d['steps']))
+                 d['hidden'], d['empty'], len(d['steps']), tuple(s[0] for s in d['steps']), self.picked)
         if shape == self.signature:
             self._refresh(d)            # el mismo desglose: solo cambian los textos
             return
@@ -887,9 +1290,15 @@ class FocusPanel(Gtk.ScrolledWindow):
             more = Gtk.Label(label=f'⋯ {d["hidden"]} paso{"" if d["hidden"] == 1 else "s"} antes', xalign=0)
             more.add_css_class('dim-label')
             mid.append(more)
-        for mark, color, text, spent in d['steps']:
+        for i, (mark, color, text, spent) in enumerate(d['steps']):
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
             row.add_css_class('elyares-card')
+            if i == self.picked:
+                row.add_css_class('raised')
+            row.set_cursor_from_name('pointer')
+            click = Gtk.GestureClick()
+            click.connect('released', lambda _g, _n, _x, _y, i=i: self._pick(i))
+            row.add_controller(click)
             m = Gtk.Label()
             m.set_markup(f'<span foreground="{color}">{GLib.markup_escape_text(mark)}</span>')
             t = Gtk.Label(label=text, xalign=0, wrap=True)
@@ -905,6 +1314,19 @@ class FocusPanel(Gtk.ScrolledWindow):
             row.append(when)
             mid.append(row)
             self.refs['steps'].append((m, t, when))
+        if self.picked is not None:
+            _mark, _color, text, spent = d['steps'][self.picked]
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
+            box.add_css_class('elyares-card')
+            head = Gtk.Label(label=self._detail_head(self.picked, spent), xalign=0)
+            head.add_css_class('dim-label')
+            body = Gtk.Label(label=text, xalign=0, wrap=True, selectable=True)
+            body.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            body.set_max_width_chars(1)
+            box.append(head)
+            box.append(body)
+            mid.append(box)
+            self.refs['detail'] = (head, body)
         others = Gtk.FlowBox()              # envuelve: en una fila no cabrían en una ventana angosta
         others.set_selection_mode(Gtk.SelectionMode.NONE)
         others.set_max_children_per_line(8)

@@ -17,7 +17,8 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import hypr, mascot, settings, windowframe
+from . import (editorpanel, fonts, gitview, hypr, mascot, pomodoro, settings, tallerpanel, terminal, terminalpanel,
+               themes, tmuxsessions, windowframe)
 from .state import MAIN_ROLE, elapsed
 
 APP_ID = 'dev.elyares.Engineer'
@@ -25,6 +26,7 @@ TITLE = 'Elyares Engineer'
 CLASS_RE = r'^(dev\.elyares\.Engineer)$'    # la `class` de la ventana, como regex de Hyprland
 MIN_W, MIN_H = 480, 320          # lo menos que se le deja a la ventana
 FIT_H = 100                      # lo que se le resta a la pantalla para que no la tape entera
+FOCUS_ROOM = 220                 # lo que un desglose deja a las barras y a lo que va debajo
 FIT_PAD = 12                     # aire bajo la isla
 FIT_STEP = 6                     # cambios de alto menores no mueven la ventana
 REMEMBER_SECS = 2                # cada cuánto se guarda el tamaño que Yared va dejando
@@ -32,6 +34,7 @@ FIT_SETTLE = 0.6                 # lo que tarda Hyprland en dejarla del alto ped
 PANELS_EVERY = 0.1               # cada cuánto se ponen al día los paneles de widgets
 FIT_HOLD = 160                   # un contenido más corto que esto no encoge la ventana: no «respira»
 FIT_VOID = 120                   # con su medida guardada, el vacío bajo el contenido que se tolera antes de ajustarla
+EDITOR_H = 760                   # el alto que pide el editor para ver código con holgura (se recorta a la pantalla)
 OPEN_H = 780                     # alto con el que abre: el tablero y el chat caben; el resto, con scroll de la pantalla
 
 
@@ -52,11 +55,15 @@ class WindowView:
     hypr_async = True               # las pruebas lo apagan: el pedido sale en el acto
     window_body = 0                 # alto extra que piden las tarjetas del tablero (lo usa body_h)
     sources_pick = 'claude'         # la fuente que muestra
-    panel_open = ''                 # 'alerts' o 'settings' cuando una de esas vistas está a la vista
+    panel_open = ''                 # 'alerts', 'settings', 'tmux', 'pomodoro', 'editor', 'terminal' o 'taller' cuando una de esas vistas está a la vista
     help_win = None
     frame = None                    # el marco de widgets (windowframe.Frame); None sin ventana real
 
     def window_init(self):
+        self.tmux_watch = tmuxsessions.Watcher()
+        self.pomo_watch = pomodoro.Watcher()
+        self.git_watch = gitview.Watcher()
+        self.pomo_repo = ''             # la carpeta del chat que se abrió con «Con agente»
         self.windowed = False
         self.app_win = None
         self.frame = None
@@ -138,6 +145,15 @@ class WindowView:
         self.overlay.add_overlay(self.frame.sources)       # y la vista Fuentes, que lo cubre todo
         self.overlay.add_overlay(self.frame.alerts)        # y la bandeja y los ajustes, igual
         self.overlay.add_overlay(self.frame.settings)
+        self.overlay.add_overlay(self.frame.tmux)
+        self.overlay.add_overlay(self.frame.pomodoro)
+        self.frame.editor = editorpanel.EditorPanel()      # en su archivo: importa de windowframe, no al revés
+        self.overlay.add_overlay(self.frame.editor)
+        self.frame.terminal = terminalpanel.TerminalPanel()
+        self.frame.taller = tallerpanel.TallerPanel()
+        self.overlay.add_overlay(self.frame.taller)
+        self.frame.extra += [self.frame.editor, self.frame.terminal, self.frame.taller]     # `hide_panels` los esconde con los demás
+        self.overlay.add_overlay(self.frame.terminal)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
 
@@ -151,7 +167,7 @@ class WindowView:
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
         self.sources_open = key == 'sources'
-        self.panel_open = key if key in ('alerts', 'settings') else ''
+        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'editor', 'terminal', 'taller') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -164,13 +180,20 @@ class WindowView:
             self.toggle_projects()
         elif key == 'flows' and not self.wf_open:
             self.open_workflows()
+        self.ensure_tick()          # en reposo el tick está apagado y los paneles no se pondrían al día
+
+    def window_panels_key(self):
+        return (self.window_current(), self.focus, self.tab, self.chat_open, self.wf_open, self.wf_screen,
+                self.wf_confirm is not None, self.wf_error is not None)
+
+    def window_panels_stale(self):
+        return self.window_panels_key() != self.panels_key
 
     def window_panels_due(self, now):
         """Los paneles se ponen al día a lo más cada PANELS_EVERY: a 60 cuadros
         por segundo el texto no cambia más rápido. Si cambió de vista o de
         agente, de inmediato, para que un clic responda en el acto."""
-        key = (self.window_current(), self.focus, self.tab, self.chat_open, self.wf_open, self.wf_screen,
-               self.wf_confirm is not None, self.wf_error is not None)
+        key = self.window_panels_key()
         if key == self.panels_key and now - self.panels_at < PANELS_EVERY:
             return False
         self.panels_key, self.panels_at = key, now
@@ -266,9 +289,15 @@ class WindowView:
                  summary=(f'{n} paso{"" if n == 1 else "s"}{took}' if n or m.busy else 'libre'),
                  steps=steps, links=links, others=others, hidden=n - len(shown), empty=empty)
         panel = self.frame.focus
-        panel.set_focus(d, dict(face=self.window_face, link=self.window_link, other=self.window_card))
+        panel.set_focus(d, dict(face=self.window_face, link=self.window_link, other=self.window_card,
+                                pick=self.ensure_tick))
         panel.animate()
-        self.window_body = 0
+        # Sus pasos piden lo que miden: la ventana crece hasta donde cabe la pantalla.
+        width = panel.get_width() or self.app_win.get_width() or MIN_W
+        room = self.screen_h - FIT_H - FOCUS_ROOM if self.screen_h else 0
+        self.window_body = max(0, panel.natural_h(width) - app.TABS_H)
+        if room:
+            self.window_body = min(self.window_body, room)
         panel.place(app.TABS_H + self.body_h())
 
     def window_link(self, kind, key):
@@ -347,7 +376,8 @@ class WindowView:
         info = dict(role=role, pet=self.chat_pet(), name=c.name if c is not None else state.MAIN_AGENT,
                     color=mascot.accent(role), project=c.project if c is not None else '',
                     status=status, where=state.tilde(c.cwd) if c is not None else '',
-                    busy=bool(c is not None and c.busy), can_split=self.chat_can_split())
+                    busy=bool(c is not None and c.busy), can_split=self.chat_can_split(),
+                    edited=len(gitview.inside(c.cwd, c.edited)) if c is not None else 0)
         head.set_info(info, dict(face=self.window_face, act=self.window_chat_act))
         head.place(chatview.CHAT_HEAD + 2)
 
@@ -429,6 +459,15 @@ class WindowView:
             self.panel_open = ''
         frame.alerts.set_visible(self.panel_open == 'alerts')
         frame.settings.set_visible(self.panel_open == 'settings')
+        frame.tmux.set_visible(self.panel_open == 'tmux')
+        if self.panel_open == 'tmux':
+            frame.tmux.set_sessions(self.window_tmux(), dict(jump=self.window_tmux_jump))
+        self.window_code_views(frame)
+        frame.pomodoro.set_visible(self.panel_open == 'pomodoro')
+        if self.panel_open == 'pomodoro':
+            status, tasks = self.pomo_watch.read()
+            frame.pomodoro.set_pomodoro(status, tasks, dict(act=self.window_pomodoro,
+                                                            agent=self.window_pomodoro_agent))
         if self.panel_open == 'alerts':
             tones = {'': 'red', 'ok': 'green', 'info': 'yellow', 'run': 'metal'}
             cards = []
@@ -443,10 +482,111 @@ class WindowView:
             st = self.settings
             rows = [('glass', 'Vidrio', bool(st['glass']), 'La ventana translúcida, desenfocada por Hyprland.'),
                     ('compact', 'Modo compacto', bool(st['compact']), 'De la isla suelta; la ventana no lo usa.'),
-                    ('pinned', 'Isla fijada', bool(st['pinned']), 'De la isla suelta; la ventana ya está abierta.')]
+                    ('pinned', 'Isla fijada', bool(st['pinned']), 'De la isla suelta; la ventana ya está abierta.'),
+                    ('chat_tech', 'Chat técnico', bool(st['chat_tech']), 'Bloques y tablas con borde fino y títulos en mayúsculas.'),
+                    ('tech_style', 'Estilo técnico', bool(st['tech_style']),
+                     'Esquinas rectas, bordes de 1 px y toda la letra monoespaciada.'),
+                    ('tired_eyes', 'Vista cansada', bool(st['tired_eyes']),
+                     'Letra más grande y más gruesa, y textos apagados más claros (tamaño abajo).')]
             rows += [(key, f'Fuente: {label}', bool(st[key]), '') for key, label in sources.SOURCES if key != 'claude']
             frame.settings.set_rows(rows, st['position'], dict(toggle=self.window_setting, move=self.move,
-                                                               theme=self.window_theme))
+                                                               theme=self.window_theme, font=self.window_font,
+                                                               tired_scale=self.window_tired_scale,
+                                                               pick_theme=self.pick_theme),
+                                    fonts.current, themes.current, round(fonts.TIRED_SCALE * 100))
+
+    def window_code_views(self, frame):
+        """Editor, Terminal y Taller: los tres miran el mismo proyecto. Cada uno solo trabaja a la vista."""
+        open_ = self.panel_open
+        frame.terminal.set_visible(open_ == 'terminal')
+        frame.editor.set_visible(open_ == 'editor')
+        frame.taller.set_visible(open_ == 'taller')
+        root = self.window_editor_root()
+        frame.terminal.set_terminal(root, open_ == 'terminal')
+        frame.taller.terminal.set_terminal(root, open_ == 'taller')
+        shown = {'editor': frame.editor, 'taller': frame.taller.editor}
+        for key, editor in shown.items():
+            editor.nvim.set_terminal(root, open_ == key)
+        if open_ in shown:
+            self.git_watch.watch(root)
+            shown[open_].files.set_files(self.git_watch.read(), self.window_editor_open,
+                                         self.window_edited(root))
+            frame.taller.fit(self.app_win.get_height() - frame.chrome_h())
+
+    def window_edited(self, root):
+        """Los archivos que Claude cambió en los chats de ese proyecto, relativos a él, el último primero."""
+        chats = sorted((c for c in self.all_chats() if c.cwd == root), key=lambda c: c.touched, reverse=True)
+        return gitview.inside(root, [path for c in chats for path in c.edited]) if root else []
+
+    def window_editor_open(self, path):
+        """Un clic en la lista del Editor o del Taller: se elige el archivo y se le pide a nvim que lo abra."""
+        self.git_watch.choose(path)
+        root = self.git_watch.root
+
+        def go():
+            ok, why = terminal.open_in_nvim(root, path)
+            if not ok:
+                GLib.idle_add(self.on_message, {'event': 'alert', 'session_id': 'nvim', 'name': 'nvim',
+                                                'message': why or 'nvim no abrió el archivo', 'tone': '',
+                                                'ttl': 20}, None)
+        threading.Thread(target=go, daemon=True).start()
+
+    def editor_goal(self):
+        """El alto que pide el editor: lo que cabe en la pantalla, hasta EDITOR_H."""
+        room = self.screen_h - FIT_H - self.frame.chrome_h() - FIT_PAD if self.screen_h and self.frame else EDITOR_H
+        return max(MIN_H, min(EDITOR_H, room))
+
+    def window_editor_root(self):
+        """La carpeta que muestra el editor: la del chat que se tiene, o la del proyecto de tmux."""
+        if self.chat is not None and self.chat.cwd:
+            return self.chat.cwd
+        here = self.project_here()
+        return here.path if here is not None else ''
+
+    def window_pomodoro(self, order, *args):
+        """Un botón de la vista Pomodoro: se le pide a `coffe` y se vuelve a preguntar."""
+        def go():
+            ok, said = pomodoro.run(order, *args)
+            if not ok:
+                GLib.idle_add(self.on_message, {'event': 'alert', 'session_id': 'coffe', 'name': 'coffe',
+                                                'message': said or f'coffe {order} falló', 'tone': '', 'ttl': 20}, None)
+            self.pomo_watch.refresh()
+        threading.Thread(target=go, daemon=True).start()
+
+    def window_pomodoro_agent(self, task, repo):
+        """«Con agente»: arranca el pomodoro de la tarea y abre el chat en la carpeta
+        de su proyecto. Si `coffe` se niega (ya hay un pomodoro, descanso…), no se abre."""
+        def go():
+            ok, said = pomodoro.run('start', task)
+            if ok:
+                GLib.idle_add(self.pomodoro_chat, repo)
+            else:
+                GLib.idle_add(self.on_message, {'event': 'alert', 'session_id': 'coffe', 'name': 'coffe',
+                                                'message': said or 'coffe start falló', 'tone': '', 'ttl': 20}, None)
+            self.pomo_watch.refresh()
+        threading.Thread(target=go, daemon=True).start()
+
+    def pomodoro_chat(self, repo):
+        self.pomo_repo = repo
+        self.open_chat(typing=True, agent='', cwd=repo)
+        return GLib.SOURCE_REMOVE
+
+    def window_tmux(self):
+        """Las sesiones de tmux con el estado de los Claude de cada ventana."""
+        return self.tmux_sessions()
+
+    def tmux_sessions(self, fresh=False):
+        """Lo mismo, o None si tmux aún no contestó; `fresh` pregunta en el acto."""
+        found = tmuxsessions.snapshot() if fresh else self.tmux_watch.read()
+        if found is None:
+            return None
+        claude = [(s.pane, s.state, [a.role for a in s.agents.values()])
+                  for s in self.model.sessions.values() if s.pane]
+        return tmuxsessions.merge(found, claude)
+
+    def window_tmux_jump(self, session, window):
+        threading.Thread(target=tmuxsessions.jump, args=(session, window), daemon=True).start()
+        self.tmux_watch.refresh()
 
     def window_alert(self, sid, key):
         s = self.model.sessions.get(sid)
@@ -470,8 +610,63 @@ class WindowView:
         elif key == 'pinned':
             self.settings['pinned'] = not self.settings['pinned']
             settings.save(self.settings)
+        elif key == 'chat_tech':
+            self.settings['chat_tech'] = not self.settings['chat_tech']
+            settings.save(self.settings)
+            self.ensure_tick()
+            self.overlay.queue_draw()
+        elif key == 'tech_style':
+            self.set_techno(not self.settings['tech_style'])
+            self.settings['tech_style'] = fonts.techno
+            settings.save(self.settings)
+            windowframe.use_theme()          # el CSS recto se rehace
+            windowframe.load_fonts()
+            self.chat_theme()
+            self.ensure_tick()
+            self.overlay.queue_draw()
+        elif key == 'tired_eyes':
+            self.set_tired(not self.settings['tired_eyes'])
+            self.settings['tired_eyes'] = fonts.tired
+            settings.save(self.settings)
+            windowframe.use_theme()          # el vidrio cambia de opacidad
+            windowframe.load_fonts()
+            self.chat_theme()
+            self.ensure_tick()
+            self.overlay.queue_draw()
         else:
             self.toggle_source(key)
+
+    def window_tired_scale(self, pct):
+        """Cambia cuánto agranda la vista cansada (125, 150 o 200 %) y lo guarda."""
+        if fonts.use_scale(pct) == self.settings['tired_scale']:
+            return
+        self.settings['tired_scale'] = round(fonts.TIRED_SCALE * 100)
+        settings.save(self.settings)
+        windowframe.load_fonts()
+        self.chat_theme()
+        self.ensure_tick()
+        self.overlay.queue_draw()
+
+    def window_font(self, family):
+        """Cambia la letra de la app, en la isla y en la ventana, y la guarda."""
+        if fonts.valid(family) == fonts.current:
+            return
+        self.settings['font'] = fonts.use(family)
+        settings.save(self.settings)
+        windowframe.load_fonts()
+        self.ensure_tick()
+        self.overlay.queue_draw()
+
+    def pick_theme(self, name):
+        """Cambia el tema de la isla y de la ventana, y lo guarda."""
+        if themes.valid(name) == themes.current:
+            return
+        self.settings['theme'] = themes.use(name)
+        settings.save(self.settings)
+        self.load_theme()
+        windowframe.load_fonts()
+        self.ensure_tick()
+        self.overlay.queue_draw()
 
     def window_theme(self):
         self.load_theme()
@@ -507,6 +702,9 @@ class WindowView:
         self.sources_pick = key
 
     def window_chat_act(self, key):
+        if key == 'files':
+            self.window_view('editor')      # los archivos que tocó el agente, en el Editor
+            return
         self.on_chat_hit(key)
 
     def window_pick(self, sid):

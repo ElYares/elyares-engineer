@@ -17,11 +17,47 @@ except (ImportError, ValueError):
 
 
 @unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
+class Temporada(unittest.TestCase):
+    def tearDown(self):
+        from elyares import themes
+        themes.use(themes.DEFAULT)
+        windowframe.use_theme()
+
+    def test_la_guirnalda_es_solo_de_navidad(self):
+        from elyares import themes
+        themes.use('navidad')
+        windowframe.use_theme()
+        self.assertIn('repeating-linear-gradient', windowframe.CSS)
+        themes.use('omarchy')
+        windowframe.use_theme()
+        self.assertNotIn('repeating-linear-gradient', windowframe.CSS)
+
+    def test_las_luces_rodean_el_borde_y_los_clics_pasan(self):
+        luces = windowframe.Lights()
+        puntos = windowframe.Lights.points(300, 200)
+        self.assertGreater(len(puntos), 20)
+        self.assertTrue(all(0 <= x <= 300 and 0 <= y <= 200 for x, y in puntos))
+        self.assertFalse(luces.get_can_target())
+        self.assertFalse(luces.get_visible())
+
+
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
 class Marco(unittest.TestCase):
 
     def setUp(self):
         self.clicks = []
         self.frame = windowframe.Frame(self.clicks.append)
+
+    def test_al_volver_la_isla_se_esconde_todo_panel_de_la_ventana(self):
+        # Un panel que se quedara visible taparía la isla suelta (la capa) al cerrar la ventana.
+        extra = Gtk.Box()
+        self.frame.extra.append(extra)
+        panels = (self.frame.sources, self.frame.alerts, self.frame.settings, self.frame.tmux,
+                  self.frame.pomodoro, extra)
+        for panel in panels:
+            panel.set_visible(True)
+        self.frame.hide_panels()
+        self.assertEqual([p.get_visible() for p in panels], [False] * len(panels))
 
     def test_los_estilos_se_leen_sin_errores(self):
         errors = []
@@ -29,6 +65,31 @@ class Marco(unittest.TestCase):
         css.connect('parsing-error', lambda _p, _sec, err: errors.append(err.message))
         css.load_from_string(windowframe.CSS)
         self.assertEqual(errors, [])
+
+    def test_los_botones_miden_24_px_al_menos(self):
+        """WCAG 2.5.8: nada pulsable por debajo de 24x24."""
+        self.assertNotIn('min-height: 0', windowframe.CSS)
+        self.assertGreaterEqual(windowframe.CSS.count('min-height: 24px; min-width: 24px'), 3)
+
+    def test_el_foco_se_ve_en_todos_los_controles(self):
+        for selector in ('entry:focus-within', 'dropdown:focus-within', 'switch:focus-visible', '.elyares-pill:focus-visible'):
+            self.assertIn(selector, windowframe.CSS)
+
+    def test_ajustes_ofrece_los_tres_tamanos_de_la_vista_cansada(self):
+        picked = []
+        handlers = dict(toggle=lambda k: None, move=lambda v: None, theme=lambda: None, font=lambda f: None,
+                        pick_theme=lambda t: None, tired_scale=picked.append)
+        self.frame.settings.set_rows([], None, handlers, tired_scale=150)
+        drops = []
+        child = self.frame.settings.page.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.DropDown):
+                drops.append(child)
+            child = child.get_next_sibling()
+        sizes = drops[0]                      # el primero, antes del tema y de la letra
+        self.assertEqual(sizes.get_selected(), 1)
+        sizes.set_selected(2)
+        self.assertEqual(picked, [200])
 
     def test_el_texto_contrasta_4_5_con_cada_superficie(self):
         def lum(h):
@@ -215,7 +276,7 @@ class CabeceraDelChat(unittest.TestCase):
     @staticmethod
     def info(**kw):
         base = dict(role='architect', pet='idle', name='elyares-architect', color='#22c7dd',
-                    project='api', status='Listo', where='~/api', busy=False, can_split=True)
+                    project='api', status='Listo', where='~/api', busy=False, can_split=True, edited=0)
         return {**base, **kw}
 
     def labels(self):
@@ -228,6 +289,23 @@ class CabeceraDelChat(unittest.TestCase):
     def test_detener_solo_si_trabaja_y_otra_solo_si_cabe(self):
         self.head.set_info(self.info(busy=True, can_split=False), self.handlers)
         self.assertEqual(self.labels(), ['Nuevo', 'Detener', 'Cerrar'])
+
+    def test_con_archivos_tocados_sale_su_boton_con_la_cuenta(self):
+        self.head.set_info(self.info(edited=3), self.handlers)
+        self.assertEqual(self.labels(), ['Archivos · 3', 'Otra', 'Nuevo', 'Cerrar'])
+        _buttons(self.head)[0].emit('clicked')
+        self.assertEqual(self.log, ['files'])
+
+    def test_la_cuenta_de_archivos_se_retoca_sin_reconstruir(self):
+        self.head.set_info(self.info(edited=1), self.handlers)
+        first = _buttons(self.head)[0]
+        self.head.set_info(self.info(edited=2), self.handlers)
+        self.assertIs(_buttons(self.head)[0], first)
+        self.assertEqual(first.get_label(), 'Archivos · 2')
+
+    def test_sin_archivos_tocados_no_hay_boton(self):
+        self.head.set_info(self.info(edited=0), self.handlers)
+        self.assertNotIn('Archivos · 0', self.labels())
 
     def test_un_enlace_avisa_con_su_clave(self):
         self.head.set_info(self.info(), self.handlers)
@@ -385,6 +463,28 @@ class Bandeja(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
+class Sesiones(unittest.TestCase):
+
+    def test_un_boton_por_ventana_y_el_clic_salta(self):
+        log = []
+        panel = windowframe.TmuxPanel()
+        wins = [dict(index='1', name='edit', state='', path='/p'),
+                dict(index='2', name='claude', state='working', path='/p')]
+        panel.set_sessions([dict(name='api', state='working', claudes=1, windows=wins)],
+                           dict(jump=lambda s, w: log.append((s, w))))
+        self.assertEqual(len(_buttons(panel)), 2)
+        _buttons(panel)[1].emit('clicked')
+        self.assertEqual(log, [('api', '2')])
+
+    def test_sin_tmux_y_sin_respuesta_no_hay_botones(self):
+        panel = windowframe.TmuxPanel()
+        panel.set_sessions([], {})
+        self.assertEqual(_buttons(panel), [])
+        panel.set_sessions(None, {})
+        self.assertEqual(_buttons(panel), [])
+
+
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
 class Ayuda(unittest.TestCase):
 
     def setUp(self):
@@ -427,6 +527,22 @@ class Desglose(unittest.TestCase):
         buttons[2].emit('clicked')
         self.assertEqual(log, [('talk', 'elyares-auditor'), ('back', None), ('other', 'reviewer', False)])
         self.assertEqual(len(panel.faces), 1)       # solo el que trabaja se anima
+
+    def test_un_paso_se_abre_abajo_con_su_texto_entero(self):
+        panel = windowframe.FocusPanel()
+        picks = []
+        d = dict(role='auditor', name='auditor', color='#9a6bff', pet='working', busy=True,
+                 label='api · chat', summary='2 pasos', links=[], others=[], hidden=0, empty='',
+                 steps=[('✓', '#34d399', 'git status ' + 'x' * 300, '3 s'), ('›', '#f2f5ff', 'git add -A', 'ahora')])
+        panel.set_focus(d, dict(face=lambda *a: None, link=lambda *a: None, other=lambda *a: None,
+                                pick=lambda: picks.append(True)))
+        self.assertNotIn('detail', panel.refs)
+        panel._pick(0)
+        self.assertEqual(panel.refs['detail'][1].get_label(), d['steps'][0][2])
+        self.assertEqual(panel.refs['detail'][0].get_label(), 'Paso 1 · 3 s')
+        panel._pick(0)                              # el mismo clic lo cierra
+        self.assertNotIn('detail', panel.refs)
+        self.assertEqual(len(picks), 2)
 
 
 class CaraQuieta(unittest.TestCase):
