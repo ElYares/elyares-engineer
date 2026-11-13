@@ -17,7 +17,8 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import editorpanel, fonts, gitview, hypr, mascot, pomodoro, settings, themes, tmuxsessions, windowframe
+from . import (editorpanel, fonts, gitview, hypr, mascot, pomodoro, settings, terminalpanel, themes, tmuxsessions,
+               windowframe)
 from .state import MAIN_ROLE, elapsed
 
 APP_ID = 'dev.elyares.Engineer'
@@ -54,7 +55,7 @@ class WindowView:
     hypr_async = True               # las pruebas lo apagan: el pedido sale en el acto
     window_body = 0                 # alto extra que piden las tarjetas del tablero (lo usa body_h)
     sources_pick = 'claude'         # la fuente que muestra
-    panel_open = ''                 # 'alerts', 'settings', 'tmux', 'pomodoro' o 'editor' cuando una de esas vistas está a la vista
+    panel_open = ''                 # 'alerts', 'settings', 'tmux', 'pomodoro', 'editor' o 'terminal' cuando una de esas vistas está a la vista
     help_win = None
     frame = None                    # el marco de widgets (windowframe.Frame); None sin ventana real
 
@@ -148,6 +149,8 @@ class WindowView:
         self.overlay.add_overlay(self.frame.pomodoro)
         self.frame.editor = editorpanel.EditorPanel()      # en su archivo: importa de windowframe, no al revés
         self.overlay.add_overlay(self.frame.editor)
+        self.frame.terminal = terminalpanel.TerminalPanel()
+        self.overlay.add_overlay(self.frame.terminal)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
 
@@ -161,7 +164,7 @@ class WindowView:
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
         self.sources_open = key == 'sources'
-        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'editor') else ''
+        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'editor', 'terminal') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -455,6 +458,8 @@ class WindowView:
         frame.tmux.set_visible(self.panel_open == 'tmux')
         if self.panel_open == 'tmux':
             frame.tmux.set_sessions(self.window_tmux(), dict(jump=self.window_tmux_jump))
+        frame.terminal.set_visible(self.panel_open == 'terminal')
+        frame.terminal.set_terminal(self.window_editor_root(), self.panel_open == 'terminal')
         frame.editor.set_visible(self.panel_open == 'editor')
         if self.panel_open == 'editor':
             self.git_watch.watch(self.window_editor_root())

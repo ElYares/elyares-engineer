@@ -1260,7 +1260,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         filas y las fuentes."""
         if self.windowed and self.wf_open:
             return BOARD_W, self.workflows_goal()[1]    # el panel de flujos cubre la ventana, sea lo que sea lo de abajo
-        if self.windowed and self.panel_open == 'editor':
+        if self.windowed and self.panel_open in ('editor', 'terminal'):
             return BOARD_W, self.editor_goal()      # el editor cubre la ventana y pide alto de sobra, sea lo que sea lo de abajo
         mode = self.target()
         if mode == 'chat':
