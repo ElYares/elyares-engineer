@@ -13,6 +13,31 @@ from elyares import terminal
 HAVE_TMUX = shutil.which('tmux') is not None
 
 
+CONF_DE_YARED = '''set -g prefix C-a
+set -g status-right "#(tmux-claude bar)"
+set -g @plugin 'tmux-plugins/tpm'
+set -g @plugin 'tmux-plugins/tmux-continuum'
+set -g @continuum-restore 'on'
+set -g @resurrect-capture-pane-contents 'on'
+run-shell -b 'tmux-keys sync'
+run '~/.config/tmux/plugins/tpm/tpm'
+bind r source-file ~/.tmux.conf
+'''
+
+
+class ConfiguracionDelServidor(unittest.TestCase):
+    def test_se_van_los_plugins_y_la_restauracion_automatica_y_se_queda_lo_demas(self):
+        got = terminal.without_plugins(CONF_DE_YARED)
+        for gone in ('@plugin', '@continuum', '@resurrect', 'tpm/tpm', 'tmux-keys sync'):
+            self.assertNotIn(gone, got)
+        self.assertIn('set -g prefix C-a', got)
+        self.assertIn('tmux-claude bar', got)
+        self.assertIn('bind r source-file', got)
+
+    def test_sin_nada_que_quitar_queda_igual(self):
+        self.assertEqual(terminal.without_plugins('set -g mouse on\n'), 'set -g mouse on\n')
+
+
 class Entorno(unittest.TestCase):
     def test_la_terminal_no_hereda_lo_del_servicio(self):
         base = {'PATH': '/usr/bin', 'HOME': '/h', 'PYTHONPATH': '/repo', 'LD_PRELOAD': '/lib/x.so',
@@ -30,8 +55,11 @@ class NadieEscribeEnLaTerminal(unittest.TestCase):
                 continue
             with open(os.path.join(root, name), encoding='utf-8') as fh:
                 text = fh.read()
-            for banned in ('feed_child', 'send-keys', 'paste-buffer', 'run-shell', '--remote-send', '--remote-expr'):
-                self.assertNotIn(banned, text, f'{name} usa {banned}')
+            banned = ['feed_child', 'send-keys', 'paste-buffer', '--remote-send', '--remote-expr']
+            if name != 'terminal.py':       # ahí `run-shell` solo corre los scripts de resurrect (`_script`, rutas fijas)
+                banned.append('run-shell')
+            for word in banned:
+                self.assertNotIn(word, text, f'{name} usa {word}')
 
 
 class Nombres(unittest.TestCase):
@@ -61,9 +89,16 @@ class Nombres(unittest.TestCase):
 @unittest.skipUnless(HAVE_TMUX, 'sin tmux')
 class Sesion(unittest.TestCase):
     def setUp(self):
-        self.sock = mock.patch.object(terminal, 'SOCKET', f'elyares-test-{os.getpid()}')
-        self.sock.start()
         self.tmp = tempfile.TemporaryDirectory()
+        self.data = os.path.join(self.tmp.name, 'data')
+        self.user_conf = os.path.join(self.tmp.name, 'user-tmux.conf')
+        with open(self.user_conf, 'w') as fh:
+            fh.write('set -g status off\n')
+        # Nada de esto toca lo real: ni la carpeta de la app, ni la configuración de Yared.
+        self.sock = mock.patch.multiple(terminal, SOCKET=f'elyares-test-{os.getpid()}', DATA_DIR=self.data,
+                                        RESURRECT_DIR=os.path.join(self.data, 'resurrect'),
+                                        CONF=os.path.join(self.data, 'tmux.conf'), USER_CONFS=(self.user_conf,))
+        self.sock.start()
 
     def tearDown(self):
         subprocess.run(['tmux', '-L', terminal.SOCKET, 'kill-server'], capture_output=True)
@@ -109,6 +144,61 @@ class Sesion(unittest.TestCase):
         got = subprocess.run(['nvim', '--server', sock, '--remote-expr', 'expand("%:p")'],
                              capture_output=True, text=True).stdout.strip()
         self.assertEqual(os.path.realpath(got), os.path.realpath(target))
+
+    def test_el_servidor_de_la_app_arranca_sin_continuum_y_con_su_carpeta_de_guardado(self):
+        with open(self.user_conf, 'w') as fh:
+            fh.write(CONF_DE_YARED.replace('bind r source-file ~/.tmux.conf', 'set -g mouse on'))
+        name, why = terminal.ensure(self.tmp.name)
+        self.assertEqual(why, '')
+        opts = subprocess.run(['tmux', '-L', terminal.SOCKET, 'show-options', '-g'], capture_output=True,
+                              text=True).stdout
+        self.assertIn('mouse on', opts)                          # lo de Yared sí entra
+        self.assertNotIn('@continuum-restore on', opts)          # su restauración automática no
+        self.assertNotIn('@continuum-save-interval', opts)
+        if terminal._plugin():
+            self.assertIn(os.path.join(self.data, 'resurrect'), opts)   # y guarda aparte de lo de Yared
+        with open(terminal.CONF) as fh:
+            self.assertNotIn('@continuum', fh.read())
+
+    @unittest.skipUnless(terminal._plugin(), 'sin tmux-resurrect')
+    def test_guarda_y_restaura_las_sesiones_tras_matar_el_servidor(self):
+        a, b = os.path.join(self.tmp.name, 'a'), os.path.join(self.tmp.name, 'b')
+        os.mkdir(a)
+        os.mkdir(b)
+        name_a, _ = terminal.ensure(a)
+        name_b, _ = terminal.ensure(b)
+        self.assertTrue(terminal.save())
+        self.assertTrue(os.path.exists(os.path.join(self.data, 'resurrect', 'last')))
+        subprocess.run(['tmux', '-L', terminal.SOCKET, 'kill-server'], capture_output=True)
+        time.sleep(0.5)
+        self.assertFalse(terminal.server_running())
+        terminal.ensure(a)              # un servidor nuevo: sale con lo guardado
+        for _ in range(60):
+            if terminal.has(name_b):
+                break
+            time.sleep(0.1)
+        self.assertTrue(terminal.has(name_a))
+        self.assertTrue(terminal.has(name_b))
+
+    def test_sin_servidor_no_hay_nada_que_guardar(self):
+        self.assertFalse(terminal.save())
+
+    @unittest.skipUnless(shutil.which('nvim'), 'sin nvim')
+    def test_una_sesion_de_nvim_que_no_escucha_se_rehace(self):
+        name, _ = terminal.ensure(self.tmp.name, terminal.NVIM)
+        sock = terminal.nvim_socket(name)
+        self.addCleanup(lambda: os.path.exists(sock) and os.remove(sock))
+        for _ in range(60):
+            if os.path.exists(sock):
+                break
+            time.sleep(0.1)
+        os.remove(sock)                 # como una sesión restaurada: existe, pero sin socket
+        terminal.ensure(self.tmp.name, terminal.NVIM)
+        for _ in range(60):
+            if os.path.exists(sock):
+                break
+            time.sleep(0.1)
+        self.assertTrue(os.path.exists(sock))
 
     def test_un_comando_en_el_nombre_de_la_carpeta_no_se_ejecuta(self):
         # tmux pasa lo de `-c` por sus formatos: `#(comando)` en la ruta se ejecutaba (tmux 3.8).
