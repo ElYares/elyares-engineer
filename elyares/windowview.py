@@ -506,12 +506,19 @@ class WindowView:
         frame.taller.terminal.set_terminal(root, open_ == 'taller')
         shown = {'editor': frame.editor, 'taller': frame.taller.editor}
         for key, editor in shown.items():
+            editor.on_fold = self.window_fold_files
+            editor.set_folded(bool(self.settings['files_collapsed']))     # el Editor y el Taller comparten la preferencia
             editor.nvim.set_terminal(root, open_ == key)
         if open_ in shown:
             self.git_watch.watch(root)
             shown[open_].files.set_files(self.git_watch.read(), self.window_editor_open,
                                          self.window_edited(root))
             frame.taller.fit(self.app_win.get_height() - frame.chrome_h())
+
+    def window_fold_files(self, folded):
+        """«Ocultar» o «Mostrar» la lista de archivos: se guarda y vale para el Editor y el Taller."""
+        self.settings['files_collapsed'] = bool(folded)
+        settings.save(self.settings)
 
     def window_edited(self, root):
         """Los archivos que Claude cambió en los chats de ese proyecto, relativos a él, el último primero."""

@@ -152,9 +152,35 @@ class Editor(Ayudas, unittest.TestCase):
         self.panel = editorpanel.EditorPanel()
 
     def test_la_lista_a_la_izquierda_y_nvim_a_la_derecha(self):
-        self.assertIs(self.panel.get_start_child(), self.panel.files)
-        self.assertIs(self.panel.get_end_child(), self.panel.nvim)
+        self.assertIs(self.panel.get_start_child(), self.panel.side)
+        self.assertIs(self.panel.files.get_parent(), self.panel.side)
+        self.assertIs(self.panel.nvim.get_parent().get_parent(), self.panel)
         self.assertEqual(self.panel.nvim.kind, terminal.NVIM)
+
+    def test_la_lista_se_pliega_y_vuelve_y_lo_avisa_solo_un_clic(self):
+        log = []
+        self.panel.on_fold = log.append
+        self.assertTrue(self.panel.side.get_visible())
+        self.panel.fold_btn.emit('clicked')
+        self.assertFalse(self.panel.side.get_visible())
+        self.assertTrue(self.panel.unfold_btn.get_visible())
+        self.panel.unfold_btn.emit('clicked')
+        self.assertTrue(self.panel.side.get_visible())
+        self.assertFalse(self.panel.unfold_btn.get_visible())
+        self.assertEqual(log, [True, False])
+
+    def test_sincronizar_la_preferencia_no_la_vuelve_a_guardar(self):
+        log = []
+        self.panel.on_fold = log.append
+        self.panel.set_folded(True)
+        self.panel.set_folded(True)
+        self.assertFalse(self.panel.side.get_visible())
+        self.assertEqual(log, [])
+
+    def test_la_lista_sigue_siendo_la_misma_al_plegar(self):
+        self.panel.set_folded(True)
+        self.panel.set_folded(False)
+        self.assertIs(self.panel.files.get_parent(), self.panel.side)
 
     def test_empieza_escondido_pero_nvim_se_ve_con_el_panel(self):
         self.assertFalse(self.panel.get_visible())
