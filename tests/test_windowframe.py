@@ -48,6 +48,17 @@ class Marco(unittest.TestCase):
         self.clicks = []
         self.frame = windowframe.Frame(self.clicks.append)
 
+    def test_al_volver_la_isla_se_esconde_todo_panel_de_la_ventana(self):
+        # Un panel que se quedara visible taparía la isla suelta (la capa) al cerrar la ventana.
+        extra = Gtk.Box()
+        self.frame.extra.append(extra)
+        panels = (self.frame.sources, self.frame.alerts, self.frame.settings, self.frame.tmux,
+                  self.frame.pomodoro, extra)
+        for panel in panels:
+            panel.set_visible(True)
+        self.frame.hide_panels()
+        self.assertEqual([p.get_visible() for p in panels], [False] * len(panels))
+
     def test_los_estilos_se_leen_sin_errores(self):
         errors = []
         css = Gtk.CssProvider()
