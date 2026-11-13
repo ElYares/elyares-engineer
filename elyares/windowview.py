@@ -17,7 +17,7 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import fonts, hypr, mascot, settings, themes, tmuxsessions, windowframe
+from . import fonts, hypr, mascot, pomodoro, settings, themes, tmuxsessions, windowframe
 from .state import MAIN_ROLE, elapsed
 
 APP_ID = 'dev.elyares.Engineer'
@@ -53,12 +53,14 @@ class WindowView:
     hypr_async = True               # las pruebas lo apagan: el pedido sale en el acto
     window_body = 0                 # alto extra que piden las tarjetas del tablero (lo usa body_h)
     sources_pick = 'claude'         # la fuente que muestra
-    panel_open = ''                 # 'alerts', 'settings' o 'tmux' cuando una de esas vistas está a la vista
+    panel_open = ''                 # 'alerts', 'settings', 'tmux' o 'pomodoro' cuando una de esas vistas está a la vista
     help_win = None
     frame = None                    # el marco de widgets (windowframe.Frame); None sin ventana real
 
     def window_init(self):
         self.tmux_watch = tmuxsessions.Watcher()
+        self.pomo_watch = pomodoro.Watcher()
+        self.pomo_repo = ''             # la carpeta del chat que se abrió con «Con agente»
         self.windowed = False
         self.app_win = None
         self.frame = None
@@ -141,6 +143,7 @@ class WindowView:
         self.overlay.add_overlay(self.frame.alerts)        # y la bandeja y los ajustes, igual
         self.overlay.add_overlay(self.frame.settings)
         self.overlay.add_overlay(self.frame.tmux)
+        self.overlay.add_overlay(self.frame.pomodoro)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
 
@@ -154,7 +157,7 @@ class WindowView:
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
         self.sources_open = key == 'sources'
-        self.panel_open = key if key in ('alerts', 'settings', 'tmux') else ''
+        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -448,6 +451,11 @@ class WindowView:
         frame.tmux.set_visible(self.panel_open == 'tmux')
         if self.panel_open == 'tmux':
             frame.tmux.set_sessions(self.window_tmux(), dict(jump=self.window_tmux_jump))
+        frame.pomodoro.set_visible(self.panel_open == 'pomodoro')
+        if self.panel_open == 'pomodoro':
+            status, tasks = self.pomo_watch.read()
+            frame.pomodoro.set_pomodoro(status, tasks, dict(act=self.window_pomodoro,
+                                                            agent=self.window_pomodoro_agent))
         if self.panel_open == 'alerts':
             tones = {'': 'red', 'ok': 'green', 'info': 'yellow', 'run': 'metal'}
             cards = []
@@ -474,6 +482,34 @@ class WindowView:
                                                                tired_scale=self.window_tired_scale,
                                                                pick_theme=self.pick_theme),
                                     fonts.current, themes.current, round(fonts.TIRED_SCALE * 100))
+
+    def window_pomodoro(self, order, *args):
+        """Un botón de la vista Pomodoro: se le pide a `coffe` y se vuelve a preguntar."""
+        def go():
+            ok, said = pomodoro.run(order, *args)
+            if not ok:
+                GLib.idle_add(self.on_message, {'event': 'alert', 'session_id': 'coffe', 'name': 'coffe',
+                                                'message': said or f'coffe {order} falló', 'tone': '', 'ttl': 20}, None)
+            self.pomo_watch.refresh()
+        threading.Thread(target=go, daemon=True).start()
+
+    def window_pomodoro_agent(self, task, repo):
+        """«Con agente»: arranca el pomodoro de la tarea y abre el chat en la carpeta
+        de su proyecto. Si `coffe` se niega (ya hay un pomodoro, descanso…), no se abre."""
+        def go():
+            ok, said = pomodoro.run('start', task)
+            if ok:
+                GLib.idle_add(self.pomodoro_chat, repo)
+            else:
+                GLib.idle_add(self.on_message, {'event': 'alert', 'session_id': 'coffe', 'name': 'coffe',
+                                                'message': said or 'coffe start falló', 'tone': '', 'ttl': 20}, None)
+            self.pomo_watch.refresh()
+        threading.Thread(target=go, daemon=True).start()
+
+    def pomodoro_chat(self, repo):
+        self.pomo_repo = repo
+        self.open_chat(typing=True, agent='', cwd=repo)
+        return GLib.SOURCE_REMOVE
 
     def window_tmux(self):
         """Las sesiones de tmux con el estado de los Claude de cada ventana."""

@@ -12,8 +12,8 @@ from . import fonts, mascot, themes
 
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
-         ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('sources', 'Fuentes'),
-         ('settings', 'Ajustes'))
+         ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'),
+         ('sources', 'Fuentes'), ('settings', 'Ajustes'))
 SIDEBAR_W = 180
 FOLD_W = 640                    # más angosta que esto, la barra lateral se pliega y el texto conserva su tamaño
 
@@ -265,6 +265,7 @@ class Frame:
         self.sources = SourcesPanel()
         self.alerts = AlertsPanel()
         self.tmux = TmuxPanel()
+        self.pomodoro = PomodoroPanel()
         self.settings = SettingsPanel()
         self.sidebar = Gtk.ListBox()
         self.sidebar.set_size_request(SIDEBAR_W, -1)
@@ -881,6 +882,115 @@ class TmuxPanel(Gtk.ScrolledWindow):
                             [f'Ir a la ventana {win["name"]} de {session}' + (f', {said}' if said else '')
                              + (f', con {len(win["agents"])} subagentes' if win.get('agents') else '')])
         btn.connect('clicked', lambda _b: handlers['jump'](session, win['index']))
+        return btn
+
+
+class PomodoroPanel(Gtk.ScrolledWindow):
+    """El pomodoro de `coffe`: el reloj, la tarea en curso con sus botones y
+    las tareas pendientes para empezar una. Sin estado propio: la llena la isla."""
+
+    TONES = {'focus': 'green', 'overlearning': 'green', 'break': 'yellow', 'break-long': 'yellow'}
+
+    def __init__(self):
+        super().__init__()
+        self.add_css_class('elyares-sources')
+        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(self.page, f'set_margin_{side}')(SPACE[2])
+        self.set_child(self.page)
+        self.signature = None
+        self.clock = None               # el reloj se retoca en el sitio: reconstruir pierde foco y hover
+        self.set_visible(False)
+
+    def set_pomodoro(self, status, tasks, handlers):
+        """`status`: lo que da `pomodoro.describe` (None si el reloj no responde);
+        `tasks`: [dict(id, title, project)]. `handlers`: act(orden, *args)."""
+        if status is None:
+            sig = ('off',)
+        else:
+            sig = (status['phase'], status['task'], status['parked'], status['today'], status['cycle'],
+                   repr(tasks))
+        if sig != self.signature:
+            self.signature = sig
+            self._build(status, tasks, handlers)
+        if status is not None and self.clock is not None:
+            self.clock.set_markup(self._clock_markup(status))
+
+    @staticmethod
+    def _clock_markup(status):
+        color = mascot.COLORS.get(PomodoroPanel.TONES.get(status['phase'], 'metal'), '#8f9ab8')
+        return (f'<span size="xx-large" weight="bold" foreground="{color}">{status["clock"]}</span>  '
+                f'<span alpha="70%">{status["text"]}</span>')
+
+    def _build(self, status, tasks, handlers):
+        while (child := self.page.get_first_child()) is not None:
+            self.page.remove(child)
+        self.clock = None
+        if status is None:
+            note = Gtk.Label(label='El reloj de coffe no responde. Arráncalo con: systemctl --user start coffe',
+                             xalign=0, wrap=True)
+            note.add_css_class('dim-label')
+            self.page.append(note)
+            return
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
+        card.add_css_class('elyares-card')
+        self.clock = Gtk.Label(xalign=0)
+        card.append(self.clock)
+        task = Gtk.Label(xalign=0, wrap=True)
+        task.set_text(status['task'] or ('Tarea en el refri' if status['parked'] else 'Sin tarea en curso'))
+        card.append(task)
+        done = ' '.join('●' if i < status['cycle'] else '○' for i in range(status['cycle_of']))
+        count = Gtk.Label(xalign=0)
+        count.set_markup(f'<span alpha="60%">Hoy {status["today"]} · ciclo {done}</span>')
+        card.append(count)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
+        if status['parked']:
+            row.append(self._button('Sacar del refri', lambda: handlers['act']('resume')))
+        if status['running']:
+            row.append(self._button('Al refri', lambda: handlers['act']('pause')))
+            row.append(self._button('Tirar pomodoro', lambda: handlers['act']('void')))
+            if status['task']:
+                row.append(self._button('Tarea hecha', lambda: handlers['act']('done')))
+        card.append(row)
+        self.page.append(card)
+        head = Gtk.Label(label='EMPEZAR UNA TAREA', xalign=0)
+        head.add_css_class('elyares-section')
+        self.page.append(head)
+        if not tasks:
+            self._note('Sin tareas pendientes.')
+        for t in tasks:
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[0])
+            btn = Gtk.Button()
+            btn.add_css_class('elyares-btn')
+            btn.set_hexpand(True)
+            label = Gtk.Label(xalign=0)
+            label.set_markup(f'{GLib.markup_escape_text(t["title"])}  '
+                             f'<span alpha="60%">{GLib.markup_escape_text(t["project"])}</span>')
+            btn.set_child(label)
+            btn.update_property([Gtk.AccessibleProperty.LABEL],
+                                [f'Empezar un pomodoro en {t["title"]}, de {t["project"]}'])
+            btn.connect('clicked', lambda _b, tid=t['id']: handlers['act']('start', tid))
+            line.append(btn)
+            if t.get('repo') and 'agent' in handlers:
+                with_agent = Gtk.Button(label='Con agente')
+                with_agent.add_css_class('elyares-btn')
+                with_agent.update_property([Gtk.AccessibleProperty.LABEL],
+                                           [f'Empezar un pomodoro en {t["title"]} y abrir el chat en su proyecto'])
+                with_agent.connect('clicked', lambda _b, t=t: handlers['agent'](t['id'], t['repo']))
+                line.append(with_agent)
+            self.page.append(line)
+
+    def _note(self, text):
+        label = Gtk.Label(label=text, xalign=0, wrap=True)
+        label.add_css_class('dim-label')
+        self.page.append(label)
+
+    @staticmethod
+    def _button(text, call):
+        btn = Gtk.Button(label=text)
+        btn.add_css_class('elyares-btn')
+        btn.connect('clicked', lambda _b: call())
         return btn
 
 
