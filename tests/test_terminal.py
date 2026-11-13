@@ -232,6 +232,181 @@ class Sesion(unittest.TestCase):
         self.assertIn('ya no existe', why)
 
 
+TEMA_A = '''background = "#112233"
+foreground = "#ddeeff"
+cursor = "#ff8800"
+selection_background = "#334455"
+selection_foreground = "#ffffff"
+''' + ''.join(f'color{i} = "#{i:02x}{i:02x}{i:02x}"\n' for i in range(16))
+
+
+class TemaDeLaTerminal(unittest.TestCase):
+    """La terminal sigue la misma regla que la barra de tmux de Yared: su tema de terminal, y si no, el de omarchy."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patch = mock.patch.dict(os.environ, {'XDG_CONFIG_HOME': self.tmp.name})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def put(self, *parts, text=TEMA_A):
+        path = os.path.join(self.tmp.name, *parts)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as fh:
+            fh.write(text)
+        return path
+
+    def test_gana_el_tema_de_terminal_si_existe(self):
+        from elyares import theme
+        omarchy = self.put('omarchy', 'current', 'theme', 'colors.toml', text='background = "#000000"\n')
+        self.assertEqual(theme.terminal_path(), omarchy)
+        own = self.put('terminal-theme', 'colors.toml')
+        self.assertEqual(theme.terminal_path(), own)
+        self.assertEqual(theme.terminal_palette()['background'], '#112233')
+
+    def test_sin_tema_de_terminal_sigue_a_omarchy(self):
+        from elyares import theme
+        self.put('omarchy', 'current', 'theme', 'colors.toml')
+        self.assertEqual(theme.terminal_palette()['color15'], '#0f0f0f')
+
+    def test_cambiar_de_tema_cambia_la_marca(self):
+        from elyares import theme
+        path = self.put('terminal-theme', 'colors.toml')
+        before = theme.terminal_stamp()
+        os.utime(path, ns=(1, 1))
+        self.assertNotEqual(theme.terminal_stamp(), before)
+
+    def test_sin_ningun_tema_la_paleta_queda_vacia_y_la_marca_no_falla(self):
+        from elyares import theme
+        self.assertEqual(theme.terminal_palette(), {})
+        self.assertEqual(theme.terminal_stamp()[1], 0)
+
+
+@unittest.skipUnless(shutil.which('tmux'), 'sin tmux')
+class RecargaDeLaBarra(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.val = os.path.join(self.tmp.name, 'val')
+        script = os.path.join(self.tmp.name, 'omarchy-theme.sh')
+        with open(script, 'w') as fh:
+            fh.write(f'tmux set -g @thm_probe "$(cat {self.val})"\n')
+        self.user_conf = os.path.join(self.tmp.name, 'user.conf')
+        with open(self.user_conf, 'w') as fh:
+            fh.write(f'run-shell "bash {script}"\n')
+        self.write('a')
+        data = os.path.join(self.tmp.name, 'data')
+        patch = mock.patch.multiple(terminal, SOCKET=f'elyares-theme-{os.getpid()}', DATA_DIR=data,
+                                    RESURRECT_DIR=os.path.join(data, 'r'), CONF=os.path.join(data, 'tmux.conf'),
+                                    USER_CONFS=(self.user_conf,))
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.addCleanup(self.cleanup)
+        terminal._themed[0] = None
+
+    def cleanup(self):
+        subprocess.run(['tmux', '-L', terminal.SOCKET, 'kill-server'], capture_output=True)
+        try:
+            os.remove(f'/tmp/tmux-{os.getuid()}/{terminal.SOCKET}')
+        except OSError:
+            pass
+        terminal._themed[0] = None
+
+    def write(self, text):
+        with open(self.val, 'w') as fh:
+            fh.write(text)
+
+    def probe(self):
+        return subprocess.run(['tmux', '-L', terminal.SOCKET, 'show-options', '-gv', '@thm_probe'],
+                              capture_output=True, text=True).stdout.strip()
+
+    def test_al_cambiar_el_tema_la_barra_carga_la_paleta_nueva(self):
+        terminal.ensure(self.tmp.name)
+        time.sleep(0.5)
+        self.assertEqual(self.probe(), 'a')                 # al arrancar el servidor, con el tema de entonces
+        self.assertFalse(terminal.reload_theme('v1'))       # la primera marca solo se anota
+        self.write('b')
+        self.assertTrue(terminal.reload_theme('v2'))
+        self.assertEqual(self.probe(), 'b')
+
+    def test_la_misma_marca_no_recarga_dos_veces(self):
+        terminal.ensure(self.tmp.name)
+        terminal.reload_theme('v1')
+        self.write('b')
+        self.assertTrue(terminal.reload_theme('v2'))
+        self.write('c')
+        self.assertFalse(terminal.reload_theme('v2'))
+        self.assertEqual(self.probe(), 'b')
+
+    def test_sin_servidor_no_hace_nada(self):
+        terminal.reload_theme('v1')
+        self.assertFalse(terminal.reload_theme('v2'))
+
+
+try:
+    import gi as _gi
+    _gi.require_version('Gtk', '4.0')
+    _gi.require_version('Vte', '3.91')
+    from gi.repository import Gtk as _Gtk
+    from elyares import terminalpanel as _terminalpanel
+    _DISPLAY = _Gtk.init_check()
+except (ImportError, ValueError):
+    _DISPLAY = False
+
+
+@unittest.skipUnless(_DISPLAY, 'sin gi, Vte o pantalla')
+class ColoresDelPanel(unittest.TestCase):
+    def setUp(self):
+        self.panel = _terminalpanel.TerminalPanel()
+        for target in ('ensure', 'reload_theme'):
+            patch = mock.patch.object(terminal, target, return_value=('x', ''))
+            patch.start()
+            self.addCleanup(patch.stop)
+        patch = mock.patch.object(_terminalpanel.TerminalPanel, 'spawn', lambda *a: None)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def colors(self, pal):
+        with mock.patch.object(_terminalpanel.theme, 'terminal_palette', return_value=pal), \
+                mock.patch.object(self.panel.term, 'set_colors') as set_colors:
+            self.panel._colors()
+        return set_colors.call_args[0]
+
+    @staticmethod
+    def hexed(rgba):
+        return '#%02x%02x%02x' % tuple(round(c * 255) for c in (rgba.red, rgba.green, rgba.blue))
+
+    def test_texto_fondo_y_los_16_ansi_salen_del_tema_de_la_terminal(self):
+        from elyares import theme
+        pal = {'foreground': '#ddeeff', 'background': '#112233', **{f'color{i}': f'#{i:02x}{i:02x}{i:02x}' for i in range(16)}}
+        fg, bg, ansi = self.colors(pal)
+        self.assertEqual((self.hexed(fg), self.hexed(bg)), ('#ddeeff', '#112233'))
+        self.assertEqual([self.hexed(c) for c in ansi], [pal[f'color{i}'] for i in range(16)])
+
+    def test_con_una_paleta_incompleta_los_ansi_quedan_por_defecto(self):
+        _fg, _bg, ansi = self.colors({'foreground': '#ddeeff', 'background': '#112233', 'color1': '#aa0000'})
+        self.assertIsNone(ansi)
+
+    def test_sin_tema_de_terminal_se_usan_los_de_la_app(self):
+        from elyares import themes
+        fg, bg, _ansi = self.colors({})
+        self.assertEqual((self.hexed(fg), self.hexed(bg)), (themes.get()['ink'].lower(), themes.get()['surface'][0].lower()))
+
+    def test_cambiar_de_tema_repinta_y_pide_recargar_la_barra(self):
+        with mock.patch.object(_terminalpanel.theme, 'terminal_stamp', side_effect=[('t', 1), ('t', 1), ('t', 2)]), \
+                mock.patch.object(self.panel, '_colors') as colors:
+            self.panel.set_terminal('', True)
+            self.panel.set_terminal('', True)       # misma marca: nada
+            self.panel.set_terminal('', True)       # marca nueva: repinta
+            for _ in range(50):                      # la recarga corre en un hilo
+                if terminal.reload_theme.call_count >= 2:
+                    break
+                time.sleep(0.02)
+        self.assertEqual(colors.call_count, 2)
+        self.assertEqual([c[0][0] for c in terminal.reload_theme.call_args_list], [('t', 1), ('t', 2)])
+
+
 if __name__ == '__main__':
     unittest.main()
 

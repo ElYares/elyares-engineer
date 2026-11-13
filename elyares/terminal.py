@@ -33,6 +33,8 @@ PLUGIN_DIRS = (os.path.expanduser('~/.config/tmux/plugins/tmux-resurrect'),
 SAVE_EVERY = 300                      # cada cuánto la app guarda sus sesiones, en segundos
 # Lo que de la configuración de Yared no entra al servidor de la app: los plugins y su restauración
 # automática (ver arriba) y la tabla de atajos que regenera su cheatsheet.
+# Las líneas de su configuración que cargan la paleta del tema en tmux: se repiten al cambiar de tema.
+THEME_LINES = re.compile(r'omarchy-theme\.sh|tmux-fz style')
 PERSISTENCE = re.compile(r'@plugin|@continuum|@resurrect|plugins/tpm/tpm|tmux-keys sync')
 # Lo del servicio que no debe llegar a la terminal ni a nvim: `PYTHONPATH` haría que todo `python` que
 # se corra ahí importe primero del repo de la isla, y `LD_PRELOAD` carga la librería de la capa.
@@ -106,6 +108,35 @@ def server_conf():
     except OSError:
         return ''
     return CONF
+
+
+_themed = [None]        # con qué versión del tema se cargó por última vez la paleta de tmux
+
+
+def reload_theme(stamp):
+    """Vuelve a cargar en el servidor de la app la paleta del tema (las líneas `THEME_LINES` de la
+    configuración de Yared) cuando `stamp` cambió: la barra de tmux solo la lee al arrancar."""
+    if stamp == _themed[0]:
+        return False
+    first = _themed[0] is None
+    _themed[0] = stamp
+    if first or not server_running():
+        return False                # la primera vez el servidor acaba de arrancar con el tema de ahora
+    for path in USER_CONFS:
+        try:
+            with open(path, encoding='utf-8') as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            m = THEME_LINES.search(line) and re.match(r'\s*run-shell(?:\s+-b)?\s+["\'](.+)["\']\s*$', line)
+            if m:
+                try:
+                    _tmux('run-shell', m.group(1))
+                except (OSError, subprocess.SubprocessError):
+                    pass
+        break
+    return True
 
 
 def server_running():

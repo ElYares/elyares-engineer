@@ -18,7 +18,7 @@ gi.require_version('Vte', '3.91')
 
 from gi.repository import Gdk, GLib, Gtk, Pango, Vte
 
-from . import fonts, terminal, themes
+from . import fonts, terminal, theme, themes
 from .windowframe import SPACE
 
 QUICK_EXIT = 2.0          # un cliente que se va antes de esto no se relanza solo: algo falla
@@ -74,13 +74,30 @@ class TerminalPanel(Gtk.Box):
         self.shown = visible
         if not visible:
             return
-        sig = (themes.current, themes.is_light())
+        sig = (themes.current, themes.is_light(), theme.terminal_stamp())
         if sig != self.theme_sig:
             self.theme_sig = sig
-            surface = themes.get()
-            self.term.set_colors(_rgba(surface['ink']), _rgba(surface['surface'][0]), None)
+            self._colors()
+            threading.Thread(target=terminal.reload_theme, args=(sig[2],), daemon=True).start()
         if root != self.root:
             self.open(root)
+
+    def _colors(self):
+        """Los colores de la terminal: los del tema que sigue la barra de tmux de Yared (el de la terminal o el
+        de omarchy): texto, fondo, cursor, selección y los 16 ANSI. Sin ese tema, los de la app."""
+        pal = theme.terminal_palette()
+        fg, bg = pal.get('foreground'), pal.get('background')
+        if not (fg and bg):
+            surface = themes.get()
+            fg, bg = surface['ink'], surface['surface'][0]
+        ansi = [_rgba(pal[f'color{i}']) for i in range(16) if f'color{i}' in pal]
+        self.term.set_colors(_rgba(fg), _rgba(bg), ansi if len(ansi) == 16 else None)
+        if pal.get('cursor'):
+            self.term.set_color_cursor(_rgba(pal['cursor']))
+        if pal.get('selection_background'):
+            self.term.set_color_highlight(_rgba(pal['selection_background']))
+        if pal.get('selection_foreground'):
+            self.term.set_color_highlight_foreground(_rgba(pal['selection_foreground']))
 
     def open(self, root):
         """Engancha la terminal a la sesión de esa carpeta (la crea si no existe)."""
