@@ -376,7 +376,8 @@ class WindowView:
         info = dict(role=role, pet=self.chat_pet(), name=c.name if c is not None else state.MAIN_AGENT,
                     color=mascot.accent(role), project=c.project if c is not None else '',
                     status=status, where=state.tilde(c.cwd) if c is not None else '',
-                    busy=bool(c is not None and c.busy), can_split=self.chat_can_split())
+                    busy=bool(c is not None and c.busy), can_split=self.chat_can_split(),
+                    edited=len(gitview.inside(c.cwd, c.edited)) if c is not None else 0)
         head.set_info(info, dict(face=self.window_face, act=self.window_chat_act))
         head.place(chatview.CHAT_HEAD + 2)
 
@@ -508,8 +509,14 @@ class WindowView:
             editor.nvim.set_terminal(root, open_ == key)
         if open_ in shown:
             self.git_watch.watch(root)
-            shown[open_].files.set_files(self.git_watch.read(), self.window_editor_open)
+            shown[open_].files.set_files(self.git_watch.read(), self.window_editor_open,
+                                         self.window_edited(root))
             frame.taller.fit(self.app_win.get_height() - frame.chrome_h())
+
+    def window_edited(self, root):
+        """Los archivos que Claude cambió en los chats de ese proyecto, relativos a él, el último primero."""
+        chats = sorted((c for c in self.all_chats() if c.cwd == root), key=lambda c: c.touched, reverse=True)
+        return gitview.inside(root, [path for c in chats for path in c.edited]) if root else []
 
     def window_editor_open(self, path):
         """Un clic en la lista del Editor o del Taller: se elige el archivo y se le pide a nvim que lo abra."""
@@ -695,6 +702,9 @@ class WindowView:
         self.sources_pick = key
 
     def window_chat_act(self, key):
+        if key == 'files':
+            self.window_view('editor')      # los archivos que tocó el agente, en el Editor
+            return
         self.on_chat_hit(key)
 
     def window_pick(self, sid):

@@ -85,6 +85,8 @@ DENY_MESSAGE = 'El usuario lo denegó desde el chat de elyares-engineer.'
 PLAN_DENY_MESSAGE = ('El usuario no aprobó el plan todavía desde el chat de elyares-engineer: '
                      'sigue en modo plan, no lo apliques y pregúntale qué quiere cambiar.')
 QUESTION_TOOL = 'AskUserQuestion'     # pide elegir entre opciones, no permiso
+EDIT_TOOLS = ('Edit', 'Write', 'MultiEdit', 'NotebookEdit')    # las que cambian un archivo
+MAX_EDITED = 30                       # cuántos archivos tocados se recuerdan por conversación
 PLAN_TOOL = 'ExitPlanMode'            # propone un plan: se aprueba viéndolo, o se sigue planeando
 # Los que modifican el repo: dos conversaciones suyas sobre la misma carpeta
 # pueden pisarse, y la isla avisa cuando pasa. Los demás solo leen y reportan.
@@ -225,6 +227,7 @@ class Chat:
         self.cut = False          # se pidió cortar el turno en curso
         self.closing = False
         self.touched = time.monotonic()   # cuándo se usó por última vez
+        self.edited = []          # los archivos que Claude ha cambiado aquí, el último primero (rutas absolutas)
 
     @property
     def project(self):
@@ -234,7 +237,7 @@ class Chat:
         """Lo que se guarda de la conversación entre reinicios de la isla."""
         return {'agent': self.agent, 'cwd': self.cwd, 'session': self.session, 'model': self.model,
                 'effort': self.effort, 'model_id': self.model_id, 'plan': self.plan, 'busy': self.busy,
-                'tokens': self.tokens, 'window': self.window,
+                'tokens': self.tokens, 'window': self.window, 'edited': self.edited,
                 'entries': [[e.kind, e.text, e.images] for e in self.entries[-SAVED_ENTRIES:]]}
 
     @classmethod
@@ -254,6 +257,8 @@ class Chat:
             if (isinstance(entry, list) and len(entry) == 3 and all(isinstance(v, str) for v in entry[:2])
                     and isinstance(entry[2], int)):
                 c.entries.append(Entry(*entry))
+        if isinstance(data.get('edited'), list):
+            c.edited = [p for p in data['edited'] if isinstance(p, str) and os.path.isabs(p)][:MAX_EDITED]
         if data.get('busy') is True:
             c._add('note', CUT_NOTE)
         return c
@@ -583,5 +588,16 @@ class Chat:
         if block.get('type') == 'tool_use':
             self.streaming = False
             self._settle()
+            self._edited(block)
             return True
         return False
+
+    def _edited(self, block):
+        """Apunta el archivo que cambia una herramienta de edición, el último primero y sin repetir."""
+        if block.get('name') not in EDIT_TOOLS or not isinstance(block.get('input'), dict):
+            return
+        path = block['input'].get('file_path') or block['input'].get('notebook_path')
+        if not isinstance(path, str) or not path:
+            return
+        path = os.path.normpath(os.path.join(self.cwd, path))
+        self.edited = [path] + [p for p in self.edited if p != path][:MAX_EDITED - 1]

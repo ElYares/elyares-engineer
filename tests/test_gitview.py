@@ -58,6 +58,17 @@ class Repositorio(unittest.TestCase):
         self.assertIn('core.fsmonitor=false', args[0])
         self.assertEqual(kwargs['env']['GIT_OPTIONAL_LOCKS'], '0')
 
+    def test_inside_deja_las_rutas_del_proyecto_como_relativas(self):
+        sub = os.path.join(self.root, 'src')
+        os.mkdir(sub)
+        paths = [os.path.join(sub, 'a.py'), '/etc/passwd', os.path.join(self.root, 'b.py'),
+                 os.path.join(self.root, 'src', '..', 'b.py'), self.root]
+        self.assertEqual(gitview.inside(self.root, paths), ['src/a.py', 'b.py'])
+
+    def test_inside_no_deja_pasar_un_enlace_que_sale(self):
+        os.symlink('/etc', os.path.join(self.root, 'enlace'))
+        self.assertEqual(gitview.inside(self.root, [os.path.join(self.root, 'enlace', 'passwd')]), [])
+
     def test_sin_repositorio_no_hay_cambios(self):
         with tempfile.TemporaryDirectory() as plain:
             self.assertIsNone(gitview.changed(plain))
@@ -110,6 +121,21 @@ class Lista(Ayudas, unittest.TestCase):
         self.assertEqual(self.buttons(self.panel), [])
         self.panel.set_files(self.state(files=[], chosen=''), self.log.append)
         self.assertEqual(self.buttons(self.panel), [])
+
+    def test_los_tocados_por_el_agente_van_arriba_y_abren_igual(self):
+        self.panel.set_files(self.state(), self.log.append, ['x/z.py'])
+        self.assertEqual(len(self.buttons(self.panel)), 3)
+        self.buttons(self.panel)[0].emit('clicked')
+        self.assertEqual(self.log, ['x/z.py'])
+
+    def test_sin_tocados_no_hay_seccion(self):
+        self.panel.set_files(self.state(), self.log.append)
+        self.assertEqual(len(self.buttons(self.panel)), 2)
+
+    def test_un_tocado_nuevo_reconstruye_la_lista(self):
+        self.panel.set_files(self.state(), self.log.append)
+        self.panel.set_files(self.state(), self.log.append, ['n.py'])
+        self.assertEqual(len(self.buttons(self.panel)), 3)
 
     def test_sin_cambios_no_reconstruye_los_botones(self):
         self.panel.set_files(self.state(), self.log.append)
