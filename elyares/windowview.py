@@ -17,7 +17,7 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import fonts, hypr, mascot, pomodoro, settings, themes, tmuxsessions, windowframe
+from . import editorpanel, fonts, gitview, hypr, mascot, pomodoro, settings, themes, tmuxsessions, windowframe
 from .state import MAIN_ROLE, elapsed
 
 APP_ID = 'dev.elyares.Engineer'
@@ -33,6 +33,7 @@ FIT_SETTLE = 0.6                 # lo que tarda Hyprland en dejarla del alto ped
 PANELS_EVERY = 0.1               # cada cuánto se ponen al día los paneles de widgets
 FIT_HOLD = 160                   # un contenido más corto que esto no encoge la ventana: no «respira»
 FIT_VOID = 120                   # con su medida guardada, el vacío bajo el contenido que se tolera antes de ajustarla
+EDITOR_H = 760                   # el alto que pide el editor para ver código con holgura (se recorta a la pantalla)
 OPEN_H = 780                     # alto con el que abre: el tablero y el chat caben; el resto, con scroll de la pantalla
 
 
@@ -53,13 +54,14 @@ class WindowView:
     hypr_async = True               # las pruebas lo apagan: el pedido sale en el acto
     window_body = 0                 # alto extra que piden las tarjetas del tablero (lo usa body_h)
     sources_pick = 'claude'         # la fuente que muestra
-    panel_open = ''                 # 'alerts', 'settings', 'tmux' o 'pomodoro' cuando una de esas vistas está a la vista
+    panel_open = ''                 # 'alerts', 'settings', 'tmux', 'pomodoro' o 'editor' cuando una de esas vistas está a la vista
     help_win = None
     frame = None                    # el marco de widgets (windowframe.Frame); None sin ventana real
 
     def window_init(self):
         self.tmux_watch = tmuxsessions.Watcher()
         self.pomo_watch = pomodoro.Watcher()
+        self.git_watch = gitview.Watcher()
         self.pomo_repo = ''             # la carpeta del chat que se abrió con «Con agente»
         self.windowed = False
         self.app_win = None
@@ -144,6 +146,8 @@ class WindowView:
         self.overlay.add_overlay(self.frame.settings)
         self.overlay.add_overlay(self.frame.tmux)
         self.overlay.add_overlay(self.frame.pomodoro)
+        self.frame.editor = editorpanel.EditorPanel()      # en su archivo: importa de windowframe, no al revés
+        self.overlay.add_overlay(self.frame.editor)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
 
@@ -157,7 +161,7 @@ class WindowView:
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
         self.sources_open = key == 'sources'
-        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro') else ''
+        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'editor') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -451,6 +455,10 @@ class WindowView:
         frame.tmux.set_visible(self.panel_open == 'tmux')
         if self.panel_open == 'tmux':
             frame.tmux.set_sessions(self.window_tmux(), dict(jump=self.window_tmux_jump))
+        frame.editor.set_visible(self.panel_open == 'editor')
+        if self.panel_open == 'editor':
+            self.git_watch.watch(self.window_editor_root())
+            frame.editor.set_editor(self.git_watch.read(), dict(choose=self.git_watch.choose))
         frame.pomodoro.set_visible(self.panel_open == 'pomodoro')
         if self.panel_open == 'pomodoro':
             status, tasks = self.pomo_watch.read()
@@ -482,6 +490,18 @@ class WindowView:
                                                                tired_scale=self.window_tired_scale,
                                                                pick_theme=self.pick_theme),
                                     fonts.current, themes.current, round(fonts.TIRED_SCALE * 100))
+
+    def editor_goal(self):
+        """El alto que pide el editor: lo que cabe en la pantalla, hasta EDITOR_H."""
+        room = self.screen_h - FIT_H - self.frame.chrome_h() - FIT_PAD if self.screen_h and self.frame else EDITOR_H
+        return max(MIN_H, min(EDITOR_H, room))
+
+    def window_editor_root(self):
+        """La carpeta que muestra el editor: la del chat que se tiene, o la del proyecto de tmux."""
+        if self.chat is not None and self.chat.cwd:
+            return self.chat.cwd
+        here = self.project_here()
+        return here.path if here is not None else ''
 
     def window_pomodoro(self, order, *args):
         """Un botón de la vista Pomodoro: se le pide a `coffe` y se vuelve a preguntar."""
