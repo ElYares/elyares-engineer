@@ -966,6 +966,51 @@ class Chat(Dibujo):
         self.isl.chat, self.isl.chat_open = c, True
         return c
 
+    def caja(self):
+        """Una caja de texto de mentira: lo escrito vive en un dict."""
+        box = {'t': ''}
+        self.isl.chat_text = lambda: box['t']
+        self.isl.chat_set_text = lambda text, cursor=None: box.__setitem__('t', text)
+        return box
+
+    def test_cada_proyecto_guarda_su_borrador_sin_enviar(self):
+        box = self.caja()
+        a = self.conversation()
+        self.isl.chat_whom = 'chat'
+        box['t'] = 'borrador de A'
+        b = self.isl.chat_make('', '/x/otro')
+        self.isl.show_chat(b)
+        self.assertEqual(box['t'], '')              # el texto de A no se va a B
+        box['t'] = 'borrador de B'
+        self.isl.show_chat(a)
+        self.assertEqual(box['t'], 'borrador de A')
+        self.isl.show_chat(b)
+        self.assertEqual(box['t'], 'borrador de B')
+
+    def test_un_borrador_repuesto_no_se_repone_otra_vez(self):
+        box = self.caja()
+        a = self.conversation()
+        self.isl.chat_whom = 'chat'
+        box['t'] = 'algo'
+        b = self.isl.chat_make('', '/x/otro')
+        self.isl.show_chat(b)
+        self.isl.show_chat(a)
+        box['t'] = ''                               # se envió
+        self.isl.show_chat(b)
+        self.isl.show_chat(a)
+        self.assertEqual(box['t'], '')
+
+    def test_el_borrador_sobrevive_a_un_mini_chat(self):
+        box = self.caja()
+        a = self.conversation()
+        self.isl.chat_whom = 'chat'
+        box['t'] = 'sin enviar'
+        self.isl.chat_claim('elyares-reviewer')     # la caja pasa a un mini chat
+        self.assertEqual(box['t'], '')
+        self.isl.chat_claim('chat')
+        self.assertEqual(box['t'], 'sin enviar')
+        self.assertIs(self.isl.chat, a)
+
     def test_con_la_orden_se_abre_y_se_cierra(self):
         self.isl.on_control('chat')
         self.assertTrue(self.isl.chat_open and self.isl.chat_typing)

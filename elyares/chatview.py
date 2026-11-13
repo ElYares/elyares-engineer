@@ -197,6 +197,7 @@ class ChatView:
         self.chat_quiz = None         # la pregunta de opciones en curso: {id, n, answers, marked}
         self.chat_extra = {}          # las otras conversaciones de un agente de solo lectura: clave -> [Chat]
         self.entry = self.entry_box = None
+        self.chat_drafts = {}         # de cada conversación, lo escrito y no enviado: (texto, imágenes)
 
     def chat_widgets(self, overlay):
         """La caja de texto: un Gtk.TextView de verdad, dentro de su scroll,
@@ -275,13 +276,32 @@ class ChatView:
             end += 1
         return text[start], text[start + 1:cursor], start, end
 
+    def chat_stash(self):
+        """Guarda lo escrito y no enviado en la conversación a la vista: la caja
+        es una sola, pero cada conversación (cada proyecto) conserva su borrador."""
+        if self.chat is not None and self.chat_whom == 'chat':
+            self.chat_drafts[self.chat] = (self.chat_text(), list(self.chat_images))
+
+    def chat_recall(self):
+        """Pone en la caja el borrador de la conversación a la vista."""
+        if self.chat is None:
+            return
+        text, images = self.chat_drafts.pop(self.chat, ('', []))     # ya está en la caja: no se repone dos veces
+        self.chat_images = list(images)
+        if self.chat_text() != text:
+            self.chat_set_text(text)
+
     def chat_claim(self, whom):
-        """La caja es una sola: lo que quedó escrito para otro (en el chat o
-        en el mini chat de un agente) no se le manda a este."""
+        """La caja es una sola: lo que quedó escrito para otro (en el mini chat
+        de un agente) no se le manda a este. El del chat se guarda en su
+        conversación y vuelve al regresar."""
         if whom != self.chat_whom:
+            self.chat_stash()
             self.chat_whom = whom
             self.chat_images = []
-            if self.chat_text():
+            if whom == 'chat':
+                self.chat_recall()
+            elif self.chat_text():
                 self.chat_set_text('')
 
     # ── abrir, cerrar y el teclado ──────────────────────────────────────────
@@ -402,13 +422,14 @@ class ChatView:
         if gone is self.chat:
             self.show_chat(family[i - 1], typing=True)
 
-    def open_chat(self, typing=False, agent=None, cwd=None):
+    def open_chat(self, typing=False, agent=None, cwd=None, keep=False):
         """Abre el chat. Sin `cwd`, con el tablero a la vista, el de la
         pestaña elegida: su conversación o, si no tiene, la de su proyecto.
         Sin tablero, en el proyecto de la sesión de tmux en la que estás y,
         sin tmux, en el que se tenía a la vista. Con el panel ya abierto se
         sigue en el que está. Sin `agent`, con el mismo de la última vez (''
-        es el engineer)."""
+        es el engineer). Con `keep`, lo escrito en la caja se lleva a esa conversación
+        en vez de quedarse de borrador en la que se deja."""
         s = self.tab_session() if not cwd and not self.chat_open and self.target() == 'board' else None
         if s is not None:
             own = s.main_agent if s.owner != state.MAIN_ROLE else ''
@@ -421,7 +442,7 @@ class ChatView:
         if not cwd:
             here = '' if self.chat_open else self.chat_here()
             cwd = here or last or os.path.expanduser('~')
-        self.show_chat(self.chat_for(agent, cwd), typing)
+        self.show_chat(self.chat_for(agent, cwd), typing, keep)
 
     def chat_here(self):
         """La carpeta del proyecto de la sesión de tmux en la que estás, mirada
@@ -448,15 +469,21 @@ class ChatView:
         return next((c for key, c in self.chats.items()
                      if key[0] == agent and self.chat_hosts.get(key) == s.sid), None)
 
-    def show_chat(self, c, typing=False):
-        """Abre el panel con esa conversación."""
+    def show_chat(self, c, typing=False, keep=False):
+        """Abre el panel con esa conversación. Lo escrito y no enviado se queda de
+        borrador en la que se deja y vuelve al regresar a ella; con `keep` se lleva."""
+        carry = not keep and c is not self.chat and self.chat is not None and self.chat_whom == 'chat'
         if c is not self.chat:
+            if not keep:
+                self.chat_stash()       # el borrador se queda en la conversación que se deja
             self.chat = c
             self.chat_cache.clear()
             self.chat_scroll, self.chat_menu = 0.0, None
         self.chat_open, self.off = True, False
         self.projects_open = False
         self.chat_claim('chat')
+        if carry:
+            self.chat_recall()          # y la caja muestra el de la que se abre (vacío si no tiene)
         if self.chat.session:
             # Ya se está leyendo: su aviso sobra.
             self.model.sessions.pop(f'chat:{self.chat.session}', None)
@@ -870,7 +897,7 @@ class ChatView:
             path = next((p.path for p in self.projects if p.key == name), '')
             self.chat_set_text(text[:start] + text[end:].lstrip(' '), start)
             if path:
-                self.open_chat(typing=True, cwd=path)
+                self.open_chat(typing=True, cwd=path, keep=True)     # lo escrito se va con él
             return
         head = f'{text[:start]}{sigil}{name} '
         self.chat_set_text(head + text[end:].lstrip(' '), len(head))
