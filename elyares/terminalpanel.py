@@ -32,8 +32,11 @@ def _rgba(color):
 
 
 class TerminalPanel(Gtk.Box):
-    def __init__(self):
+    """`kind=''` es la terminal de siempre; `kind='nvim'`, una sesión que corre nvim (la mitad de arriba del Taller)."""
+
+    def __init__(self, kind=''):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
+        self.kind = kind
         self.add_css_class('elyares-sources')
         self.root = None            # la carpeta cuya sesión se ve; None = aún no se ha elegido (distinto de '')
         self.name = ''
@@ -85,16 +88,18 @@ class TerminalPanel(Gtk.Box):
         if not root:
             self.name = ''
             self.head.set_markup('<b>Terminal</b>')
-            self._say('Abre el chat de un proyecto, o una sesión de tmux en uno, y aquí se abre su terminal.')
+            self._say('Abre el chat de un proyecto, o una sesión de tmux en uno, y aquí se abre su '
+                      + ('nvim.' if self.kind else 'terminal.'))
             self._stop()
             return
         base = GLib.markup_escape_text(os.path.basename(root.rstrip('/')) or root)
-        self.head.set_markup(f'<b>{base}</b>  <span alpha="60%">sesión de tmux; sobrevive al reload</span>')
+        what = 'nvim, en una sesión de tmux' if self.kind else 'sesión de tmux'
+        self.head.set_markup(f'<b>{base}</b>  <span alpha="60%">{what}; sobrevive al reload</span>')
         self._say('')
         threading.Thread(target=self._prepare, args=(root,), daemon=True).start()
 
     def _prepare(self, root):
-        name, why = terminal.ensure(root)
+        name, why = terminal.ensure(root, self.kind)
         GLib.idle_add(self._attach, root, name, why)
 
     def _attach(self, root, name, why):

@@ -25,6 +25,12 @@ class Nombres(unittest.TestCase):
     def test_el_mismo_proyecto_siempre_la_misma_sesion(self):
         self.assertEqual(terminal.session_name('/a/api'), terminal.session_name('/a/api/'))
 
+    def test_la_sesion_de_nvim_es_otra_de_la_misma_carpeta(self):
+        plain, nvim = terminal.session_name('/a/api'), terminal.session_name('/a/api', terminal.NVIM)
+        self.assertNotEqual(plain, nvim)
+        self.assertTrue(nvim.startswith(plain))
+        self.assertRegex(nvim, r'^[A-Za-z0-9_-]+$')
+
     def test_engancha_con_el_servidor_propio(self):
         argv = terminal.attach_argv('api-1')
         self.assertEqual(argv[:3], ['tmux', '-L', terminal.SOCKET])
@@ -61,6 +67,30 @@ class Sesion(unittest.TestCase):
             time.sleep(0.1)
         self.assertEqual(got, want)
 
+    @unittest.skipUnless(shutil.which('nvim'), 'sin nvim')
+    def test_nvim_arranca_escuchando_y_abre_un_archivo_a_peticion(self):
+        name, why = terminal.ensure(self.tmp.name, terminal.NVIM)
+        self.assertEqual(why, '')
+        sock = terminal.nvim_socket(name)
+        for _ in range(60):                 # nvim tarda un instante en crear su socket
+            if os.path.exists(sock):
+                break
+            time.sleep(0.1)
+        target = os.path.join(self.tmp.name, 'a.txt')
+        with open(target, 'w') as fh:
+            fh.write('hola\n')
+        self.assertEqual(terminal.open_in_nvim(self.tmp.name, 'a.txt'), (True, ''))
+        got = subprocess.run(['nvim', '--server', sock, '--remote-expr', 'expand("%:p")'],
+                             capture_output=True, text=True).stdout.strip()
+        self.assertEqual(os.path.realpath(got), os.path.realpath(target))
+
+    def test_no_abre_nada_fuera_del_proyecto(self):
+        ok, why = terminal.open_in_nvim(self.tmp.name, '../etc/passwd')
+        self.assertEqual((ok, why), (False, 'Fuera del proyecto'))
+
+    def test_sin_nvim_escuchando_se_dice(self):
+        self.assertEqual(terminal.open_in_nvim(self.tmp.name, 'a.txt'), (False, 'nvim aún no está listo'))
+
     def test_una_carpeta_que_no_existe_se_avisa(self):
         _, why = terminal.ensure('/no/existe/de/verdad')
         self.assertIn('ya no existe', why)
@@ -86,7 +116,7 @@ class Panel(unittest.TestCase):
     def setUp(self):
         self.panel = terminalpanel.TerminalPanel()
         self.opened = []
-        patch = mock.patch.object(terminal, 'ensure', side_effect=lambda root: (terminal.session_name(root), ''))
+        patch = mock.patch.object(terminal, 'ensure', side_effect=lambda root, kind='': (terminal.session_name(root, kind), ''))
         patch.start()
         self.addCleanup(patch.stop)
         patch = mock.patch.object(terminalpanel.TerminalPanel, 'spawn', lambda _s, root, name: self.opened.append(name))

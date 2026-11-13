@@ -13,8 +13,8 @@ from . import fonts, mascot, themes
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
          ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'),
-         ('editor', 'Editor'), ('terminal', 'Terminal'), ('sources', 'Fuentes'),
-         ('settings', 'Ajustes'))
+         ('editor', 'Editor'), ('terminal', 'Terminal'), ('taller', 'Taller'),
+         ('sources', 'Fuentes'), ('settings', 'Ajustes'))
 SIDEBAR_W = 180
 FOLD_W = 640                    # más angosta que esto, la barra lateral se pliega y el texto conserva su tamaño
 

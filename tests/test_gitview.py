@@ -48,53 +48,28 @@ class Repositorio(unittest.TestCase):
         self.assertEqual(gitview.branch(self.root), 'main')
         self.assertEqual(sorted(gitview.changed(self.root)), [('?', 'b.py'), ('M', 'a.py')])
 
-    def test_el_diff_de_un_modificado_y_el_de_un_nuevo(self):
-        self.put('a.py', 'uno\ndos\n')
-        self.put('b.py', 'nuevo\n')
-        self.assertIn('+dos', gitview.diff(self.root, 'a.py'))
-        self.assertIn('+nuevo', gitview.diff(self.root, 'b.py', '?'))
-
     def test_sin_repositorio_no_hay_cambios(self):
         with tempfile.TemporaryDirectory() as plain:
             self.assertIsNone(gitview.changed(plain))
             self.assertEqual(gitview.branch(plain), '')
 
-    def test_lee_un_archivo_y_avisa_de_lo_que_no_muestra(self):
-        self.assertEqual(gitview.read(self.root, 'a.py'), ('uno\n', ''))
-        self.assertEqual(gitview.read(self.root, 'no.py')[1], 'El archivo ya no existe')
-        with open(os.path.join(self.root, 'bin'), 'wb') as fh:
-            fh.write(b'\0\1\2')
-        self.assertEqual(gitview.read(self.root, 'bin')[1], 'Archivo binario')
-
-    def test_no_sale_de_la_carpeta_del_proyecto(self):
-        self.assertEqual(gitview.read(self.root, '../etc/passwd')[1], 'Fuera del proyecto')
-
-
-if __name__ == '__main__':
-    unittest.main()
-
 
 try:
     import gi
     gi.require_version('Gtk', '4.0')
-    gi.require_version('GtkSource', '5')
+    gi.require_version('Vte', '3.91')
     from gi.repository import Gtk
-    from elyares import editorpanel
+    from elyares import editorpanel, terminal
     HAVE_DISPLAY = Gtk.init_check()
 except (ImportError, ValueError):
     HAVE_DISPLAY = False
 
 
-@unittest.skipUnless(HAVE_DISPLAY, 'sin gi, GtkSource o pantalla')
-class Panel(unittest.TestCase):
-    def setUp(self):
-        self.log = []
-        self.panel = editorpanel.EditorPanel()
-        self.handlers = dict(choose=self.log.append)
+class Ayudas:
+    """Lo que comparten las pruebas de los paneles con widgets."""
 
-    def buttons(self, widget=None, found=None):
+    def buttons(self, widget, found=None):
         found = [] if found is None else found
-        widget = widget or self.panel
         if isinstance(widget, Gtk.Button):
             found.append(widget)
         child = widget.get_first_child()
@@ -104,38 +79,86 @@ class Panel(unittest.TestCase):
         return found
 
     def state(self, **over):
-        base = dict(branch='main', files=[('M', 'a.py'), ('?', 'b.py')], root='/p/x', chosen='a.py',
-                    text='print(1)\n', note='', diff='+print(1)\n')
+        base = dict(branch='main', files=[('M', 'a.py'), ('?', 'b.py')], root='/p/x', chosen='a.py')
         return gitview.State(**{**base, **over})
 
-    def text(self, view):
-        buf = view.get_buffer()
-        return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi, Vte o pantalla')
+class Lista(Ayudas, unittest.TestCase):
+    def setUp(self):
+        self.log = []
+        self.panel = editorpanel.FileList()
 
     def test_un_boton_por_archivo_y_el_clic_lo_elige(self):
-        self.panel.set_editor(self.state(), self.handlers)
-        self.assertEqual(len(self.buttons()), 2)
-        self.buttons()[1].emit('clicked')
+        self.panel.set_files(self.state(), self.log.append)
+        self.assertEqual(len(self.buttons(self.panel)), 2)
+        self.buttons(self.panel)[1].emit('clicked')
         self.assertEqual(self.log, ['b.py'])
 
-    def test_muestra_el_archivo_y_su_diff_con_sintaxis(self):
-        self.panel.set_editor(self.state(), self.handlers)
-        self.assertEqual(self.text(self.panel.file_view), 'print(1)\n')
-        self.assertEqual(self.text(self.panel.diff_view), '+print(1)\n')
-        self.assertEqual(self.panel.diff_view.get_buffer().get_language().get_id(), 'diff')
-        self.assertEqual(self.panel.file_view.get_buffer().get_language().get_id(), 'python3')
-
-    def test_es_un_visor_no_se_puede_escribir(self):
-        self.assertFalse(self.panel.file_view.get_editable())
-        self.assertFalse(self.panel.diff_view.get_editable())
-
-    def test_cambia_el_texto_cuando_el_agente_edita(self):
-        self.panel.set_editor(self.state(), self.handlers)
-        self.panel.set_editor(self.state(text='print(2)\n'), self.handlers)
-        self.assertEqual(self.text(self.panel.file_view), 'print(2)\n')
-
     def test_sin_repositorio_o_sin_cambios_no_hay_botones(self):
-        self.panel.set_editor(self.state(files=None, chosen='', text='', diff=''), self.handlers)
-        self.assertEqual(self.buttons(), [])
-        self.panel.set_editor(self.state(files=[], chosen='', text='', diff=''), self.handlers)
-        self.assertEqual(self.buttons(), [])
+        self.panel.set_files(self.state(files=None, chosen=''), self.log.append)
+        self.assertEqual(self.buttons(self.panel), [])
+        self.panel.set_files(self.state(files=[], chosen=''), self.log.append)
+        self.assertEqual(self.buttons(self.panel), [])
+
+    def test_sin_cambios_no_reconstruye_los_botones(self):
+        self.panel.set_files(self.state(), self.log.append)
+        first = self.buttons(self.panel)[0]
+        self.panel.set_files(self.state(), self.log.append)
+        self.assertIs(self.buttons(self.panel)[0], first)
+
+
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi, Vte o pantalla')
+class Editor(Ayudas, unittest.TestCase):
+    """El Editor: la lista a un lado y nvim al otro."""
+
+    def setUp(self):
+        self.panel = editorpanel.EditorPanel()
+
+    def test_la_lista_a_la_izquierda_y_nvim_a_la_derecha(self):
+        self.assertIs(self.panel.get_start_child(), self.panel.files)
+        self.assertIs(self.panel.get_end_child(), self.panel.nvim)
+        self.assertEqual(self.panel.nvim.kind, terminal.NVIM)
+
+    def test_empieza_escondido_pero_nvim_se_ve_con_el_panel(self):
+        self.assertFalse(self.panel.get_visible())
+        self.assertTrue(self.panel.nvim.get_visible())
+
+
+@unittest.skipUnless(HAVE_DISPLAY, 'sin gi, Vte o pantalla')
+class Taller(Ayudas, unittest.TestCase):
+    """El Taller: el editor (lista y nvim) arriba y la terminal abajo."""
+
+    def setUp(self):
+        from elyares import tallerpanel
+        self.panel = tallerpanel.TallerPanel()
+
+    def test_el_editor_arriba_y_la_terminal_abajo(self):
+        self.assertEqual(self.panel.get_orientation(), Gtk.Orientation.VERTICAL)
+        self.assertIsInstance(self.panel.get_start_child(), editorpanel.EditorPanel)
+        self.assertIs(self.panel.get_end_child(), self.panel.terminal)
+        self.assertEqual(self.panel.terminal.kind, '')
+
+    def test_las_mitades_se_ven_cuando_se_ve_el_taller(self):
+        self.assertTrue(self.panel.editor.get_visible())
+        self.assertTrue(self.panel.terminal.get_visible())
+        self.assertFalse(self.panel.get_visible())
+
+    def test_el_divisor_se_coloca_una_sola_vez(self):
+        self.panel.fit(800)
+        first = self.panel.get_position()
+        self.panel.fit(400)
+        self.assertEqual(self.panel.get_position(), first)
+        self.assertGreater(first, 0)
+
+    def test_se_esconde_con_los_demas_al_volver_la_isla(self):
+        from elyares import windowframe
+        frame = windowframe.Frame(lambda _k: None)
+        frame.extra.append(self.panel)
+        self.panel.set_visible(True)
+        frame.hide_panels()
+        self.assertFalse(self.panel.get_visible())
+
+
+if __name__ == '__main__':
+    unittest.main()

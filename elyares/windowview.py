@@ -17,8 +17,8 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import (editorpanel, fonts, gitview, hypr, mascot, pomodoro, settings, terminalpanel, themes, tmuxsessions,
-               windowframe)
+from . import (editorpanel, fonts, gitview, hypr, mascot, pomodoro, settings, tallerpanel, terminal, terminalpanel,
+               themes, tmuxsessions, windowframe)
 from .state import MAIN_ROLE, elapsed
 
 APP_ID = 'dev.elyares.Engineer'
@@ -55,7 +55,7 @@ class WindowView:
     hypr_async = True               # las pruebas lo apagan: el pedido sale en el acto
     window_body = 0                 # alto extra que piden las tarjetas del tablero (lo usa body_h)
     sources_pick = 'claude'         # la fuente que muestra
-    panel_open = ''                 # 'alerts', 'settings', 'tmux', 'pomodoro', 'editor' o 'terminal' cuando una de esas vistas está a la vista
+    panel_open = ''                 # 'alerts', 'settings', 'tmux', 'pomodoro', 'editor', 'terminal' o 'taller' cuando una de esas vistas está a la vista
     help_win = None
     frame = None                    # el marco de widgets (windowframe.Frame); None sin ventana real
 
@@ -150,7 +150,9 @@ class WindowView:
         self.frame.editor = editorpanel.EditorPanel()      # en su archivo: importa de windowframe, no al revés
         self.overlay.add_overlay(self.frame.editor)
         self.frame.terminal = terminalpanel.TerminalPanel()
-        self.frame.extra += [self.frame.editor, self.frame.terminal]     # `hide_panels` los esconde con los demás
+        self.frame.taller = tallerpanel.TallerPanel()
+        self.overlay.add_overlay(self.frame.taller)
+        self.frame.extra += [self.frame.editor, self.frame.terminal, self.frame.taller]     # `hide_panels` los esconde con los demás
         self.overlay.add_overlay(self.frame.terminal)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
@@ -165,7 +167,7 @@ class WindowView:
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
         self.sources_open = key == 'sources'
-        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'editor', 'terminal') else ''
+        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'editor', 'terminal', 'taller') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -459,12 +461,7 @@ class WindowView:
         frame.tmux.set_visible(self.panel_open == 'tmux')
         if self.panel_open == 'tmux':
             frame.tmux.set_sessions(self.window_tmux(), dict(jump=self.window_tmux_jump))
-        frame.terminal.set_visible(self.panel_open == 'terminal')
-        frame.terminal.set_terminal(self.window_editor_root(), self.panel_open == 'terminal')
-        frame.editor.set_visible(self.panel_open == 'editor')
-        if self.panel_open == 'editor':
-            self.git_watch.watch(self.window_editor_root())
-            frame.editor.set_editor(self.git_watch.read(), dict(choose=self.git_watch.choose))
+        self.window_code_views(frame)
         frame.pomodoro.set_visible(self.panel_open == 'pomodoro')
         if self.panel_open == 'pomodoro':
             status, tasks = self.pomo_watch.read()
@@ -496,6 +493,36 @@ class WindowView:
                                                                tired_scale=self.window_tired_scale,
                                                                pick_theme=self.pick_theme),
                                     fonts.current, themes.current, round(fonts.TIRED_SCALE * 100))
+
+    def window_code_views(self, frame):
+        """Editor, Terminal y Taller: los tres miran el mismo proyecto. Cada uno solo trabaja a la vista."""
+        open_ = self.panel_open
+        frame.terminal.set_visible(open_ == 'terminal')
+        frame.editor.set_visible(open_ == 'editor')
+        frame.taller.set_visible(open_ == 'taller')
+        root = self.window_editor_root()
+        frame.terminal.set_terminal(root, open_ == 'terminal')
+        frame.taller.terminal.set_terminal(root, open_ == 'taller')
+        shown = {'editor': frame.editor, 'taller': frame.taller.editor}
+        for key, editor in shown.items():
+            editor.nvim.set_terminal(root, open_ == key)
+        if open_ in shown:
+            self.git_watch.watch(root)
+            shown[open_].files.set_files(self.git_watch.read(), self.window_editor_open)
+            frame.taller.fit(self.app_win.get_height() - frame.chrome_h())
+
+    def window_editor_open(self, path):
+        """Un clic en la lista del Editor o del Taller: se elige el archivo y se le pide a nvim que lo abra."""
+        self.git_watch.choose(path)
+        root = self.git_watch.root
+
+        def go():
+            ok, why = terminal.open_in_nvim(root, path)
+            if not ok:
+                GLib.idle_add(self.on_message, {'event': 'alert', 'session_id': 'nvim', 'name': 'nvim',
+                                                'message': why or 'nvim no abrió el archivo', 'tone': '',
+                                                'ttl': 20}, None)
+        threading.Thread(target=go, daemon=True).start()
 
     def editor_goal(self):
         """El alto que pide el editor: lo que cabe en la pantalla, hasta EDITOR_H."""
