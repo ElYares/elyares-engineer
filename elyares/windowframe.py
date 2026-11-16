@@ -86,6 +86,7 @@ def build_css():
 .elyares-bar {{ background: {SURFACE[0]}; color: {INK}; border: none; box-shadow: none;
   border-bottom: 1px solid rgba({GLOW}, 0.06); }}
 /* Las vistas, como el control segmentado de macOS: una pastilla con la activa elevada. */
+.elyares-muted {{ color: {MUTED}; opacity: 1; }}
 .elyares-title {{ font-size: 1.45em; font-weight: 700; margin-bottom: {SPACE[0]}px; }}
 .elyares-segments {{ background: {SURFACE[1]}; border-radius: {RADIUS[0]}px; padding: 2px;
   border: 1px solid rgba({GLOW}, 0.06); }}
@@ -105,7 +106,7 @@ def build_css():
 .elyares-side {{ background: transparent; color: {INK}; padding: {SPACE[0]}px {SPACE[1]}px; }}
 .elyares-side row {{ border-radius: {RADIUS[0]}px; padding: {SPACE[1]}px {SPACE[1]}px; margin: 1px 0; }}
 .elyares-side row:hover {{ background: rgba({GLOW}, 0.05); }}
-.elyares-side row:selected {{ background: rgba({ACCENT_RGB}, 0.22); color: {INK}; }}
+.elyares-side row:selected {{ background: rgba({ACCENT_RGB}, 0.22); color: {INK}; box-shadow: inset 2px 0 {ACCENT}; }}
 {ROLE_ROWS}.elyares-card {{ background: {SURFACE[1]}; color: {INK}; border-radius: {RADIUS[1]}px;
   padding: {SPACE[1]}px {SPACE[2]}px; border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-card:hover {{ background: {SURFACE[2]}; }}
@@ -388,7 +389,7 @@ class Frame:
             title = Gtk.Label(label=name, xalign=0)
             title.set_ellipsize(Pango.EllipsizeMode.END)
             sub = Gtk.Label(label=text, xalign=0)
-            sub.add_css_class('dim-label')
+            sub.add_css_class('elyares-muted')
             col.append(title)
             col.append(sub)
             box.append(dot)
@@ -619,7 +620,7 @@ class BoardPanel(Gtk.ScrolledWindow):
         name.set_markup(f'<span foreground="{card["color"]}" weight="bold">{GLib.markup_escape_text(card["name"])}</span>')
         name.set_ellipsize(Pango.EllipsizeMode.END)
         state = Gtk.Label(label=card['state'], xalign=0)
-        state.add_css_class('dim-label')
+        state.add_css_class('elyares-muted')
         text.append(name)
         text.append(state)
         ref['state'] = state
@@ -710,7 +711,7 @@ class ChatHead(Gtk.Box):
                          f' | {GLib.markup_escape_text(info["project"])}')
         where = f' · {info["where"]}' if info['where'] else ''
         status = Gtk.Label(label=info['status'] + where, xalign=0)
-        status.add_css_class('dim-label')
+        status.add_css_class('elyares-muted')
         status.set_ellipsize(Pango.EllipsizeMode.END)
         text.append(title)
         text.append(status)
@@ -783,7 +784,7 @@ class SourcesPanel(Gtk.Box):
             col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             col.append(Gtk.Label(label=name, xalign=0))
             sub = Gtk.Label(label=text, xalign=0)
-            sub.add_css_class('dim-label')
+            sub.add_css_class('elyares-muted')
             sub.set_ellipsize(Pango.EllipsizeMode.END)
             col.append(sub)
             box.append(dot)
@@ -807,7 +808,7 @@ class SourcesPanel(Gtk.Box):
         status = Gtk.Label(label=d['status'], xalign=0)
         self.detail.append(status)
         about = Gtk.Label(label=d['about'], xalign=0, wrap=True)
-        about.add_css_class('dim-label')
+        about.add_css_class('elyares-muted')
         self.detail.append(about)
         for line in d['lines']:
             self.detail.append(Gtk.Label(label=line, xalign=0, wrap=True))
@@ -853,7 +854,7 @@ class SourcesPanel(Gtk.Box):
             for i, (cmd, text) in enumerate(d['cmds']):
                 grid.attach(Gtk.Label(label=cmd, xalign=0, selectable=True), 0, i, 1, 1)
                 what = Gtk.Label(label=text, xalign=0, wrap=True)
-                what.add_css_class('dim-label')
+                what.add_css_class('elyares-muted')
                 grid.attach(what, 1, i, 1, 1)
             self.detail.append(grid)
 
@@ -888,7 +889,7 @@ class AlertsPanel(Gtk.ScrolledWindow):
             self.page.remove(child)
         if not alerts:
             empty = Gtk.Label(label='Sin alertas. Todo en orden.', xalign=0)
-            empty.add_css_class('dim-label')
+            empty.add_css_class('elyares-muted')
             self.page.append(empty)
         for a in alerts:
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
@@ -902,7 +903,7 @@ class AlertsPanel(Gtk.ScrolledWindow):
             where = ' · '.join(x for x in (a['where'], a['note']) if x)
             if where:
                 dim = Gtk.Label(label=where, xalign=0)
-                dim.add_css_class('dim-label')
+                dim.add_css_class('elyares-muted')
                 card.append(dim)
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
             for key, label in a['buttons']:
@@ -953,7 +954,7 @@ class TmuxPanel(Gtk.ScrolledWindow):
             count = 'sin Claude' if not claudes else '1 Claude' if claudes == 1 else f'{claudes} Claude'
             title = Gtk.Label(xalign=0)
             title.set_markup(f'<b>{GLib.markup_escape_text(sess["name"])}</b>  '
-                             f'<span alpha="60%">{count}</span>')
+                             f'<span foreground="{MUTED}">{count}</span>')
             card.append(title)
             for win in sess['windows']:
                 card.append(self._window(sess['name'], win, handlers))
@@ -961,7 +962,7 @@ class TmuxPanel(Gtk.ScrolledWindow):
 
     def _note(self, text):
         label = Gtk.Label(label=text, xalign=0, wrap=True)
-        label.add_css_class('dim-label')
+        label.add_css_class('elyares-muted')
         self.page.append(label)
 
     def _window(self, session, win, handlers):
@@ -972,7 +973,7 @@ class TmuxPanel(Gtk.ScrolledWindow):
         label = Gtk.Label(xalign=0)
         color = mascot.COLORS.get(self.TONES.get(win['state'], 'metal'), '#8f9ab8')
         dot = f'<span foreground="{color}">{mark}</span> ' if mark else ''
-        tail = f'  <span alpha="60%">{said}</span>' if said else ''
+        tail = f'  <span foreground="{MUTED}">{said}</span>' if said else ''
         crew = ''.join(f' <span foreground="{mascot.accent(role)}">●</span>' for role in win.get('agents', ()))
         label.set_markup(f'{dot}{win["index"]} · {GLib.markup_escape_text(win["name"])}{tail}{crew}')
         btn.set_child(label)
@@ -1019,7 +1020,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
     def _clock_markup(status):
         color = themes.ink_for(mascot.COLORS.get(PomodoroPanel.TONES.get(status['phase'], 'metal'), '#8f9ab8'))
         return (f'<span size="xx-large" weight="bold" foreground="{color}">{status["clock"]}</span>  '
-                f'<span alpha="70%">{status["text"]}</span>')
+                f'<span foreground="{MUTED}">{status["text"]}</span>')
 
     def _build(self, status, tasks, handlers):
         while (child := self.page.get_first_child()) is not None:
@@ -1028,7 +1029,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
         if status is None:
             note = Gtk.Label(label='El reloj de coffe no responde. Arráncalo con: systemctl --user start coffe',
                              xalign=0, wrap=True)
-            note.add_css_class('dim-label')
+            note.add_css_class('elyares-muted')
             self.page.append(note)
             return
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
@@ -1040,7 +1041,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
         card.append(task)
         done = ' '.join('●' if i < status['cycle'] else '○' for i in range(status['cycle_of']))
         count = Gtk.Label(xalign=0)
-        count.set_markup(f'<span alpha="60%">Hoy {status["today"]} · ciclo {done}</span>')
+        count.set_markup(f'<span foreground="{MUTED}">Hoy {status["today"]} · ciclo {done}</span>')
         card.append(count)
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
         if status['parked']:
@@ -1064,7 +1065,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
             btn.set_hexpand(True)
             label = Gtk.Label(xalign=0)
             label.set_markup(f'{GLib.markup_escape_text(t["title"])}  '
-                             f'<span alpha="60%">{GLib.markup_escape_text(t["project"])}</span>')
+                             f'<span foreground="{MUTED}">{GLib.markup_escape_text(t["project"])}</span>')
             btn.set_child(label)
             btn.update_property([Gtk.AccessibleProperty.LABEL],
                                 [f'Empezar un pomodoro en {t["title"]}, de {t["project"]}'])
@@ -1081,7 +1082,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
 
     def _note(self, text):
         label = Gtk.Label(label=text, xalign=0, wrap=True)
-        label.add_css_class('dim-label')
+        label.add_css_class('elyares-muted')
         self.page.append(label)
 
     @staticmethod
@@ -1137,7 +1138,7 @@ class SettingsPanel(Gtk.ScrolledWindow):
             col.append(Gtk.Label(label=text, xalign=0))
             if note:
                 dim = Gtk.Label(label=note, xalign=0, wrap=True)
-                dim.add_css_class('dim-label')
+                dim.add_css_class('elyares-muted')
                 col.append(dim)
             switch = Gtk.Switch()
             switch.set_active(on)
@@ -1182,7 +1183,7 @@ class SettingsPanel(Gtk.ScrolledWindow):
         self.page.append(pick)
         note = Gtk.Label(label='Vale para la isla y para la ventana; el código sigue en monoespaciada.',
                          xalign=0, wrap=True)
-        note.add_css_class('dim-label')
+        note.add_css_class('elyares-muted')
         self.page.append(note)
         theme = Gtk.Button(label='Releer los colores del tema')
         theme.add_css_class('elyares-btn')
@@ -1233,7 +1234,7 @@ class HelpDialog(Gtk.Window):
             cmd = Gtk.Label(label=what, xalign=0, selectable=True)
             cmd.set_size_request(200, -1)
             hint = Gtk.Label(label=text, xalign=0, wrap=True)
-            hint.add_css_class('dim-label')
+            hint.add_css_class('elyares-muted')
             line.append(cmd)
             line.append(hint)
             row.set_child(line)
@@ -1358,7 +1359,7 @@ class FocusPanel(Gtk.ScrolledWindow):
         left.append(name)
         for key, text in (('label', d['label']), ('summary', d['summary'])):
             lab = Gtk.Label(label=text)
-            lab.add_css_class('dim-label')
+            lab.add_css_class('elyares-muted')
             lab.set_ellipsize(Pango.EllipsizeMode.END)
             left.append(lab)
             self.refs[key] = lab
@@ -1376,7 +1377,7 @@ class FocusPanel(Gtk.ScrolledWindow):
             mid.append(Gtk.Label(label=d['empty'], xalign=0, wrap=True))
         if d['hidden']:
             more = Gtk.Label(label=f'⋯ {d["hidden"]} paso{"" if d["hidden"] == 1 else "s"} antes', xalign=0)
-            more.add_css_class('dim-label')
+            more.add_css_class('elyares-muted')
             mid.append(more)
         for i, (mark, color, text, spent) in enumerate(d['steps']):
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
@@ -1396,7 +1397,7 @@ class FocusPanel(Gtk.ScrolledWindow):
             t.set_max_width_chars(1)        # el mínimo es una letra: se envuelve al ancho que haya
             t.set_ellipsize(Pango.EllipsizeMode.END)
             when = Gtk.Label(label=spent)
-            when.add_css_class('dim-label')
+            when.add_css_class('elyares-muted')
             row.append(m)
             row.append(t)
             row.append(when)
@@ -1407,7 +1408,7 @@ class FocusPanel(Gtk.ScrolledWindow):
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
             box.add_css_class('elyares-card')
             head = Gtk.Label(label=self._detail_head(self.picked, spent), xalign=0)
-            head.add_css_class('dim-label')
+            head.add_css_class('elyares-muted')
             body = Gtk.Label(label=text, xalign=0, wrap=True, selectable=True)
             body.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             body.set_max_width_chars(1)
@@ -1477,7 +1478,7 @@ class FlowsPanel(Gtk.ScrolledWindow):
         title.add_css_class('elyares-title')
         head.append(title)
         count = Gtk.Label(label='' if not rows else '1 guardado' if len(rows) == 1 else f'{len(rows)} guardados')
-        count.add_css_class('dim-label')
+        count.add_css_class('elyares-muted')
         count.set_hexpand(True)
         count.set_xalign(0)
         head.append(count)
@@ -1494,7 +1495,7 @@ class FlowsPanel(Gtk.ScrolledWindow):
         if not rows:
             empty = Gtk.Label(label='Todavía no guardaste ningún workflow. Crea uno para repetir una cadena '
                                     'de agentes sin escribirla cada vez.', xalign=0, wrap=True)
-            empty.add_css_class('dim-label')
+            empty.add_css_class('elyares-muted')
             self.page.append(empty)
             return
         for i, r in enumerate(rows):
@@ -1508,7 +1509,7 @@ class FlowsPanel(Gtk.ScrolledWindow):
             note = Gtk.Label(xalign=0, wrap=True)
             note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             note.set_max_width_chars(1)
-            note.add_css_class('dim-label')
+            note.add_css_class('elyares-muted')
             note.set_label(r['place'] if not r['status'] else f'{r["place"]} · {r["status"]}')
             self.refs.append(note)
             col.append(name)

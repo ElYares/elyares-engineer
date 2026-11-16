@@ -18,7 +18,7 @@ gi.require_version('Vte', '3.91')
 
 from gi.repository import Gdk, GLib, Gtk, Pango, Vte
 
-from . import fonts, settings, terminal, theme, themes
+from . import fonts, settings, terminal, theme, themes, windowframe
 from .windowframe import SPACE
 
 QUICK_EXIT = 2.0          # un cliente que se va antes de esto no se relanza solo: algo falla
@@ -80,7 +80,7 @@ class TerminalPanel(Gtk.Box):
         self.term.add_controller(keys)
         self.term.connect('child-exited', self._exited)
         self.note = Gtk.Label(xalign=0, wrap=True)
-        self.note.add_css_class('dim-label')
+        self.note.add_css_class('elyares-muted')
         self.note.set_margin_start(SPACE[1])
         self.again = Gtk.Button(label='Reabrir')
         self.again.add_css_class('elyares-btn')
@@ -94,6 +94,7 @@ class TerminalPanel(Gtk.Box):
             btn = Gtk.Button(label=label)
             btn.add_css_class('elyares-btn')
             btn.set_tooltip_text(tip)
+            btn.update_property([Gtk.AccessibleProperty.LABEL], [tip])
             btn.connect('clicked', lambda _b, d=step: set_font_size(font_size() + d))
             bar.append(btn)
         for widget in (bar, self.note, self.again, self.term):
@@ -162,7 +163,7 @@ class TerminalPanel(Gtk.Box):
             return
         base = GLib.markup_escape_text(os.path.basename(root.rstrip('/')) or root)
         what = 'nvim, en una sesión de tmux' if self.kind else 'sesión de tmux'
-        self.head.set_markup(f'<b>{base}</b>  <span alpha="60%">{what}; sobrevive al reload</span>')
+        self.head.set_markup(f'<b>{base}</b>  <span foreground="{windowframe.MUTED}">{what}; se conserva al recargar</span>')
         self._say('')
         threading.Thread(target=self._prepare, args=(root,), daemon=True).start()
 

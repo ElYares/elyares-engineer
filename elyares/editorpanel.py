@@ -29,11 +29,15 @@ def tones():
     return {'M': amber, 'A': green, '?': green, 'D': red, 'R': amber, 'U': red}
 
 
-CSS = """
-.ftree-row { background: none; border: none; box-shadow: none; border-radius: 6px; padding: 1px 4px; min-height: 22px; }
-.ftree-row:hover { background: alpha(currentColor, 0.08); }
-.ftree-row.picked { background: alpha(currentColor, 0.16); }
+def build_css():
+    wf = windowframe
+    return f"""
+.ftree-row {{ background: none; border: none; box-shadow: none; border-radius: {wf.RADIUS[0]}px; padding: 1px 4px; min-height: 24px; }}
+.ftree-row:hover {{ background: alpha(currentColor, 0.08); }}
+.ftree-row.picked {{ background: alpha({wf.ACCENT}, 0.18); box-shadow: inset 2px 0 {wf.ACCENT}; }}
 """
+
+
 _css = None
 
 
@@ -41,9 +45,10 @@ def load_css():
     global _css
     if _css is None:
         _css = Gtk.CssProvider()
-        _css.load_from_string(CSS)
+        _css.load_from_string(build_css())
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), _css,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+        windowframe.HOOKS.append(lambda: _css.load_from_string(build_css()))
 
 
 class FileList(Gtk.ScrolledWindow):
@@ -159,7 +164,7 @@ class FileList(Gtk.ScrolledWindow):
             amount = Gtk.Label(xalign=1)
             amount.set_markup(f'<span foreground="{tones()["A"]}">+{added}</span> '
                               f'<span foreground="{tones()["D"]}">−{removed}</span>')
-            amount.add_css_class('dim-label')
+            amount.add_css_class('elyares-muted')
             line.append(amount)
         said = f'{gitview.LABELS.get(code, "sin cambios")}: {path}'
         btn = self._button(row['depth'], said, lambda p=path: (choose(p), self.on_chosen()))
@@ -170,7 +175,7 @@ class FileList(Gtk.ScrolledWindow):
 
     def _note(self, text):
         label = Gtk.Label(label=text, xalign=0, wrap=True)
-        label.add_css_class('dim-label')
+        label.add_css_class('elyares-muted')
         self.box.append(label)
 
 
