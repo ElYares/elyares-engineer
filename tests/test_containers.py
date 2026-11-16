@@ -116,6 +116,14 @@ class TallerTest(unittest.TestCase):
         self.assertEqual(tp.layout(1600, 900), 'stack')      # nunca lado a lado: la terminal siempre abajo
 
 
+class ShortcutTest(unittest.TestCase):
+    def test_go_skips_hidden_views(self):
+        from elyares import windowframe as wf
+        shown = [k for k, _t in wf.VIEWS if k not in wf.HIDDEN_VIEWS]
+        self.assertGreaterEqual(len(shown), 9)
+        self.assertNotIn('flows', shown)
+
+
 class GroupTest(unittest.TestCase):
     def setUp(self):
         registered = [dict(name='aang', path='/w/aang'), dict(name='vacio', path='/w/vacio')]
