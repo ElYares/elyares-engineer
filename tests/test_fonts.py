@@ -10,6 +10,10 @@ class Letra(unittest.TestCase):
         fonts.use_techno(False)
         fonts.use_scale(125)
 
+    def test_ninguna_letra_baja_del_suelo(self):
+        self.assertEqual(fonts.pick('Sans Semi-Bold 8'), 'Sans Semi-Bold 9')
+        self.assertEqual(fonts.pick('Sans 9'), 'Sans 9')
+
     def test_la_del_sistema_deja_todo_como_esta(self):
         self.assertEqual(fonts.pick('Sans Semi-Bold 11'), 'Sans Semi-Bold 11')
         self.assertEqual(fonts.css(), '')
@@ -43,7 +47,7 @@ class Letra(unittest.TestCase):
     def test_vista_cansada_agranda_y_engrosa(self):
         fonts.use_tired(True)
         self.assertEqual(fonts.pick('Sans 10'), 'Sans Medium 12.5')
-        self.assertEqual(fonts.pick('Sans Semi-Bold 8'), 'Sans Semi-Bold 10')
+        self.assertEqual(fonts.pick('Sans Semi-Bold 8'), 'Sans Semi-Bold 11.2')
         self.assertEqual(fonts.pick('JetBrainsMono Nerd Font 9'), 'JetBrainsMono Nerd Font 11.2')
         self.assertEqual(fonts.pick('Sans'), 'Sans')
         self.assertIn('font-size: 125%', fonts.css())
@@ -51,7 +55,7 @@ class Letra(unittest.TestCase):
     def test_vista_cansada_con_letra_elegida(self):
         fonts.use('Garet')
         fonts.use_tired(True)
-        self.assertEqual(fonts.pick('Sans Semi-Bold 8'), 'Garet Book 10')
+        self.assertEqual(fonts.pick('Sans Semi-Bold 8'), 'Garet Book 11.2')
         self.assertIn('font-family: "Garet"', fonts.css())
 
     def test_apagada_todo_vuelve_a_como_estaba(self):
