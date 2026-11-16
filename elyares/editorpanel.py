@@ -12,7 +12,7 @@ gi.require_version('Gtk', '4.0')
 
 from gi.repository import Gdk, GLib, Gtk
 
-from . import gitview, terminal
+from . import gitview, terminal, themes, windowframe
 from .terminalpanel import TerminalPanel
 from .windowframe import SPACE
 
@@ -21,9 +21,14 @@ LIST_MIN = 160
 CODES = {'M': 'M', 'A': 'A', 'D': 'D', 'R': 'R', '?': 'N', 'U': '!'}      # la marca de cada archivo cambiado
 MAX_ROWS = 1500           # filas del árbol que se dibujan; más que eso, un repositorio enorme con todo abierto
 INDENT = 14
-# El color de cada cambio (los de aviso, no del tema): modificado, nuevo, borrado, en conflicto.
-TONES = {'M': '#f5c542', 'A': '#4ade80', '?': '#4ade80', 'D': '#ff6b6b', 'R': '#f5c542', 'U': '#ff6b6b'}
-AGENT = '#6ea8ff'         # lo que tocó el agente en el chat
+
+
+def tones():
+    """El color de cada cambio (los de aviso, que siguen al tema claro/oscuro): modificado, nuevo, borrado, en conflicto."""
+    green, amber, red = themes.signal()
+    return {'M': amber, 'A': green, '?': green, 'D': red, 'R': amber, 'U': red}
+
+
 CSS = """
 .ftree-row { background: none; border: none; box-shadow: none; border-radius: 6px; padding: 1px 4px; min-height: 22px; }
 .ftree-row:hover { background: alpha(currentColor, 0.08); }
@@ -124,7 +129,7 @@ class FileList(Gtk.ScrolledWindow):
         return label
 
     def _dir(self, row):
-        extra = f'  <span foreground="{TONES["M"]}">● {row["count"]}</span>' if row['count'] and not row['open'] else ''
+        extra = f'  <span foreground="{tones()["M"]}">● {row["count"]}</span>' if row['count'] and not row['open'] else ''
         name = Gtk.Label(xalign=0, hexpand=True, ellipsize=3)
         name.set_markup(f'<b>{GLib.markup_escape_text(row["name"])}</b>{extra}')
         line = Gtk.Box(spacing=SPACE[0])
@@ -137,12 +142,12 @@ class FileList(Gtk.ScrolledWindow):
 
     def _file(self, row, state, choose, edited):
         path, code = row['path'], row['code']
-        color = TONES.get(code)
+        color = tones().get(code)
         text = GLib.markup_escape_text(row['name'])
         name = Gtk.Label(xalign=0, hexpand=True, ellipsize=3)
         name.set_markup(f'<span foreground="{color}">{text}</span>' if color else text)
         if path in edited:
-            mark = f'<span foreground="{AGENT}">✎</span>'
+            mark = f'<span foreground="{windowframe.ACCENT}">✎</span>'
         else:
             mark = f'<span foreground="{color}" weight="bold">{CODES.get(code, "M")}</span>' if color else ''
         line = Gtk.Box(spacing=SPACE[0])
@@ -151,8 +156,8 @@ class FileList(Gtk.ScrolledWindow):
         added, removed = (state.stats or {}).get(path, (0, 0))
         if added or removed:
             amount = Gtk.Label(xalign=1)
-            amount.set_markup(f'<span foreground="{TONES["A"]}">+{added}</span> '
-                              f'<span foreground="{TONES["D"]}">−{removed}</span>')
+            amount.set_markup(f'<span foreground="{tones()["A"]}">+{added}</span> '
+                              f'<span foreground="{tones()["D"]}">−{removed}</span>')
             amount.add_css_class('dim-label')
             line.append(amount)
         said = f'{gitview.LABELS.get(code, "sin cambios")}: {path}'

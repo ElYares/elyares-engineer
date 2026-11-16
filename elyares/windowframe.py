@@ -8,7 +8,7 @@ arma los widgets; qué hace cada botón lo decide quien lo crea con `on_view`.
 
 from gi.repository import Gdk, GLib, Gtk, Pango
 
-from . import fonts, mascot, themes
+from . import fonts, mascot, responsive, themes
 
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
@@ -17,6 +17,9 @@ VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
          ('sources', 'Fuentes'), ('settings', 'Ajustes'))
 HIDDEN_VIEWS = ('flows', 'tmux')       # sin botón en la barra por ahora: el código sigue ahí
 SIDEBAR_W = 180
+NAV_EDGES = (1000, 1250)        # ancho de la ventana: bajo el primero, casi todas las vistas van en «Vista ▾»; bajo el segundo, las menos usadas en «Más ▾»
+NAV_MORE = {responsive.WIDE: (), responsive.MEDIUM: ('projects', 'pomodoro', 'sources', 'settings'),
+            responsive.COMPACT: tuple(k for k, _t in VIEWS if k not in ('board', 'chat'))}
 FOLD_W = 640                    # más angosta que esto, la barra lateral se pliega y el texto conserva su tamaño
 
 # Tokens (HU-005). Espacios en px: 4, 8, 12, 16; radios: 8 y 12. Tres
@@ -83,6 +86,7 @@ def build_css():
 .elyares-bar {{ background: {SURFACE[0]}; color: {INK}; border: none; box-shadow: none;
   border-bottom: 1px solid rgba({GLOW}, 0.06); }}
 /* Las vistas, como el control segmentado de macOS: una pastilla con la activa elevada. */
+.elyares-title {{ font-size: 1.45em; font-weight: 700; margin-bottom: {SPACE[0]}px; }}
 .elyares-segments {{ background: {SURFACE[1]}; border-radius: {RADIUS[0]}px; padding: 2px;
   border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-segments button {{ background: transparent; color: {MUTED}; border: none; box-shadow: none;
@@ -251,6 +255,16 @@ class Frame:
             btn.set_visible(key not in HIDDEN_VIEWS)
             nav.append(btn)
             self.buttons[key] = btn
+        self.nav_mode = None
+        self.more = Gtk.MenuButton(label='Más ▾')
+        self.more.add_css_class('elyares-more')
+        self.more.set_visible(False)
+        self.more.update_property([Gtk.AccessibleProperty.LABEL], ['Más vistas'])
+        self.more_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        pop = Gtk.Popover()
+        pop.set_child(self.more_box)
+        self.more.set_popover(pop)
+        nav.append(self.more)
         self.none = Gtk.ToggleButton()      # nadie del grupo marcado: la bandeja no es una de las vistas
         self.none.set_group(first)
         self.header.set_title_widget(nav)
@@ -419,6 +433,28 @@ class Frame:
         """Plegada, la barra lateral no achica el contenido: con la ventana
         angosta (hasta 480) el dibujo conserva todo su ancho."""
         self.side_box.set_visible(not width or width >= FOLD_W)
+        if width:
+            mode = responsive.mode(width, self.nav_mode, edges=NAV_EDGES)
+            if mode != self.nav_mode:
+                self.nav_mode = mode
+                self.fit_nav()
+
+    def fit_nav(self):
+        """Con la ventana angosta, las vistas que no caben pasan a un menú («Más ▾» o «Vista ▾»)."""
+        spill = NAV_MORE[self.nav_mode]
+        for key, btn in self.buttons.items():
+            if key in dict(VIEWS):
+                btn.set_visible(key not in HIDDEN_VIEWS and key not in spill)
+        while (child := self.more_box.get_first_child()) is not None:
+            self.more_box.remove(child)
+        for key, text in VIEWS:
+            if key in spill and key not in HIDDEN_VIEWS:
+                item = Gtk.Button(label=text, halign=Gtk.Align.FILL)
+                item.add_css_class('flat')
+                item.connect('clicked', lambda _b, k=key: (self.buttons[k].set_active(True), self.more.popdown()))
+                self.more_box.append(item)
+        self.more.set_visible(bool(spill))
+        self.more.set_label('Vista ▾' if self.nav_mode == responsive.COMPACT else 'Más ▾')
 
     def chrome_h(self):
         """Lo que la barra de título le quita al alto de la ventana."""
@@ -721,7 +757,8 @@ class SourcesPanel(Gtk.Box):
         while (child := self.detail.get_first_child()) is not None:
             self.detail.remove(child)
         title = Gtk.Label(xalign=0)
-        title.set_markup(f'<span size="x-large" weight="bold">{GLib.markup_escape_text(d["title"])}</span>')
+        title.set_label(d['title'])
+        title.add_css_class('elyares-title')
         self.detail.append(title)
         status = Gtk.Label(label=d['status'], xalign=0)
         self.detail.append(status)
@@ -1392,7 +1429,8 @@ class FlowsPanel(Gtk.ScrolledWindow):
             self.page.remove(child)
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
         title = Gtk.Label(xalign=0)
-        title.set_markup('<span size="x-large" weight="bold">Workflows</span>')
+        title.set_label('Workflows')
+        title.add_css_class('elyares-title')
         head.append(title)
         count = Gtk.Label(label='' if not rows else '1 guardado' if len(rows) == 1 else f'{len(rows)} guardados')
         count.add_css_class('dim-label')

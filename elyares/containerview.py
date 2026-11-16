@@ -29,8 +29,7 @@ KEYS = ('state', 'ports', 'cpu', 'mem', 'created')      # las columnas de COLS, 
 HIDDEN = {responsive.COMPACT: KEYS, responsive.MEDIUM: ('ports', 'created'), responsive.WIDE: ()}
 FILTERS = (('all', 'Todos'), ('up', 'Arriba'), ('stopped', 'Parados'), ('failed', 'Fallidos'))
 # Colores de aviso: no son del tema; en los temas claros van en su versión oscura para que se lean (≥ 4.5:1).
-SIGNALS = {False: ('#4ade80', '#f5c542', '#ff6b6b'), True: ('#166534', '#7a4f00', '#991b1b')}
-GREEN, AMBER, RED = SIGNALS[False]
+GREEN, AMBER, RED = themes.SIGNALS[False]
 GREY = '#8f9ab8'
 CORES = os.cpu_count() or 1
 PULSE_SECS = 1.3          # lo que tarda el esqueleto en latir una vez
@@ -46,7 +45,7 @@ LOG_TONES = ((re.compile(r'\b(error|fatal|panic|exception|critical|traceback)\b|
 def palette():
     """Toma del tema de ahora los colores de aviso y el gris; los lee `dot()` y los estilos."""
     global GREEN, AMBER, RED, GREY
-    GREEN, AMBER, RED = SIGNALS[themes.is_light()]
+    GREEN, AMBER, RED = themes.signal()
     GREY = windowframe.MUTED
 
 
@@ -261,7 +260,7 @@ class ContainersPanel(Gtk.Box):
         for tile in (up_tile, cpu_tile, mem_tile):
             tiles.append(tile)
         title = Gtk.Label(label='Contenedores', xalign=0)
-        title.add_css_class('title-2')
+        title.add_css_class('elyares-title')
         self.chips = {}
         first = None
         top = Gtk.Box(spacing=SPACE[1])
