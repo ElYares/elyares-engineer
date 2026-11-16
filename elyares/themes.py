@@ -221,6 +221,37 @@ def signal():
     return SIGNALS[is_light()]
 
 
+def luminance(color):
+    """La luminancia relativa de WCAG de un `#rrggbb`."""
+    def lin(c):
+        return c / 12.92 if c <= .03928 else ((c + .055) / 1.055) ** 2.4
+    r, g, b = (lin(c) for c in tuple_of(color))
+    return .2126 * r + .7152 * g + .0722 * b
+
+
+def contrast(a, b):
+    """La razón de contraste WCAG entre dos `#rrggbb` (1 a 21)."""
+    hi, lo = sorted((luminance(a), luminance(b)), reverse=True)
+    return (hi + .05) / (lo + .05)
+
+
+def legible(color, background, ratio=4.5):
+    """`color` con la luminosidad movida (el tono y la saturación se conservan) hasta leerse sobre
+    `background` con al menos `ratio`: oscurece si el fondo es claro y aclara si es oscuro."""
+    import colorsys
+    h, l, s = colorsys.rgb_to_hls(*tuple_of(color))
+    step = -.02 if luminance(background) > .4 else .02
+    while contrast(color, background) < ratio and 0 < l < 1:
+        l = min(1, max(0, l + step))
+        color = '#%02x%02x%02x' % tuple(round(c * 255) for c in colorsys.hls_to_rgb(h, l, s))
+    return color
+
+
+def ink_for(color):
+    """El color de un personaje o de un estado como texto sobre la tarjeta del tema de ahora."""
+    return legible(color, get()['surface'][1])
+
+
 def glow():
     """El color de los velos y filos sobre una superficie: blanco en oscuro, negro en claro."""
     return (0, 0, 0) if is_light() else (1, 1, 1)

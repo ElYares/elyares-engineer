@@ -241,7 +241,7 @@ class WindowView:
         now, cards, free = time.monotonic(), [], []
         for m in self.team(s):
             busy = m.busy
-            color = mascot.COLORS.get(mascot.accent(m.role), mascot.accent(m.role))
+            color = themes.ink_for(mascot.COLORS.get(mascot.accent(m.role), mascot.accent(m.role)))
             asleep = m.role == MAIN_ROLE and not busy and not s.delegating
             pet = app.MEMBER_PET.get(m.state, 'sleep' if asleep else 'idle')
             if busy:
@@ -268,7 +268,7 @@ class WindowView:
         from . import state
         s, m = self.focused()
         now = time.monotonic()
-        color = mascot.accent(m.role)
+        color = themes.ink_for(mascot.accent(m.role))
         pet = app.MEMBER_PET.get(m.state, 'idle')
         n = len(m.steps)
         took = f' · {elapsed(now - m.since)}' if m.busy and m.since else ''
@@ -378,7 +378,7 @@ class WindowView:
         role = self.chat_role()
         status, _tone = self.chat_status()
         info = dict(role=role, pet=self.chat_pet(), name=c.name if c is not None else state.MAIN_AGENT,
-                    color=mascot.accent(role), project=c.project if c is not None else '',
+                    color=themes.ink_for(mascot.accent(role)), project=c.project if c is not None else '',
                     status=status, where=state.tilde(c.cwd) if c is not None else '',
                     busy=bool(c is not None and c.busy), can_split=self.chat_can_split(),
                     edited=len(gitview.inside(c.cwd, c.edited)) if c is not None else 0)
