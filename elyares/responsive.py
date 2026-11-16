@@ -8,13 +8,13 @@ EDGES = (560, 1150)         # compacto < 560 <= medio < 1150 <= amplio (lista y 
 HYST = 24
 
 
-def mode(width, current=None, scale=1.0):
+def mode(width, current=None, scale=1.0, edges=EDGES):
     """El modo para `width` px. `scale`: el aumento de la vista cansada (con 150 % cabe lo de un ancho menor)."""
     wide = width / max(scale, 0.1)
     steps = (COMPACT, MEDIUM, WIDE)
-    new = steps[sum(wide >= edge for edge in EDGES)]
+    new = steps[sum(wide >= edge for edge in edges)]
     if current in steps and new != current:
-        edge = EDGES[min(steps.index(new), steps.index(current))]
+        edge = edges[min(steps.index(new), steps.index(current))]
         if abs(wide - edge) < HYST:
             return current
     return new

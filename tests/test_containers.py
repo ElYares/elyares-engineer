@@ -86,6 +86,28 @@ class ResponsiveTest(unittest.TestCase):
         self.assertEqual(containerview.ContainersPanel._subtitle(box, ()), 'nginx:1')
 
 
+class WholeAppTest(unittest.TestCase):
+    def test_signal_follows_theme_brightness(self):
+        from elyares import themes
+        old = themes.current
+        try:
+            themes.use('omarchy')
+            dark = themes.signal()
+            themes.use('papel')
+            self.assertNotEqual(dark, themes.signal())
+            self.assertEqual(themes.signal()[0], '#166534')
+        finally:
+            themes.use(old)
+
+    def test_nav_overflow_only_names_real_views(self):
+        from elyares import windowframe as wf, responsive as r
+        keys = {k for k, _t in wf.VIEWS}
+        for spill in wf.NAV_MORE.values():
+            self.assertTrue(set(spill) <= keys)
+        self.assertEqual(r.mode(1100, edges=wf.NAV_EDGES), r.MEDIUM)
+        self.assertEqual(r.mode(900, edges=wf.NAV_EDGES), r.COMPACT)
+
+
 class GroupTest(unittest.TestCase):
     def setUp(self):
         registered = [dict(name='aang', path='/w/aang'), dict(name='vacio', path='/w/vacio')]

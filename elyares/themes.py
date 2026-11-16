@@ -212,6 +212,15 @@ def is_light():
     return .2126 * r + .7152 * g + .0722 * b > .5
 
 
+SIGNALS = {False: ('#4ade80', '#f5c542', '#ff6b6b'), True: ('#166534', '#7a4f00', '#991b1b')}
+
+
+def signal():
+    """(verde, ámbar, rojo) de aviso: no son del tema, pero en los temas claros van en su paso oscuro
+    para que se lean (≥ 4.5:1). Los leen Contenedores y el Editor."""
+    return SIGNALS[is_light()]
+
+
 def glow():
     """El color de los velos y filos sobre una superficie: blanco en oscuro, negro en claro."""
     return (0, 0, 0) if is_light() else (1, 1, 1)
