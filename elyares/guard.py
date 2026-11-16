@@ -49,6 +49,9 @@ WRITERS = {'rm', 'rmdir', 'unlink', 'mv', 'ln', 'chmod', 'chown', 'chgrp', 'trun
            'shred', 'patch'}
 TO_DEST = {'cp', 'install', 'mkdir', 'touch', 'tee', 'rsync'}     # pasan si el destino es /tmp
 STOPPERS = {'kill', 'pkill', 'killall', 'reboot', 'shutdown', 'poweroff'}
+TMUX_TYPES = {'send-keys', 'send', 'paste-buffer', 'pasteb', 'run-shell', 'run', 'if-shell', 'if',
+              'pipe-pane', 'pipep', 'respawn-pane', 'respawnp', 'respawn-window', 'respawnw'}
+NVIM = {'nvim', 'vim', 'vi', 'nvr'}
 SYSTEM_PACKAGES = {'pacman', 'yay', 'paru', 'apt', 'apt-get', 'dnf', 'brew'}
 SQL_CLIENTS = {'psql', 'mysql', 'mariadb', 'sqlite3'}
 SQL_WRITE = re.compile(r'\b(insert|update|delete|drop|alter|truncate|create|replace|grant)\b', re.I)
@@ -389,6 +392,10 @@ def simple(segment, scratch, depth=0):
         return '`perl -i` edita el archivo'
     if name in ('awk', 'gawk') and 'inplace' in rest:
         return '`awk -i inplace` edita el archivo'
+    if name == 'tmux' and any(a in TMUX_TYPES for a in rest):
+        return f'`tmux` escribe o corre comandos dentro de una terminal'
+    if name in NVIM and any(a in ('--server', '--remote') or a.startswith('--remote-') for a in rest):
+        return f'`{name} --server` escribe en el editor abierto'
     if name == 'git':
         return git(rest, scratch)
     if name == 'docker':
