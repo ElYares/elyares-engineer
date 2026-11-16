@@ -60,5 +60,21 @@ class TiredView(unittest.TestCase):
             fonts.tired, fonts.TIRED_SCALE = old
 
 
+class TypeScale(unittest.TestCase):
+    def test_tokens_become_css(self):
+        from elyares import fonts, windowframe
+        css = fonts.type_css()
+        for name in fonts.TYPE:
+            self.assertIn(f'.elyares-{name} {{', css)
+        self.assertIn('letter-spacing: 1px', fonts.type_rule('caption'))
+        self.assertIn('"tnum"', fonts.type_rule('figure'))
+        self.assertIn('.elyares-figure', windowframe.build_css())       # la ventana usa la escala
+
+    def test_nothing_in_px_in_window_text_rules(self):
+        from elyares import containerview
+        import re
+        self.assertEqual(re.findall(r'font-size: \d+px', containerview.build_css()), [])
+
+
 if __name__ == '__main__':
     unittest.main()
