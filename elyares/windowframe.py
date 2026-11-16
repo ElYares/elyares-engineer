@@ -1017,7 +1017,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
 
     @staticmethod
     def _clock_markup(status):
-        color = mascot.COLORS.get(PomodoroPanel.TONES.get(status['phase'], 'metal'), '#8f9ab8')
+        color = themes.ink_for(mascot.COLORS.get(PomodoroPanel.TONES.get(status['phase'], 'metal'), '#8f9ab8'))
         return (f'<span size="xx-large" weight="bold" foreground="{color}">{status["clock"]}</span>  '
                 f'<span alpha="70%">{status["text"]}</span>')
 

@@ -39,6 +39,7 @@ FONT_PROJ = 'Sans Medium 9'
 FONT_PROJ_HEAD = 'Sans Semi-Bold 9'
 FONT_PROJ_NOTE = 'JetBrainsMono Nerd Font 8'
 FONT_PROJ_TITLE = 'Sans Semi-Bold 11'
+TITLE = (.95, .96, 1)         # el color del título: `App.load_theme` lo cambia con el tema
 AMBER = (.96, .76, .36)       # donde estás: el mismo ámbar del sidebar
 # Cómo va el Claude de un proyecto: (lo que se lee, papel de su color).
 CLAUDE_NOTES = {'permission': ('permiso', 'bad'), 'working': ('trabaja', 'cmd'), 'done': ('listo', 'pass'),
@@ -171,7 +172,7 @@ class ProjectView:
         items = self.project_items()
         soft = mascot.rgba(self.ink('text', .62))[:3]
         opened, total = sum(p.open for p in self.projects), len(self.projects)
-        tw = self.put(cr, 'Proyectos', FONT_PROJ_TITLE, left, 14, (.95, .96, 1), alpha)
+        tw = self.put(cr, 'Proyectos', FONT_PROJ_TITLE, left, 14, TITLE, alpha)
         self.put(cr, f'{opened} abiertos en tmux, de {total}', FONT_PROJ_NOTE, left + tw + 12, 17, soft, alpha)
         x = left + width
         for key, label in (('close', 'Cerrar'), ('all', 'solo abiertos ›' if self.projects_all else 'todos ›')):
