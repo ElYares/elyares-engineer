@@ -36,6 +36,56 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(c.to_bytes(''), 0.0)
 
 
+class ColumnsTest(unittest.TestCase):
+    def test_span(self):
+        self.assertEqual(c.span('Up 8 hours (healthy)'), '8 h')
+        self.assertEqual(c.span('About an hour ago'), '1 h')
+        self.assertEqual(c.span('4 minutes ago'), '4 min')
+        self.assertEqual(c.span('nada'), '')
+
+    def test_ports_without_ipv6_duplicates(self):
+        self.assertEqual(c.parse_ports('0.0.0.0:50515->80/tcp, [::]:50515->80/tcp, 9000/tcp'), ['50515→80'])
+        self.assertEqual(c.parse_ports(''), [])
+
+    def test_kind_and_state_text(self):
+        up = dict(state='running', status='Up 3 hours', health='')
+        bad = dict(state='exited', status='Exited (1) 2 hours ago')
+        off = dict(state='exited', status='Exited (0) 2 hours ago')
+        self.assertEqual([containerview.kind(b) for b in (up, bad, off)], ['up', 'failed', 'stopped'])
+        self.assertEqual([containerview.state_text(b) for b in (up, bad, off)], ['Arriba 3 h', 'Falló', 'Parado'])
+
+
+class IconsTest(unittest.TestCase):
+    def test_find_by_image_or_service(self):
+        from elyares import icons
+        self.assertEqual(icons.find('postgres:16-alpine'), ('devicon', 'postgresql'))
+        self.assertEqual(icons.find('opensearchproject/opensearch:2.11'), ('dashboard', 'opensearch'))
+        self.assertEqual(icons.find('docker.io/library/rust:1'), ('devicon', 'rust'))
+        self.assertEqual(icons.find('', 'redis'), ('devicon', 'redis'))
+        self.assertIsNone(icons.find('miapp:latest', 'web'))
+
+    def test_every_mapped_file_exists(self):
+        import os
+        from elyares import icons
+        for _key, folder, stem in icons.BRANDS:
+            self.assertTrue(os.path.exists(os.path.join(icons.DIR, folder, f'{stem}.svg')), (folder, stem))
+
+
+class ResponsiveTest(unittest.TestCase):
+    def test_modes_and_hysteresis(self):
+        from elyares import responsive as r
+        self.assertEqual([r.mode(w) for w in (400, 700, 1300)], [r.COMPACT, r.MEDIUM, r.WIDE])
+        self.assertEqual(r.mode(570, r.COMPACT), r.COMPACT)      # a 10 px del corte: no cambia
+        self.assertEqual(r.mode(600, r.COMPACT), r.MEDIUM)
+        self.assertEqual(r.mode(1140, r.WIDE), r.WIDE)
+        self.assertEqual(r.mode(700, scale=1.5), r.COMPACT)      # vista cansada: 700/1.5 = 466
+
+    def test_subtitle_carries_hidden_columns(self):
+        box = dict(name='n', service='s', image='nginx:1', state='running', status='Up 3 hours', ports=['80→80'], created='2 h')
+        self.assertEqual(containerview.ContainersPanel._subtitle(box, ('ports', 'created')), 'nginx:1 · 80→80 · hace 2 h')
+        self.assertEqual(containerview.ContainersPanel._subtitle(box, ()), 'nginx:1')
+
+
 class GroupTest(unittest.TestCase):
     def setUp(self):
         registered = [dict(name='aang', path='/w/aang'), dict(name='vacio', path='/w/vacio')]

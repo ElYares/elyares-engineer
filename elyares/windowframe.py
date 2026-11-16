@@ -50,8 +50,10 @@ def tech_css():
 .elyares-segments, .elyares-segments button, .elyares-pill, .elyares-side row, .elyares-card,
 .elyares-btn, entry, textview, dropdown, button, popover, popover contents, scrollbar slider, switch, switch slider
   {{ border-radius: 0; box-shadow: none; }}
-.elyares-segments, .elyares-card, .elyares-btn, .elyares-pill, .elyares-chathead
+.elyares-segments, .elyares-card, .elyares-btn, .elyares-pill, .elyares-chathead, .cbox-chip, .cbox-group, .cbox-tile
   {{ border: 1px solid rgba({GLOW}, 0.22); }}
+.cbox-chip, .cbox-row, .cbox-group, .cbox-tile, .cbox-icon, .cbox-logs, .cbox-job, .cbox-badge, .cbox-pip
+  {{ border-radius: 0; }}
 .elyares-segments button:checked, .elyares-pill:checked, .elyares-side row:selected
   {{ border-left: 2px solid {ACCENT}; }}
 """
@@ -122,6 +124,7 @@ dropdown:focus-within, switch:focus-visible, checkbutton:focus-visible, button:f
 
 CSS = build_css()
 _provider = None
+HOOKS = []          # lo que otras vistas rehacen cuando cambia el tema (sus estilos propios)
 
 
 def use_theme():
@@ -136,6 +139,8 @@ def use_theme():
     CSS = build_css()
     if _provider is not None:
         _provider.load_from_string(CSS)
+    for hook in HOOKS:
+        hook()
 
 
 def load_css():
