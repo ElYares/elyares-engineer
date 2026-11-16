@@ -17,7 +17,7 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import (editorpanel, fonts, gitview, hypr, mascot, pomodoro, settings, tallerpanel, terminal, terminalpanel,
+from . import (containers, containerview, editorpanel, fonts, gitview, hypr, mascot, pomodoro, settings, tallerpanel, terminal, terminalpanel,
                themes, tmuxsessions, windowframe)
 from .state import MAIN_ROLE, elapsed
 
@@ -55,13 +55,15 @@ class WindowView:
     hypr_async = True               # las pruebas lo apagan: el pedido sale en el acto
     window_body = 0                 # alto extra que piden las tarjetas del tablero (lo usa body_h)
     sources_pick = 'claude'         # la fuente que muestra
-    panel_open = ''                 # 'alerts', 'settings', 'tmux', 'pomodoro', 'editor', 'terminal' o 'taller' cuando una de esas vistas está a la vista
+    code_root = ''                  # la carpeta de la sesión elegida en la barra lateral: manda en Editor, Terminal y Taller
+    panel_open = ''                 # 'alerts', 'settings', 'tmux', 'pomodoro', 'containers', 'editor', 'terminal' o 'taller' cuando una de esas vistas está a la vista
     help_win = None
     frame = None                    # el marco de widgets (windowframe.Frame); None sin ventana real
 
     def window_init(self):
         self.tmux_watch = tmuxsessions.Watcher()
         self.pomo_watch = pomodoro.Watcher()
+        self.box_watch = containers.Watcher()
         self.git_watch = gitview.Watcher()
         self.pomo_repo = ''             # la carpeta del chat que se abrió con «Con agente»
         self.windowed = False
@@ -152,7 +154,9 @@ class WindowView:
         self.frame.terminal = terminalpanel.TerminalPanel()
         self.frame.taller = tallerpanel.TallerPanel()
         self.overlay.add_overlay(self.frame.taller)
-        self.frame.extra += [self.frame.editor, self.frame.terminal, self.frame.taller]     # `hide_panels` los esconde con los demás
+        self.frame.containers = containerview.ContainersPanel()
+        self.overlay.add_overlay(self.frame.containers)
+        self.frame.extra += [self.frame.editor, self.frame.terminal, self.frame.taller, self.frame.containers]     # `hide_panels` los esconde con los demás
         self.overlay.add_overlay(self.frame.terminal)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
@@ -167,7 +171,7 @@ class WindowView:
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
         self.sources_open = key == 'sources'
-        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'editor', 'terminal', 'taller') else ''
+        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'containers', 'editor', 'terminal', 'taller') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -237,7 +241,7 @@ class WindowView:
         now, cards, free = time.monotonic(), [], []
         for m in self.team(s):
             busy = m.busy
-            color = mascot.COLORS.get(mascot.accent(m.role), mascot.accent(m.role))
+            color = themes.ink_for(mascot.COLORS.get(mascot.accent(m.role), mascot.accent(m.role)))
             asleep = m.role == MAIN_ROLE and not busy and not s.delegating
             pet = app.MEMBER_PET.get(m.state, 'sleep' if asleep else 'idle')
             if busy:
@@ -264,7 +268,7 @@ class WindowView:
         from . import state
         s, m = self.focused()
         now = time.monotonic()
-        color = mascot.accent(m.role)
+        color = themes.ink_for(mascot.accent(m.role))
         pet = app.MEMBER_PET.get(m.state, 'idle')
         n = len(m.steps)
         took = f' · {elapsed(now - m.since)}' if m.busy and m.since else ''
@@ -374,7 +378,7 @@ class WindowView:
         role = self.chat_role()
         status, _tone = self.chat_status()
         info = dict(role=role, pet=self.chat_pet(), name=c.name if c is not None else state.MAIN_AGENT,
-                    color=mascot.accent(role), project=c.project if c is not None else '',
+                    color=themes.ink_for(mascot.accent(role)), project=c.project if c is not None else '',
                     status=status, where=state.tilde(c.cwd) if c is not None else '',
                     busy=bool(c is not None and c.busy), can_split=self.chat_can_split(),
                     edited=len(gitview.inside(c.cwd, c.edited)) if c is not None else 0)
@@ -468,6 +472,12 @@ class WindowView:
             status, tasks = self.pomo_watch.read()
             frame.pomodoro.set_pomodoro(status, tasks, dict(act=self.window_pomodoro,
                                                             agent=self.window_pomodoro_agent))
+        frame.containers.set_visible(self.panel_open == 'containers')
+        if self.panel_open == 'containers':
+            data = self.box_watch.read()
+            frame.containers.set_data(data, dict(act=self.window_containers), loading=not self.box_watch.loaded)
+        else:
+            frame.containers.leave()
         if self.panel_open == 'alerts':
             tones = {'': 'red', 'ok': 'green', 'info': 'yellow', 'run': 'metal'}
             cards = []
@@ -544,11 +554,28 @@ class WindowView:
         return max(MIN_H, min(EDITOR_H, room))
 
     def window_editor_root(self):
-        """La carpeta que muestra el editor: la del chat que se tiene, o la del proyecto de tmux."""
+        """La carpeta que muestra el editor: la de la sesión que se eligió en la barra lateral, o la del
+        chat que se tiene, o la del proyecto de tmux."""
+        if self.code_root:
+            return self.code_root
         if self.chat is not None and self.chat.cwd:
             return self.chat.cwd
         here = self.project_here()
         return here.path if here is not None else ''
+
+    def window_containers(self, order, target, on_line=None, on_done=None):
+        """Un botón de la vista Contenedores: corre en un hilo, avisa del avance a la vista y, si falla,
+        también lo dice como alerta."""
+        def go():
+            ok, said = containers.act(order, target, on_line)
+            if on_done:
+                on_done(ok, said)
+            if not ok:
+                GLib.idle_add(self.on_message, {'event': 'alert', 'session_id': 'contenedores', 'name': 'contenedores',
+                                                'message': said or f'{order} {target} falló', 'tone': '',
+                                                'ttl': 20}, None)
+            self.box_watch.refresh()
+        threading.Thread(target=go, daemon=True).start()
 
     def window_pomodoro(self, order, *args):
         """Un botón de la vista Pomodoro: se le pide a `coffe` y se vuelve a preguntar."""
@@ -723,6 +750,8 @@ class WindowView:
         if sid != self.tab:
             self.tab, self.focus = sid, None
             self.tab_manual = True
+        picked = next((c for c in self.claude() if c.sid == sid), None)
+        self.code_root = self.tab_place(self.host(picked)) if picked is not None else ''
 
     def window_rows(self):
         """Las filas de la barra lateral: nombre, punto y estado en texto."""

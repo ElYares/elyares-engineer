@@ -8,14 +8,18 @@ arma los widgets; qué hace cada botón lo decide quien lo crea con `on_view`.
 
 from gi.repository import Gdk, GLib, Gtk, Pango
 
-from . import fonts, mascot, themes
+from . import fonts, mascot, responsive, themes
 
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
-         ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'),
+         ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'), ('containers', 'Contenedores'),
          ('editor', 'Editor'), ('terminal', 'Terminal'), ('taller', 'Taller'),
          ('sources', 'Fuentes'), ('settings', 'Ajustes'))
+HIDDEN_VIEWS = ('flows', 'tmux')       # sin botón en la barra por ahora: el código sigue ahí
 SIDEBAR_W = 180
+NAV_EDGES = (1000, 1250)        # ancho de la ventana: bajo el primero, casi todas las vistas van en «Vista ▾»; bajo el segundo, las menos usadas en «Más ▾»
+NAV_MORE = {responsive.WIDE: (), responsive.MEDIUM: ('projects', 'pomodoro', 'sources', 'settings'),
+            responsive.COMPACT: tuple(k for k, _t in VIEWS if k not in ('board', 'chat'))}
 FOLD_W = 640                    # más angosta que esto, la barra lateral se pliega y el texto conserva su tamaño
 
 # Tokens (HU-005). Espacios en px: 4, 8, 12, 16; radios: 8 y 12. Tres
@@ -49,8 +53,10 @@ def tech_css():
 .elyares-segments, .elyares-segments button, .elyares-pill, .elyares-side row, .elyares-card,
 .elyares-btn, entry, textview, dropdown, button, popover, popover contents, scrollbar slider, switch, switch slider
   {{ border-radius: 0; box-shadow: none; }}
-.elyares-segments, .elyares-card, .elyares-btn, .elyares-pill, .elyares-chathead
+.elyares-segments, .elyares-card, .elyares-btn, .elyares-pill, .elyares-chathead, .cbox-chip, .cbox-group, .cbox-tile
   {{ border: 1px solid rgba({GLOW}, 0.22); }}
+.cbox-chip, .cbox-row, .cbox-group, .cbox-tile, .cbox-icon, .cbox-logs, .cbox-job, .cbox-badge, .cbox-pip
+  {{ border-radius: 0; }}
 .elyares-segments button:checked, .elyares-pill:checked, .elyares-side row:selected
   {{ border-left: 2px solid {ACCENT}; }}
 """
@@ -80,6 +86,8 @@ def build_css():
 .elyares-bar {{ background: {SURFACE[0]}; color: {INK}; border: none; box-shadow: none;
   border-bottom: 1px solid rgba({GLOW}, 0.06); }}
 /* Las vistas, como el control segmentado de macOS: una pastilla con la activa elevada. */
+.elyares-muted {{ color: {MUTED}; opacity: 1; }}
+.elyares-title {{ font-size: 1.45em; font-weight: 700; margin-bottom: {SPACE[0]}px; }}
 .elyares-segments {{ background: {SURFACE[1]}; border-radius: {RADIUS[0]}px; padding: 2px;
   border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-segments button {{ background: transparent; color: {MUTED}; border: none; box-shadow: none;
@@ -98,7 +106,7 @@ def build_css():
 .elyares-side {{ background: transparent; color: {INK}; padding: {SPACE[0]}px {SPACE[1]}px; }}
 .elyares-side row {{ border-radius: {RADIUS[0]}px; padding: {SPACE[1]}px {SPACE[1]}px; margin: 1px 0; }}
 .elyares-side row:hover {{ background: rgba({GLOW}, 0.05); }}
-.elyares-side row:selected {{ background: rgba({ACCENT_RGB}, 0.22); color: {INK}; }}
+.elyares-side row:selected {{ background: rgba({ACCENT_RGB}, 0.22); color: {INK}; box-shadow: inset 2px 0 {ACCENT}; }}
 {ROLE_ROWS}.elyares-card {{ background: {SURFACE[1]}; color: {INK}; border-radius: {RADIUS[1]}px;
   padding: {SPACE[1]}px {SPACE[2]}px; border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-card:hover {{ background: {SURFACE[2]}; }}
@@ -121,6 +129,7 @@ dropdown:focus-within, switch:focus-visible, checkbutton:focus-visible, button:f
 
 CSS = build_css()
 _provider = None
+HOOKS = []          # lo que otras vistas rehacen cuando cambia el tema (sus estilos propios)
 
 
 def use_theme():
@@ -135,6 +144,8 @@ def use_theme():
     CSS = build_css()
     if _provider is not None:
         _provider.load_from_string(CSS)
+    for hook in HOOKS:
+        hook()
 
 
 def load_css():
@@ -242,8 +253,19 @@ class Frame:
             else:
                 btn.set_group(first)
             btn.connect('toggled', self._toggled, key)
+            btn.set_visible(key not in HIDDEN_VIEWS)
             nav.append(btn)
             self.buttons[key] = btn
+        self.nav_mode = None
+        self.more = Gtk.MenuButton(label='Más ▾')
+        self.more.add_css_class('elyares-more')
+        self.more.set_visible(False)
+        self.more.update_property([Gtk.AccessibleProperty.LABEL], ['Más vistas'])
+        self.more_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        pop = Gtk.Popover()
+        pop.set_child(self.more_box)
+        self.more.set_popover(pop)
+        nav.append(self.more)
         self.none = Gtk.ToggleButton()      # nadie del grupo marcado: la bandeja no es una de las vistas
         self.none.set_group(first)
         self.header.set_title_widget(nav)
@@ -259,6 +281,14 @@ class Frame:
         self.help.set_margin_start(SPACE[1])
         self.header.pack_end(self.help)
         self.header.pack_end(self.bell)
+        self.side_open = False          # en ventana angosta: ¿la lista de agentes ocupa el lugar del contenido?
+        self.narrow = False
+        self.agents = Gtk.ToggleButton(label='Agentes')
+        self.agents.add_css_class('elyares-pill')
+        self.agents.update_property([Gtk.AccessibleProperty.LABEL], ['Mostrar los agentes'])
+        self.agents.set_visible(False)
+        self.agents.connect('toggled', self._agents_toggled)
+        self.header.pack_start(self.agents)
         self.board = BoardPanel()
         self.chat_head = ChatHead()
         self.focus = FocusPanel()
@@ -290,6 +320,10 @@ class Frame:
 
     def attach(self, win):
         win.set_titlebar(self.header)
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect('key-pressed', self._shortcut)
+        win.add_controller(keys)
         dressed = Gtk.Overlay()         # encima del contenido, las luces de temporada
         dressed.set_child(self.body)
         self.lights = Lights()
@@ -355,7 +389,7 @@ class Frame:
             title = Gtk.Label(label=name, xalign=0)
             title.set_ellipsize(Pango.EllipsizeMode.END)
             sub = Gtk.Label(label=text, xalign=0)
-            sub.add_css_class('dim-label')
+            sub.add_css_class('elyares-muted')
             col.append(title)
             col.append(sub)
             box.append(dot)
@@ -389,6 +423,8 @@ class Frame:
 
     def _picked(self, _box, row):
         self.on_session(row.sid)
+        if self.side_open:              # en angosto, elegido un agente se vuelve al contenido
+            self.agents.set_active(False)
 
     def hide_panels(self):
         """Los paneles que van encima del dibujo solo valen en la ventana: al
@@ -411,7 +447,59 @@ class Frame:
     def fold(self, width):
         """Plegada, la barra lateral no achica el contenido: con la ventana
         angosta (hasta 480) el dibujo conserva todo su ancho."""
-        self.side_box.set_visible(not width or width >= FOLD_W)
+        self.narrow = bool(width) and width < FOLD_W
+        if not self.narrow and self.side_open:
+            self.agents.set_active(False)
+        self._show_side()
+        if width:
+            mode = responsive.mode(width, self.nav_mode, edges=NAV_EDGES)
+            if mode != self.nav_mode:
+                self.nav_mode = mode
+                self.fit_nav()
+
+    def _shortcut(self, _ctl, keyval, _code, state):
+        """Alt+1…9 salta de vista, aunque el foco esté en la terminal (Ctrl+dígito le toca a nvim y a tmux)."""
+        if state & Gdk.ModifierType.ALT_MASK and not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK) \
+                and Gdk.KEY_1 <= keyval <= Gdk.KEY_9:
+            return self.go(keyval - Gdk.KEY_0)
+        return False
+
+    def _show_side(self):
+        """Ancha: la lista de agentes a un lado. Angosta: oculta, y «Agentes» la pone en lugar del contenido."""
+        self.agents.set_visible(self.narrow)
+        self.side_box.set_visible(not self.narrow or self.side_open)
+        self.side_box.set_hexpand(self.narrow and self.side_open)
+        self.sidebar.set_hexpand(self.narrow and self.side_open)
+        self.slot.set_visible(not (self.narrow and self.side_open))
+
+    def _agents_toggled(self, btn):
+        self.side_open = btn.get_active()
+        self._show_side()
+
+    def go(self, number):
+        """Alt+1…9: la vista que está en ese lugar de la barra (las ocultas no cuentan)."""
+        keys = [k for k, _t in VIEWS if k not in HIDDEN_VIEWS]
+        if 1 <= number <= len(keys):
+            self.buttons[keys[number - 1]].set_active(True)
+            return True
+        return False
+
+    def fit_nav(self):
+        """Con la ventana angosta, las vistas que no caben pasan a un menú («Más ▾» o «Vista ▾»)."""
+        spill = NAV_MORE[self.nav_mode]
+        for key, btn in self.buttons.items():
+            if key in dict(VIEWS):
+                btn.set_visible(key not in HIDDEN_VIEWS and key not in spill)
+        while (child := self.more_box.get_first_child()) is not None:
+            self.more_box.remove(child)
+        for key, text in VIEWS:
+            if key in spill and key not in HIDDEN_VIEWS:
+                item = Gtk.Button(label=text, halign=Gtk.Align.FILL)
+                item.add_css_class('flat')
+                item.connect('clicked', lambda _b, k=key: (self.buttons[k].set_active(True), self.more.popdown()))
+                self.more_box.append(item)
+        self.more.set_visible(bool(spill))
+        self.more.set_label('Vista ▾' if self.nav_mode == responsive.COMPACT else 'Más ▾')
 
     def chrome_h(self):
         """Lo que la barra de título le quita al alto de la ventana."""
@@ -532,7 +620,7 @@ class BoardPanel(Gtk.ScrolledWindow):
         name.set_markup(f'<span foreground="{card["color"]}" weight="bold">{GLib.markup_escape_text(card["name"])}</span>')
         name.set_ellipsize(Pango.EllipsizeMode.END)
         state = Gtk.Label(label=card['state'], xalign=0)
-        state.add_css_class('dim-label')
+        state.add_css_class('elyares-muted')
         text.append(name)
         text.append(state)
         ref['state'] = state
@@ -623,7 +711,7 @@ class ChatHead(Gtk.Box):
                          f' | {GLib.markup_escape_text(info["project"])}')
         where = f' · {info["where"]}' if info['where'] else ''
         status = Gtk.Label(label=info['status'] + where, xalign=0)
-        status.add_css_class('dim-label')
+        status.add_css_class('elyares-muted')
         status.set_ellipsize(Pango.EllipsizeMode.END)
         text.append(title)
         text.append(status)
@@ -696,7 +784,7 @@ class SourcesPanel(Gtk.Box):
             col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             col.append(Gtk.Label(label=name, xalign=0))
             sub = Gtk.Label(label=text, xalign=0)
-            sub.add_css_class('dim-label')
+            sub.add_css_class('elyares-muted')
             sub.set_ellipsize(Pango.EllipsizeMode.END)
             col.append(sub)
             box.append(dot)
@@ -714,12 +802,13 @@ class SourcesPanel(Gtk.Box):
         while (child := self.detail.get_first_child()) is not None:
             self.detail.remove(child)
         title = Gtk.Label(xalign=0)
-        title.set_markup(f'<span size="x-large" weight="bold">{GLib.markup_escape_text(d["title"])}</span>')
+        title.set_label(d['title'])
+        title.add_css_class('elyares-title')
         self.detail.append(title)
         status = Gtk.Label(label=d['status'], xalign=0)
         self.detail.append(status)
         about = Gtk.Label(label=d['about'], xalign=0, wrap=True)
-        about.add_css_class('dim-label')
+        about.add_css_class('elyares-muted')
         self.detail.append(about)
         for line in d['lines']:
             self.detail.append(Gtk.Label(label=line, xalign=0, wrap=True))
@@ -765,7 +854,7 @@ class SourcesPanel(Gtk.Box):
             for i, (cmd, text) in enumerate(d['cmds']):
                 grid.attach(Gtk.Label(label=cmd, xalign=0, selectable=True), 0, i, 1, 1)
                 what = Gtk.Label(label=text, xalign=0, wrap=True)
-                what.add_css_class('dim-label')
+                what.add_css_class('elyares-muted')
                 grid.attach(what, 1, i, 1, 1)
             self.detail.append(grid)
 
@@ -800,7 +889,7 @@ class AlertsPanel(Gtk.ScrolledWindow):
             self.page.remove(child)
         if not alerts:
             empty = Gtk.Label(label='Sin alertas. Todo en orden.', xalign=0)
-            empty.add_css_class('dim-label')
+            empty.add_css_class('elyares-muted')
             self.page.append(empty)
         for a in alerts:
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
@@ -814,7 +903,7 @@ class AlertsPanel(Gtk.ScrolledWindow):
             where = ' · '.join(x for x in (a['where'], a['note']) if x)
             if where:
                 dim = Gtk.Label(label=where, xalign=0)
-                dim.add_css_class('dim-label')
+                dim.add_css_class('elyares-muted')
                 card.append(dim)
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
             for key, label in a['buttons']:
@@ -865,7 +954,7 @@ class TmuxPanel(Gtk.ScrolledWindow):
             count = 'sin Claude' if not claudes else '1 Claude' if claudes == 1 else f'{claudes} Claude'
             title = Gtk.Label(xalign=0)
             title.set_markup(f'<b>{GLib.markup_escape_text(sess["name"])}</b>  '
-                             f'<span alpha="60%">{count}</span>')
+                             f'<span foreground="{MUTED}">{count}</span>')
             card.append(title)
             for win in sess['windows']:
                 card.append(self._window(sess['name'], win, handlers))
@@ -873,7 +962,7 @@ class TmuxPanel(Gtk.ScrolledWindow):
 
     def _note(self, text):
         label = Gtk.Label(label=text, xalign=0, wrap=True)
-        label.add_css_class('dim-label')
+        label.add_css_class('elyares-muted')
         self.page.append(label)
 
     def _window(self, session, win, handlers):
@@ -884,7 +973,7 @@ class TmuxPanel(Gtk.ScrolledWindow):
         label = Gtk.Label(xalign=0)
         color = mascot.COLORS.get(self.TONES.get(win['state'], 'metal'), '#8f9ab8')
         dot = f'<span foreground="{color}">{mark}</span> ' if mark else ''
-        tail = f'  <span alpha="60%">{said}</span>' if said else ''
+        tail = f'  <span foreground="{MUTED}">{said}</span>' if said else ''
         crew = ''.join(f' <span foreground="{mascot.accent(role)}">●</span>' for role in win.get('agents', ()))
         label.set_markup(f'{dot}{win["index"]} · {GLib.markup_escape_text(win["name"])}{tail}{crew}')
         btn.set_child(label)
@@ -929,9 +1018,9 @@ class PomodoroPanel(Gtk.ScrolledWindow):
 
     @staticmethod
     def _clock_markup(status):
-        color = mascot.COLORS.get(PomodoroPanel.TONES.get(status['phase'], 'metal'), '#8f9ab8')
+        color = themes.ink_for(mascot.COLORS.get(PomodoroPanel.TONES.get(status['phase'], 'metal'), '#8f9ab8'))
         return (f'<span size="xx-large" weight="bold" foreground="{color}">{status["clock"]}</span>  '
-                f'<span alpha="70%">{status["text"]}</span>')
+                f'<span foreground="{MUTED}">{status["text"]}</span>')
 
     def _build(self, status, tasks, handlers):
         while (child := self.page.get_first_child()) is not None:
@@ -940,7 +1029,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
         if status is None:
             note = Gtk.Label(label='El reloj de coffe no responde. Arráncalo con: systemctl --user start coffe',
                              xalign=0, wrap=True)
-            note.add_css_class('dim-label')
+            note.add_css_class('elyares-muted')
             self.page.append(note)
             return
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[1])
@@ -952,7 +1041,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
         card.append(task)
         done = ' '.join('●' if i < status['cycle'] else '○' for i in range(status['cycle_of']))
         count = Gtk.Label(xalign=0)
-        count.set_markup(f'<span alpha="60%">Hoy {status["today"]} · ciclo {done}</span>')
+        count.set_markup(f'<span foreground="{MUTED}">Hoy {status["today"]} · ciclo {done}</span>')
         card.append(count)
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
         if status['parked']:
@@ -976,7 +1065,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
             btn.set_hexpand(True)
             label = Gtk.Label(xalign=0)
             label.set_markup(f'{GLib.markup_escape_text(t["title"])}  '
-                             f'<span alpha="60%">{GLib.markup_escape_text(t["project"])}</span>')
+                             f'<span foreground="{MUTED}">{GLib.markup_escape_text(t["project"])}</span>')
             btn.set_child(label)
             btn.update_property([Gtk.AccessibleProperty.LABEL],
                                 [f'Empezar un pomodoro en {t["title"]}, de {t["project"]}'])
@@ -993,7 +1082,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
 
     def _note(self, text):
         label = Gtk.Label(label=text, xalign=0, wrap=True)
-        label.add_css_class('dim-label')
+        label.add_css_class('elyares-muted')
         self.page.append(label)
 
     @staticmethod
@@ -1049,7 +1138,7 @@ class SettingsPanel(Gtk.ScrolledWindow):
             col.append(Gtk.Label(label=text, xalign=0))
             if note:
                 dim = Gtk.Label(label=note, xalign=0, wrap=True)
-                dim.add_css_class('dim-label')
+                dim.add_css_class('elyares-muted')
                 col.append(dim)
             switch = Gtk.Switch()
             switch.set_active(on)
@@ -1094,7 +1183,7 @@ class SettingsPanel(Gtk.ScrolledWindow):
         self.page.append(pick)
         note = Gtk.Label(label='Vale para la isla y para la ventana; el código sigue en monoespaciada.',
                          xalign=0, wrap=True)
-        note.add_css_class('dim-label')
+        note.add_css_class('elyares-muted')
         self.page.append(note)
         theme = Gtk.Button(label='Releer los colores del tema')
         theme.add_css_class('elyares-btn')
@@ -1145,7 +1234,7 @@ class HelpDialog(Gtk.Window):
             cmd = Gtk.Label(label=what, xalign=0, selectable=True)
             cmd.set_size_request(200, -1)
             hint = Gtk.Label(label=text, xalign=0, wrap=True)
-            hint.add_css_class('dim-label')
+            hint.add_css_class('elyares-muted')
             line.append(cmd)
             line.append(hint)
             row.set_child(line)
@@ -1270,7 +1359,7 @@ class FocusPanel(Gtk.ScrolledWindow):
         left.append(name)
         for key, text in (('label', d['label']), ('summary', d['summary'])):
             lab = Gtk.Label(label=text)
-            lab.add_css_class('dim-label')
+            lab.add_css_class('elyares-muted')
             lab.set_ellipsize(Pango.EllipsizeMode.END)
             left.append(lab)
             self.refs[key] = lab
@@ -1288,7 +1377,7 @@ class FocusPanel(Gtk.ScrolledWindow):
             mid.append(Gtk.Label(label=d['empty'], xalign=0, wrap=True))
         if d['hidden']:
             more = Gtk.Label(label=f'⋯ {d["hidden"]} paso{"" if d["hidden"] == 1 else "s"} antes', xalign=0)
-            more.add_css_class('dim-label')
+            more.add_css_class('elyares-muted')
             mid.append(more)
         for i, (mark, color, text, spent) in enumerate(d['steps']):
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
@@ -1308,7 +1397,7 @@ class FocusPanel(Gtk.ScrolledWindow):
             t.set_max_width_chars(1)        # el mínimo es una letra: se envuelve al ancho que haya
             t.set_ellipsize(Pango.EllipsizeMode.END)
             when = Gtk.Label(label=spent)
-            when.add_css_class('dim-label')
+            when.add_css_class('elyares-muted')
             row.append(m)
             row.append(t)
             row.append(when)
@@ -1319,7 +1408,7 @@ class FocusPanel(Gtk.ScrolledWindow):
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
             box.add_css_class('elyares-card')
             head = Gtk.Label(label=self._detail_head(self.picked, spent), xalign=0)
-            head.add_css_class('dim-label')
+            head.add_css_class('elyares-muted')
             body = Gtk.Label(label=text, xalign=0, wrap=True, selectable=True)
             body.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             body.set_max_width_chars(1)
@@ -1385,10 +1474,11 @@ class FlowsPanel(Gtk.ScrolledWindow):
             self.page.remove(child)
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[1])
         title = Gtk.Label(xalign=0)
-        title.set_markup('<span size="x-large" weight="bold">Workflows</span>')
+        title.set_label('Workflows')
+        title.add_css_class('elyares-title')
         head.append(title)
         count = Gtk.Label(label='' if not rows else '1 guardado' if len(rows) == 1 else f'{len(rows)} guardados')
-        count.add_css_class('dim-label')
+        count.add_css_class('elyares-muted')
         count.set_hexpand(True)
         count.set_xalign(0)
         head.append(count)
@@ -1405,7 +1495,7 @@ class FlowsPanel(Gtk.ScrolledWindow):
         if not rows:
             empty = Gtk.Label(label='Todavía no guardaste ningún workflow. Crea uno para repetir una cadena '
                                     'de agentes sin escribirla cada vez.', xalign=0, wrap=True)
-            empty.add_css_class('dim-label')
+            empty.add_css_class('elyares-muted')
             self.page.append(empty)
             return
         for i, r in enumerate(rows):
@@ -1419,7 +1509,7 @@ class FlowsPanel(Gtk.ScrolledWindow):
             note = Gtk.Label(xalign=0, wrap=True)
             note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             note.set_max_width_chars(1)
-            note.add_css_class('dim-label')
+            note.add_css_class('elyares-muted')
             note.set_label(r['place'] if not r['status'] else f'{r["place"]} · {r["status"]}')
             self.refs.append(note)
             col.append(name)

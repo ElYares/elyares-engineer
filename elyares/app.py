@@ -577,11 +577,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
 
     def load_theme(self):
         """Fondo, grises, acento de la mascota y colores del texto, del tema elegido."""
-        global ISLAND_BG, TITLE_COLOR, MUTED_NORMAL, MUTED_TIRED, MUTED_COLOR, SEP_COLOR
+        global ISLAND_BG, TITLE_COLOR, MUTED_NORMAL, MUTED_TIRED, MUTED_COLOR, SEP_COLOR, ALLOW_BG, ALLOW_FG, DENY_BG, DENY_FG
         look = themes.get()
         ISLAND_BG = (*themes.tuple_of(look['island']), ISLAND_BG[3])
         TITLE_COLOR = (*themes.tuple_of(look['ink']), 1)
-        chatview.TITLE = workflowview.TITLE = TITLE_COLOR[:3]
+        chatview.TITLE = workflowview.TITLE = projectview.TITLE = TITLE_COLOR[:3]
+        # «Permitir» lleva el acento con el fondo de la ventana de texto; «Denegar» un velo con la tinta: se leen en claro y en oscuro
+        ALLOW_BG, ALLOW_FG = themes.tuple_of(look['accent']), themes.tuple_of(look['surface'][0])
+        DENY_BG, DENY_FG = themes.glow(), themes.tuple_of(look['ink'])
         MUTED_NORMAL, MUTED_TIRED = look['island_muted'], look['island_tired']
         MUTED_COLOR = MUTED_TIRED if fonts.tired else MUTED_NORMAL
         SEP_COLOR = '#%02x%02x%02x' % tuple(round(c * 255) for c in MUTED_NORMAL[:3])
