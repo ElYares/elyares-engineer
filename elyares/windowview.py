@@ -496,6 +496,8 @@ class WindowView:
                     ('chat_tech', 'Chat técnico', bool(st['chat_tech']), 'Bloques y tablas con borde fino y títulos en mayúsculas.'),
                     ('tech_style', 'Estilo técnico', bool(st['tech_style']),
                      'Esquinas rectas, bordes de 1 px y toda la letra monoespaciada.'),
+                    ('reduce_motion', 'Movimiento reducido', bool(st['reduce_motion']),
+                     'La isla quieta no parpadea y redibuja a 2 fps en vez de 12.'),
                     ('tired_eyes', 'Vista cansada', bool(st['tired_eyes']),
                      'Letra más grande y más gruesa, y textos apagados más claros (tamaño abajo).')]
             rows += [(key, f'Fuente: {label}', bool(st[key]), '') for key, label in sources.SOURCES if key != 'claude']
@@ -658,6 +660,10 @@ class WindowView:
             self.chat_theme()
             self.ensure_tick()
             self.overlay.queue_draw()
+        elif key == 'reduce_motion':
+            self.settings['reduce_motion'] = not self.settings['reduce_motion']
+            settings.save(self.settings)
+            self.ensure_tick()
         elif key == 'tired_eyes':
             self.set_tired(not self.settings['tired_eyes'])
             self.settings['tired_eyes'] = fonts.tired

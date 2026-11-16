@@ -224,6 +224,7 @@ ALLOW_BG, ALLOW_FG = (.95, .96, 1), (5 / 255, 6 / 255, 8 / 255)
 DENY_BG, DENY_FG = (1, 1, 1), (.95, .96, 1)
 SPRING_K, SPRING_C = 220.0, 22.0   # rigidez y amortiguación: rebota un poquito
 LOOK_EVERY = 1 / 15                # frecuencia con la que se pregunta el cursor
+REDUCED_FPS = 2                    # con «Movimiento reducido»: lo justo para que lo nuevo se vea
 IDLE_FPS = 12                      # asomada y quieta: ~3% de CPU en vez de ~8% a 30
 KEY_OPEN_SECS = 6                  # abierta con el teclado: se cierra sola
 ASK_GUARD_SECS = .6                # un permiso recién salido no se contesta con el teclado
@@ -1546,7 +1547,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.w, self.h, self.vw, self.vh = tw, th, 0.0, 0.0
 
         if now > self.next_blink:
-            self.blink_until = now + 0.13
+            self.blink_until = 0 if self.motion_reduced() else now + 0.13
             self.next_blink = now + 2 + random.random() * 3.5
         self.update_look(now)
         self.update_region()
@@ -1563,14 +1564,18 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             # haya nada que redibujar.
             self.ticking = False
             if self.target() not in ('hidden', 'off'):
-                self.slow_id = GLib.timeout_add(1000 // IDLE_FPS, self.on_slow)
+                self.slow_id = GLib.timeout_add(1000 // (REDUCED_FPS if self.motion_reduced() else IDLE_FPS), self.on_slow)
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
+
+    def motion_reduced(self):
+        """«Movimiento reducido» (ajuste) o animaciones apagadas en GTK."""
+        return bool(self.settings['reduce_motion']) or not Gtk.Settings.get_default().get_property('gtk-enable-animations')
 
     def on_slow(self):
         now = time.monotonic()
         if now > self.next_blink:
-            self.blink_until = now + 0.13
+            self.blink_until = 0 if self.motion_reduced() else now + 0.13
             self.next_blink = now + 2 + random.random() * 3.5
         self.update_look(now)
         self.da.queue_draw()
