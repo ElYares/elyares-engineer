@@ -280,6 +280,14 @@ class Frame:
         self.help.set_margin_start(SPACE[1])
         self.header.pack_end(self.help)
         self.header.pack_end(self.bell)
+        self.side_open = False          # en ventana angosta: ¿la lista de agentes ocupa el lugar del contenido?
+        self.narrow = False
+        self.agents = Gtk.ToggleButton(label='Agentes')
+        self.agents.add_css_class('elyares-pill')
+        self.agents.update_property([Gtk.AccessibleProperty.LABEL], ['Mostrar los agentes'])
+        self.agents.set_visible(False)
+        self.agents.connect('toggled', self._agents_toggled)
+        self.header.pack_start(self.agents)
         self.board = BoardPanel()
         self.chat_head = ChatHead()
         self.focus = FocusPanel()
@@ -311,6 +319,10 @@ class Frame:
 
     def attach(self, win):
         win.set_titlebar(self.header)
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect('key-pressed', self._shortcut)
+        win.add_controller(keys)
         dressed = Gtk.Overlay()         # encima del contenido, las luces de temporada
         dressed.set_child(self.body)
         self.lights = Lights()
@@ -410,6 +422,8 @@ class Frame:
 
     def _picked(self, _box, row):
         self.on_session(row.sid)
+        if self.side_open:              # en angosto, elegido un agente se vuelve al contenido
+            self.agents.set_active(False)
 
     def hide_panels(self):
         """Los paneles que van encima del dibujo solo valen en la ventana: al
@@ -432,12 +446,42 @@ class Frame:
     def fold(self, width):
         """Plegada, la barra lateral no achica el contenido: con la ventana
         angosta (hasta 480) el dibujo conserva todo su ancho."""
-        self.side_box.set_visible(not width or width >= FOLD_W)
+        self.narrow = bool(width) and width < FOLD_W
+        if not self.narrow and self.side_open:
+            self.agents.set_active(False)
+        self._show_side()
         if width:
             mode = responsive.mode(width, self.nav_mode, edges=NAV_EDGES)
             if mode != self.nav_mode:
                 self.nav_mode = mode
                 self.fit_nav()
+
+    def _shortcut(self, _ctl, keyval, _code, state):
+        """Alt+1…9 salta de vista, aunque el foco esté en la terminal (Ctrl+dígito le toca a nvim y a tmux)."""
+        if state & Gdk.ModifierType.ALT_MASK and not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK) \
+                and Gdk.KEY_1 <= keyval <= Gdk.KEY_9:
+            return self.go(keyval - Gdk.KEY_0)
+        return False
+
+    def _show_side(self):
+        """Ancha: la lista de agentes a un lado. Angosta: oculta, y «Agentes» la pone en lugar del contenido."""
+        self.agents.set_visible(self.narrow)
+        self.side_box.set_visible(not self.narrow or self.side_open)
+        self.side_box.set_hexpand(self.narrow and self.side_open)
+        self.sidebar.set_hexpand(self.narrow and self.side_open)
+        self.slot.set_visible(not (self.narrow and self.side_open))
+
+    def _agents_toggled(self, btn):
+        self.side_open = btn.get_active()
+        self._show_side()
+
+    def go(self, number):
+        """Alt+1…9: la vista que está en ese lugar de la barra (las ocultas no cuentan)."""
+        keys = [k for k, _t in VIEWS if k not in HIDDEN_VIEWS]
+        if 1 <= number <= len(keys):
+            self.buttons[keys[number - 1]].set_active(True)
+            return True
+        return False
 
     def fit_nav(self):
         """Con la ventana angosta, las vistas que no caben pasan a un menú («Más ▾» o «Vista ▾»)."""
