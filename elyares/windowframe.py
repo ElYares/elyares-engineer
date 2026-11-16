@@ -452,7 +452,7 @@ class Frame:
             self.agents.set_active(False)
         self._show_side()
         if width:
-            mode = responsive.mode(width, self.nav_mode, edges=NAV_EDGES)
+            mode = responsive.mode(width, self.nav_mode, min(fonts.view_scale(), 1.5), NAV_EDGES)
             if mode != self.nav_mode:
                 self.nav_mode = mode
                 self.fit_nav()

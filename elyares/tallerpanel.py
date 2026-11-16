@@ -12,7 +12,7 @@ gi.require_version('Gtk', '4.0')
 
 from gi.repository import GLib, Gtk
 
-from . import responsive
+from . import fonts, responsive
 from .editorpanel import EditorPanel
 from .terminalpanel import TerminalPanel
 from .windowframe import SPACE
@@ -24,7 +24,7 @@ MIN_SIDE = 280
 
 def layout(width, height):
     """'tabs' (angosto) o 'stack' (el editor arriba y la terminal abajo)."""
-    return 'tabs' if responsive.mode(width) == responsive.COMPACT else 'stack'
+    return 'tabs' if responsive.mode(width, scale=fonts.view_scale()) == responsive.COMPACT else 'stack'
 
 
 class TallerPanel(Gtk.Box):

@@ -109,6 +109,12 @@ def pick(font):
     return ' '.join(part for part in (head, scaled(size) if has_size else '') if part)
 
 
+def view_scale():
+    """Cuánto agranda la vista cansada lo que se ve (1.0 si está apagada): `responsive.mode` lo usa para que
+    un ancho de 700 px con letra al 150 % cuente como uno de ~470."""
+    return TIRED_SCALE if tired else 1.0
+
+
 def css():
     """La letra de los widgets; la caja del chat lleva la suya."""
     out = ''
@@ -123,9 +129,12 @@ def css():
                 f'font-style: {"italic" if italic else "normal"}; }}\n')
     if tired:
         pct = round(TIRED_SCALE * 100)
-        out += (f'label, button, entry, dropdown {{ font-size: {pct}%; }}\n'
+        # El aumento va una sola vez, en la raíz: lo demás hereda. En `label, button` se multiplicaba (150 % del
+        # botón × 150 % de su etiqueta). La barra de vistas topa en 150 %: su fracción se calcula contra la raíz.
+        cap = round(min(pct, 150) / pct * 100)
+        out += (f'window, popover, tooltip {{ font-size: {pct}%; }}\n'
                 f'.elyares-section {{ font-size: 14px; }}\n'
-                f'.elyares-segments button, .elyares-pill {{ font-size: {min(pct, 150)}%; }}\n'
+                f'.elyares-segments, .elyares-pill {{ font-size: {cap}%; }}\n'
                 f'.elyares-segments button, .elyares-pill, .elyares-side, .elyares-sidebox {{ color: {TIRED_MUTED}; }}\n'
                 f'.elyares-segments button:checked, .elyares-pill:checked, .elyares-side row:selected {{ color: {TIRED_INK}; }}\n'
                 f'.dim-label, .elyares-muted, .elyares-section {{ color: {TIRED_MUTED}; opacity: 1; }}\n'

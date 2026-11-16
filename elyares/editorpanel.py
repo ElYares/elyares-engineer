@@ -12,7 +12,7 @@ gi.require_version('Gtk', '4.0')
 
 from gi.repository import Gdk, GLib, Gtk
 
-from . import gitview, responsive, terminal, themes, windowframe
+from . import fonts, gitview, responsive, terminal, themes, windowframe
 from .terminalpanel import TerminalPanel
 from .windowframe import SPACE
 
@@ -230,7 +230,7 @@ class EditorPanel(Gtk.Paned):
     def _measure(self, _widget, _clock):
         width = self.get_width()
         if width:
-            narrow = responsive.mode(width) == responsive.COMPACT
+            narrow = responsive.mode(width, scale=fonts.view_scale()) == responsive.COMPACT
             if narrow != self.narrow:
                 self.narrow, self.sheet = narrow, False
                 self._apply()
