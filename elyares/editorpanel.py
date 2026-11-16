@@ -12,7 +12,7 @@ gi.require_version('Gtk', '4.0')
 
 from gi.repository import Gdk, GLib, Gtk
 
-from . import gitview, terminal, themes, windowframe
+from . import gitview, responsive, terminal, themes, windowframe
 from .terminalpanel import TerminalPanel
 from .windowframe import SPACE
 
@@ -62,6 +62,7 @@ class FileList(Gtk.ScrolledWindow):
         self.set_child(self.box)
         self.signature = None
         self.expanded = {}          # raíz del proyecto → carpetas abiertas
+        self.on_chosen = lambda: None       # el Editor lo usa para volver a nvim en angosto
         self.last = None            # (estado, choose, edited) de la última vez, para repintar al abrir o cerrar
 
     def set_files(self, state, choose, edited=()):
@@ -161,7 +162,7 @@ class FileList(Gtk.ScrolledWindow):
             amount.add_css_class('dim-label')
             line.append(amount)
         said = f'{gitview.LABELS.get(code, "sin cambios")}: {path}'
-        btn = self._button(row['depth'], said, lambda p=path: choose(p))
+        btn = self._button(row['depth'], said, lambda p=path: (choose(p), self.on_chosen()))
         if path == state.chosen:
             btn.add_css_class('picked')
         btn.set_child(line)
@@ -185,12 +186,15 @@ class EditorPanel(Gtk.Paned):
         self.on_fold = lambda folded: None
         self.folded = False
         self.files = FileList()
+        self.files.on_chosen = self._chosen
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         title = Gtk.Label(label='ARCHIVOS', xalign=0)
         title.add_css_class('elyares-section')
         title.set_hexpand(True)
         title.set_margin_start(SPACE[1])
-        self.fold_btn = self._button('«', 'Ocultar la lista de archivos', lambda: self.set_folded(True, notify=True))
+        self.narrow = False             # ventana angosta: la lista y nvim no caben juntos, se turnan
+        self.sheet = False              # en angosto: ¿se ve la lista (y no nvim)?
+        self.fold_btn = self._button('«', 'Ocultar la lista de archivos', lambda: self._toggle_list(False))
         head.append(title)
         head.append(self._button('⊟', 'Cerrar todas las carpetas', lambda: self.files.collapse_all()))
         head.append(self._button('⊞', 'Abrir todas las carpetas', lambda: self.files.expand_all()))
@@ -203,10 +207,10 @@ class EditorPanel(Gtk.Paned):
         self.nvim.set_visible(True)         # solo se ve cuando se ve el panel entero
         self.nvim.set_size_request(LIST_MIN, -1)
         self.nvim.set_hexpand(True)
-        self.unfold_btn = self._button('»', 'Mostrar la lista de archivos', lambda: self.set_folded(False, notify=True))
+        self.unfold_btn = self._button('»', 'Mostrar la lista de archivos', lambda: self._toggle_list(True))
         self.unfold_btn.set_valign(Gtk.Align.START)
         self.unfold_btn.set_visible(False)
-        right = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        right = self.right = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         right.append(self.unfold_btn)
         right.append(self.nvim)
         self.set_start_child(self.side)
@@ -215,7 +219,41 @@ class EditorPanel(Gtk.Paned):
         self.set_resize_start_child(False)
         self.set_shrink_start_child(False)
         self.set_shrink_end_child(False)
+        self.add_tick_callback(self._measure)
         self.set_visible(False)
+
+    def _measure(self, _widget, _clock):
+        width = self.get_width()
+        if width:
+            narrow = responsive.mode(width) == responsive.COMPACT
+            if narrow != self.narrow:
+                self.narrow, self.sheet = narrow, False
+                self._apply()
+        return GLib.SOURCE_CONTINUE
+
+    def _chosen(self):
+        """Elegido un archivo en angosto, se vuelve a nvim para verlo."""
+        if self.narrow and self.sheet:
+            self.sheet = False
+            self._apply()
+
+    def _toggle_list(self, show):
+        """«»» y «««: con espacio, pliega o despliega la lista (y se guarda); en angosto la lista y nvim se turnan."""
+        if self.narrow:
+            self.sheet = show
+            self._apply()
+        else:
+            self.set_folded(not show, notify=True)
+
+    def _apply(self):
+        if self.narrow:
+            self.side.set_visible(self.sheet)
+            self.right.set_visible(not self.sheet)
+            self.unfold_btn.set_visible(True)
+        else:
+            self.side.set_visible(not self.folded)
+            self.right.set_visible(True)
+            self.unfold_btn.set_visible(self.folded)
 
     @staticmethod
     def _button(text, said, call):
@@ -233,7 +271,6 @@ class EditorPanel(Gtk.Paned):
         if folded == self.folded:
             return
         self.folded = folded
-        self.side.set_visible(not folded)
-        self.unfold_btn.set_visible(folded)
+        self._apply()
         if notify:
             self.on_fold(folded)

@@ -108,6 +108,14 @@ class WholeAppTest(unittest.TestCase):
         self.assertEqual(r.mode(900, edges=wf.NAV_EDGES), r.COMPACT)
 
 
+class TallerTest(unittest.TestCase):
+    def test_layout_by_size(self):
+        from elyares import tallerpanel as tp
+        self.assertEqual(tp.layout(400, 800), 'tabs')
+        self.assertEqual(tp.layout(900, 800), 'stack')
+        self.assertEqual(tp.layout(1600, 900), 'stack')      # nunca lado a lado: la terminal siempre abajo
+
+
 class GroupTest(unittest.TestCase):
     def setUp(self):
         registered = [dict(name='aang', path='/w/aang'), dict(name='vacio', path='/w/vacio')]

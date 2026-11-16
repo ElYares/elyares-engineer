@@ -203,9 +203,9 @@ class Taller(Ayudas, unittest.TestCase):
         self.panel = tallerpanel.TallerPanel()
 
     def test_el_editor_arriba_y_la_terminal_abajo(self):
-        self.assertEqual(self.panel.get_orientation(), Gtk.Orientation.VERTICAL)
-        self.assertIsInstance(self.panel.get_start_child(), editorpanel.EditorPanel)
-        self.assertIs(self.panel.get_end_child(), self.panel.terminal)
+        self.assertEqual(self.panel.paned.get_orientation(), Gtk.Orientation.VERTICAL)
+        self.assertIsInstance(self.panel.paned.get_start_child(), editorpanel.EditorPanel)
+        self.assertIs(self.panel.paned.get_end_child(), self.panel.terminal)
         self.assertEqual(self.panel.terminal.kind, '')
 
     def test_las_mitades_se_ven_cuando_se_ve_el_taller(self):
@@ -215,9 +215,9 @@ class Taller(Ayudas, unittest.TestCase):
 
     def test_el_divisor_se_coloca_una_sola_vez(self):
         self.panel.fit(800)
-        first = self.panel.get_position()
+        first = self.panel.paned.get_position()
         self.panel.fit(400)
-        self.assertEqual(self.panel.get_position(), first)
+        self.assertEqual(self.panel.paned.get_position(), first)
         self.assertGreater(first, 0)
 
     def test_se_esconde_con_los_demas_al_volver_la_isla(self):
