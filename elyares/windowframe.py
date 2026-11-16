@@ -87,7 +87,7 @@ def build_css():
   border-bottom: 1px solid rgba({GLOW}, 0.06); }}
 /* Las vistas, como el control segmentado de macOS: una pastilla con la activa elevada. */
 .elyares-muted {{ color: {MUTED}; opacity: 1; }}
-.elyares-title {{ font-size: 1.45em; font-weight: 700; margin-bottom: {SPACE[0]}px; }}
+{fonts.type_css()}.elyares-title {{ margin-bottom: {SPACE[0]}px; }}
 .elyares-segments {{ background: {SURFACE[1]}; border-radius: {RADIUS[0]}px; padding: 2px;
   border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-segments button {{ background: transparent; color: {MUTED}; border: none; box-shadow: none;
@@ -101,7 +101,7 @@ def build_css():
 .elyares-pill:hover {{ background: {SURFACE[2]}; }}
 /* La barra lateral: sección en versalitas y la fila elegida con el acento, como en macOS. */
 .elyares-sidebox {{ background: {SURFACE[0]}; border-right: 1px solid rgba({GLOW}, 0.06); }}
-.elyares-section {{ color: {MUTED}; font-size: 11px; font-weight: 700; letter-spacing: 1px;
+.elyares-section {{ color: {MUTED}; {fonts.type_rule('caption')}
   padding: {SPACE[2]}px {SPACE[2]}px {SPACE[0]}px; }}
 .elyares-side {{ background: transparent; color: {INK}; padding: {SPACE[0]}px {SPACE[1]}px; }}
 .elyares-side row {{ border-radius: {RADIUS[0]}px; padding: {SPACE[1]}px {SPACE[1]}px; margin: 1px 0; }}
@@ -452,7 +452,7 @@ class Frame:
             self.agents.set_active(False)
         self._show_side()
         if width:
-            mode = responsive.mode(width, self.nav_mode, edges=NAV_EDGES)
+            mode = responsive.mode(width, self.nav_mode, min(fonts.view_scale(), 1.5), NAV_EDGES)
             if mode != self.nav_mode:
                 self.nav_mode = mode
                 self.fit_nav()

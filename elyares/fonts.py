@@ -109,6 +109,42 @@ def pick(font):
     return ' '.join(part for part in (head, scaled(size) if has_size else '') if part)
 
 
+# La escala de letra de los widgets (HU-010 T2): cada token es un tamaño en em (1 em = el cuerpo) y, si
+# aplica, peso y espaciado. Todo el CSS de la ventana toma de aquí en vez de poner px sueltos; la vista
+# cansada agranda la raíz (ver `css()`) y por eso todo sigue al aumento.
+TYPE = {
+    'caption': dict(size=.82, weight=700, spacing=1),       # versalitas: cabeceras de columna, secciones
+    'small': dict(size=.9),                                  # notas, imagen bajo el nombre
+    'heading': dict(size=1.15, weight=600),                  # encabezado de grupo
+    'title': dict(size=1.45, weight=700),                    # título de la vista
+    'figure': dict(size=1.6, weight=700, tnum=True),         # cifras grandes
+}
+
+
+def type_rule(name):
+    """Las líneas de CSS de un token: `font-size`, y `font-weight`, `letter-spacing` y `tnum` si los trae."""
+    t = TYPE[name]
+    out = f'font-size: {t["size"]}em;'
+    if 'weight' in t:
+        out += f' font-weight: {t["weight"]};'
+    if 'spacing' in t:
+        out += f' letter-spacing: {t["spacing"]}px;'
+    if t.get('tnum'):
+        out += ' font-feature-settings: "tnum";'
+    return out
+
+
+def type_css():
+    """Una clase `.elyares-<token>` por cada token."""
+    return ''.join(f'.elyares-{name} {{ {type_rule(name)} }}\n' for name in TYPE)
+
+
+def view_scale():
+    """Cuánto agranda la vista cansada lo que se ve (1.0 si está apagada): `responsive.mode` lo usa para que
+    un ancho de 700 px con letra al 150 % cuente como uno de ~470."""
+    return TIRED_SCALE if tired else 1.0
+
+
 def css():
     """La letra de los widgets; la caja del chat lleva la suya."""
     out = ''
@@ -123,9 +159,11 @@ def css():
                 f'font-style: {"italic" if italic else "normal"}; }}\n')
     if tired:
         pct = round(TIRED_SCALE * 100)
-        out += (f'label, button, entry, dropdown {{ font-size: {pct}%; }}\n'
-                f'.elyares-section {{ font-size: 14px; }}\n'
-                f'.elyares-segments button, .elyares-pill {{ font-size: {min(pct, 150)}%; }}\n'
+        # El aumento va una sola vez, en la raíz: lo demás hereda. En `label, button` se multiplicaba (150 % del
+        # botón × 150 % de su etiqueta). La barra de vistas topa en 150 %: su fracción se calcula contra la raíz.
+        cap = round(min(pct, 150) / pct * 100)
+        out += (f'window, popover, tooltip {{ font-size: {pct}%; }}\n'
+                f'.elyares-segments, .elyares-pill {{ font-size: {cap}%; }}\n'
                 f'.elyares-segments button, .elyares-pill, .elyares-side, .elyares-sidebox {{ color: {TIRED_MUTED}; }}\n'
                 f'.elyares-segments button:checked, .elyares-pill:checked, .elyares-side row:selected {{ color: {TIRED_INK}; }}\n'
                 f'.dim-label, .elyares-muted, .elyares-section {{ color: {TIRED_MUTED}; opacity: 1; }}\n'
