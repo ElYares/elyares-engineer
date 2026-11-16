@@ -60,12 +60,38 @@ def _labels(text):
     return out
 
 
+PORT = re.compile(r'(\d+)->(\d+)/')
+SPAN = re.compile(r'(\d+|an?)\s+(second|minute|hour|day|week|month|year)', re.I)
+SPAN_UNITS = {'second': ('s', 's'), 'minute': ('min', 'min'), 'hour': ('h', 'h'), 'day': ('d', 'd'),
+              'week': ('sem', 'sem'), 'month': ('mes', 'meses'), 'year': ('año', 'años')}
+
+
+def span(text):
+    """«About an hour ago» / «Up 8 hours» → «1 h» / «8 h»; '' si no trae una duración."""
+    m = SPAN.search(text or '')
+    if not m:
+        return ''
+    count = 1 if m.group(1)[0].lower() == 'a' else int(m.group(1))
+    return f'{count} {SPAN_UNITS[m.group(2).lower()][count != 1]}'
+
+
+def parse_ports(text):
+    """«0.0.0.0:50515->80/tcp, [::]:50515->80/tcp» → ['50515→80'] (sin repetir v4 y v6)."""
+    out = []
+    for host, inner in PORT.findall(text or ''):
+        port = f'{host}→{inner}'
+        if port not in out:
+            out.append(port)
+    return out
+
+
 def parse_ps(text):
-    """`docker ps -a --format json` → [{id, name, service, state, status, health, path}]."""
+    """`docker ps -a --format json` → [{id, name, image, service, state, status, health, path, ports, created}]."""
     rows = []
     for row in _jsonl(text):
         labels = _labels(row.get('Labels'))
-        rows.append(dict(id=row.get('ID', ''), name=row.get('Names', ''), service=labels.get(SERVICE, ''),
+        rows.append(dict(id=row.get('ID', ''), name=row.get('Names', ''), image=row.get('Image', ''),
+                         ports=parse_ports(row.get('Ports')), created=span(row.get('RunningFor')), service=labels.get(SERVICE, ''),
                          state=row.get('State', ''), status=row.get('Status', ''),
                          health=row.get('HealthStatus', ''), path=labels.get(WORKDIR, '')))
     return rows
