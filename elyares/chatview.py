@@ -1286,7 +1286,7 @@ class ChatView:
             name = self.chat.name if self.chat is not None else state.MAIN_AGENT
             hint = (PLACEHOLDER.format(agent=name) if self.chat_typing
                     else 'Clic aquí, o elyares-ctl chat, para escribir')
-            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, themes.hot(), .38 * alpha,
+            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, themes.tuple_of(themes.get()['muted']), alpha,
                      width=width - CHAT_INPUT_INSET - 12)
 
     def draw_chat_status(self, cr, left, y, width, alpha):
@@ -1433,7 +1433,7 @@ class ChatView:
                              int(ih - 2 * CHAT_INPUT_PAD))
         if not text:
             hint = f'Dile a {agent} qué hacer' if typing else f'Clic aquí para encargarle algo a {agent}'
-            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, themes.hot(), .38 * alpha,
+            self.put(cr, hint, FONT_LINK, left + CHAT_INPUT_INSET, y + CHAT_INPUT_PAD, themes.tuple_of(themes.get()['muted']), alpha,
                      width=text_w)
         soft = mascot.rgba(self.ink('text', .66))[:3]
         c = self.chats.get(self.chat_key(agent, self.tab_place(s)))
@@ -1728,7 +1728,7 @@ class ChatView:
             y -= CHAT_GAP
         cr.restore()
         if self.chat_scroll > 0:
-            self.put(cr, '↓ más abajo', FONT_STEP, left + width, bottom - 14, themes.hot(), .45 * alpha, align=1.0)
+            self.put(cr, '↓ más abajo', FONT_STEP, left + width, bottom - 14, themes.tuple_of(themes.get()['muted']), alpha, align=1.0)
 
     @staticmethod
     def code_spans(layout):

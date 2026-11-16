@@ -128,7 +128,7 @@ def css():
                 f'.elyares-segments button, .elyares-pill {{ font-size: {min(pct, 150)}%; }}\n'
                 f'.elyares-segments button, .elyares-pill, .elyares-side, .elyares-sidebox {{ color: {TIRED_MUTED}; }}\n'
                 f'.elyares-segments button:checked, .elyares-pill:checked, .elyares-side row:selected {{ color: {TIRED_INK}; }}\n'
-                f'.dim-label, .elyares-section {{ color: {TIRED_MUTED}; opacity: 1; }}\n'
+                f'.dim-label, .elyares-muted, .elyares-section {{ color: {TIRED_MUTED}; opacity: 1; }}\n'
                 f'.elyares-btn:focus-visible, .elyares-segments button:focus-visible, .elyares-side row:focus-visible, '
                 f'.elyares-pill:focus-visible, .elyares-card:focus-visible, entry:focus-within, textview:focus-within, '
                 f'dropdown:focus-within, switch:focus-visible, checkbutton:focus-visible, button:focus-visible '
