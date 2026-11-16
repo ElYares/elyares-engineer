@@ -51,7 +51,7 @@ class NadieEscribeEnLaTerminal(unittest.TestCase):
     def test_ningun_modulo_manda_texto_a_un_pty_ni_a_tmux(self):
         root = os.path.join(os.path.dirname(__file__), '..', 'elyares')
         for name in sorted(os.listdir(root)):
-            if not name.endswith('.py'):
+            if not name.endswith('.py') or name == 'guard.py':      # el candado nombra esas palabras para frenarlas
                 continue
             with open(os.path.join(root, name), encoding='utf-8') as fh:
                 text = fh.read()

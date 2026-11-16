@@ -75,6 +75,7 @@ class SoloLectura(unittest.TestCase):
         'env FOO=1 rm x', 'timeout 5 git push', 'nice -n 10 npm install',
         'curl -O https://ejemplo.mx/a.zip', 'curl -X POST https://ejemplo.mx/api',
         'curl -d a=1 https://ejemplo.mx', 'wget https://ejemplo.mx/a.zip',
+        'tmux send-keys -t x ls Enter', 'tmux -L elyares paste-buffer', 'nvim --server /tmp/s --remote-send x',
         'psql -c "delete from users"', 'mysql -e "DROP TABLE x"', 'kill 123',
         'systemctl --user restart elyares-engineer', 'echo x > $SALIDA', 'echo x > ~/x',
         # operación: nada que llegue a un servidor ni cambie su estado
