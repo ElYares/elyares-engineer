@@ -17,7 +17,7 @@ import time
 
 from gi.repository import Gdk, GLib, Gtk, Pango
 
-from . import containers, icons, responsive, themes, windowframe
+from . import containers, fonts, icons, responsive, themes, windowframe
 from .windowframe import SPACE
 
 LIST_W = 660
@@ -70,7 +70,7 @@ def build_css():
 .cbox-tool:hover {{ background: alpha(currentColor, 0.10); color: {RED}; }}
 .cbox-tool.go:hover {{ color: {GREEN}; }}
 .cbox-muted {{ color: {wf.MUTED}; opacity: 1; }}
-.cbox-head {{ font-size: 11px; font-weight: 700; letter-spacing: 1px; color: {wf.MUTED}; padding: 4px 4px;
+.cbox-head {{ font-size: 0.85em; font-weight: 700; letter-spacing: 1px; color: {wf.MUTED}; padding: 4px 4px;
               border-bottom: 1px solid alpha(currentColor, 0.12); }}
 .cbox-group {{ background: alpha(currentColor, 0.05); border-radius: 8px; padding: 6px 8px; margin-top: 6px; }}
 .cbox-tree {{ margin-left: 14px; border-left: 1px solid alpha(currentColor, 0.18); }}
@@ -89,7 +89,7 @@ def build_css():
              border: 1px solid alpha(currentColor, 0.14); box-shadow: none; }}
 .cbox-chip:checked {{ background: alpha({wf.ACCENT}, 0.2); border-color: alpha({wf.ACCENT}, 0.7); }}
 .cbox-card {{ border-left: 3px solid {GREY}; }}
-.cbox-badge {{ border-radius: 99px; padding: 0 8px; font-size: 11px; font-weight: 700;
+.cbox-badge {{ border-radius: 99px; padding: 0 8px; font-size: 0.85em; font-weight: 700;
               background: alpha({wf.MUTED}, 0.2); color: {wf.MUTED}; }}
 .cbox-badge.all {{ background: alpha({GREEN}, 0.18); color: {GREEN}; }}
 .cbox-badge.part {{ background: alpha({AMBER}, 0.18); color: {AMBER}; }}
@@ -97,7 +97,7 @@ def build_css():
 .cbox-num.warm {{ color: {AMBER}; }}
 .cbox-num.hot {{ color: {RED}; }}
 .cbox-tile {{ background: alpha(currentColor, 0.06); border-radius: 8px; padding: 8px 12px; }}
-.cbox-big {{ font-size: 22px; font-weight: 700; }}
+.cbox-big {{ font-size: 1.7em; font-weight: 700; }}
 .cbox-bar trough {{ min-height: 5px; border-radius: 99px; background: alpha(currentColor, 0.12); }}
 .cbox-bar progress {{ min-height: 5px; border-radius: 99px; background: {GREEN}; }}
 .cbox-bar.warm progress {{ background: {AMBER}; }}
@@ -106,7 +106,7 @@ def build_css():
 .cbox-job.ok {{ background: alpha({GREEN}, 0.16); }}
 .cbox-job.bad {{ background: alpha({RED}, 0.18); }}
 .cbox-skel {{ background: rgba(128, 128, 128, 0.28); border-radius: 8px; color: transparent; }}
-.cbox-logs {{ background: alpha(currentColor, 0.06); color: {wf.INK}; border-radius: 8px; font-size: 12px; }}
+.cbox-logs {{ background: alpha(currentColor, 0.06); color: {wf.INK}; border-radius: 8px; font-size: 0.92em; }}
 .cbox-logs text {{ background: none; }}
 """
 
@@ -366,7 +366,7 @@ class ContainersPanel(Gtk.Box):
 
     def _measure(self, _widget, _clock):
         width = self.get_width()
-        new = responsive.mode(width, self.layout_mode) if width else self.layout_mode
+        new = responsive.mode(width, self.layout_mode, fonts.view_scale()) if width else self.layout_mode
         if new != self.layout_mode:
             self.layout_mode = new
             self._apply_mode()

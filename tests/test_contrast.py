@@ -41,5 +41,24 @@ class Contrast(unittest.TestCase):
             self.assertGreaterEqual(themes.contrast(look['surface'][0], look['accent']), MIN, (name, 'Permitir'))
 
 
+class TiredView(unittest.TestCase):
+    def test_scale_goes_once_at_the_root(self):
+        from elyares import fonts
+        old = fonts.tired, fonts.TIRED_SCALE
+        try:
+            fonts.use_tired(True)
+            fonts.use_scale(150)
+            css = fonts.css()
+            self.assertIn('window, popover, tooltip { font-size: 150%; }', css)
+            self.assertNotIn('label, button, entry, dropdown { font-size', css)     # se multiplicaba por dos
+            self.assertEqual(fonts.view_scale(), 1.5)
+            fonts.use_scale(200)
+            self.assertIn('.elyares-segments, .elyares-pill { font-size: 75%; }', fonts.css())   # 75 % de 200 = 150
+            fonts.use_tired(False)
+            self.assertEqual(fonts.view_scale(), 1.0)
+        finally:
+            fonts.tired, fonts.TIRED_SCALE = old
+
+
 if __name__ == '__main__':
     unittest.main()
