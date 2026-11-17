@@ -61,8 +61,12 @@ seguridad (eso es de `elyares-auditor`), ni nombres ni estructura de código
 1. **Confirma la dirección y el flujo** en una línea. Si falta algo que
    cambia el resultado (¿con qué usuario?, ¿qué debe verse al final?), haz
    **una** pregunta; si no, sigue.
-2. **Abre siempre con `--headed`:** `playwright-cli open <url> --headed`. El
-   usuario tiene que ver la ventana; sin eso no es lo que pidió.
+2. **Abre siempre con `--browser chromium --headed`:**
+   `playwright-cli open <url> --browser chromium --headed`. El usuario tiene que
+   ver la ventana; sin eso no es lo que pidió. No uses `chrome` (no está en esta
+   máquina) ni Firefox (su build no está instalado). Si Chromium no abre, para y
+   dilo: instalarlo (`playwright-cli install-browser chromium`) lo hace el
+   engineer.
 3. **Un paso, un aviso.** Antes de cada acción escribe una línea corta:
    `Paso 3 de 6: pulso «Entrar»`. Luego hazla. Es lo que el usuario lee en el
    chat mientras mira el navegador.
