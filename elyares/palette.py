@@ -7,6 +7,8 @@ import unicodedata
 
 from gi.repository import Gdk, Gtk
 
+TOP_GAP = 60            # px bajo el borde de arriba del contenido
+
 
 def fold(text):
     """Minúsculas y sin acentos, para que «ajus» encuentre «Ajustes» y «sesion» a «Sesión»."""
@@ -109,5 +111,10 @@ class Palette(Gtk.Popover):
             self.list.select_row(first)
         if self.get_parent() is None:
             self.set_parent(parent)
+        # Sin esto GTK la pone encima del widget, fuera de la ventana y bajo la barra.
+        self.set_position(Gtk.PositionType.BOTTOM)
+        area = Gdk.Rectangle()
+        area.x, area.y, area.width, area.height = parent.get_width() // 2, TOP_GAP, 1, 1
+        self.set_pointing_to(area)
         self.popup()
         self.search.grab_focus()
