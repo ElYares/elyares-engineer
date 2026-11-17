@@ -37,11 +37,12 @@ class GitPanel(Gtk.ScrolledWindow):
             getattr(self.page, f'set_margin_{side}')(SPACE[2])
         self.set_child(self.page)
         self.signature = None
+        self.logs = {}                  # url -> 'cargando' o las líneas del log de su CI; sobrevive al redibujo
         self.set_visible(False)
 
     def set_prs(self, items, state, handlers):
         """`items`: lo de `github.items`; `state`: 'on', 'bad' u 'off' de la fuente. `handlers`: open(url)."""
-        sig = (state, repr(items), themes.is_light())
+        sig = (state, repr(items), themes.is_light(), repr(self.logs))
         if sig == self.signature:
             return
         self.signature = sig
@@ -60,7 +61,36 @@ class GitPanel(Gtk.ScrolledWindow):
             self.page.append(note)
             return
         for item in order(items):
-            self.page.append(self._row(item, handlers))
+            self.page.append(self._block(item, handlers))
+
+    def _block(self, item, handlers):
+        """El PR y, si su CI está en rojo, el botón del log y lo que se trajo."""
+        block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE[0])
+        block.append(self._row(item, handlers))
+        if item.get('tone') != 'bad':
+            return block
+        got = self.logs.get(item['url'])
+        if got is None or got == 'cargando':
+            btn = Gtk.Button(label='Cargando el log…' if got else 'Ver el log del CI')
+            btn.set_sensitive(got is None)
+            btn.set_halign(Gtk.Align.START)
+            btn.connect('clicked', lambda _b: self._fetch(item, handlers))
+            block.append(btn)
+            return block
+        label = Gtk.Label(label='\n'.join(got) or 'No encontré el log (el check no es de GitHub Actions).',
+                          xalign=0, wrap=True, selectable=True)
+        label.add_css_class('elyares-muted')
+        block.append(label)
+        return block
+
+    def _fetch(self, item, handlers):
+        self.logs[item['url']] = 'cargando'
+        self.signature = None
+        handlers['log'](item, lambda lines: self._got(item['url'], lines))
+
+    def _got(self, url, lines):
+        self.logs[url] = lines
+        self.signature = None
 
     def _row(self, item, handlers):
         row = Gtk.Button()

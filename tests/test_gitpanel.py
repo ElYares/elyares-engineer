@@ -19,5 +19,22 @@ class Orden(unittest.TestCase):
         self.assertEqual(gitpanel.chip(dict(tone='info')), ('revisión', None))
 
 
+@unittest.skipIf(gitpanel is None, 'sin gi')
+class Log(unittest.TestCase):
+    def test_el_log_se_guarda_y_obliga_a_redibujar(self):
+        panel = gitpanel.GitPanel()
+        panel.signature = 'viejo'
+        panel._got('u', ['falló x'])
+        self.assertEqual(panel.logs['u'], ['falló x'])
+        self.assertIsNone(panel.signature)
+
+    def test_pedir_el_log_lo_marca_cargando(self):
+        panel = gitpanel.GitPanel()
+        asked = []
+        panel._fetch(dict(url='u'), dict(log=lambda item, done: asked.append(item)))
+        self.assertEqual(panel.logs['u'], 'cargando')
+        self.assertEqual(len(asked), 1)
+
+
 if __name__ == '__main__':
     unittest.main()
