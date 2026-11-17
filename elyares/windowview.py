@@ -140,6 +140,10 @@ class WindowView:
         win.connect('notify::is-active', self.on_window_focus)
         self.frame = windowframe.Frame(self.window_view, self.window_pick)
         self.frame.attach(win)
+        self.frame.palette_extra = [
+            (f'Alternar: {label}', 'ajuste', lambda k=key: self.window_setting(k))
+            for key, label in (('glass', 'Vidrio'), ('chat_tech', 'Chat técnico'), ('tech_style', 'Estilo técnico'),
+                               ('reduce_motion', 'Movimiento reducido'), ('tired_eyes', 'Vista cansada'))]
         self.overlay.add_overlay(self.frame.flows)     # y la lista de Flujos, con el estilo de la app
         self.overlay.add_overlay(self.frame.focus)     # el desglose de un agente, igual
         self.overlay.add_overlay(self.frame.board)     # encima del dibujo, solo con el tablero a la vista
