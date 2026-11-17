@@ -8,17 +8,17 @@ arma los widgets; qué hace cada botón lo decide quien lo crea con `on_view`.
 
 from gi.repository import Gdk, GLib, Gtk, Pango
 
-from . import fonts, mascot, responsive, themes
+from . import fonts, mascot, palette, responsive, themes
 
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
          ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'), ('containers', 'Contenedores'),
          ('editor', 'Editor'), ('terminal', 'Terminal'), ('taller', 'Taller'),
-         ('sources', 'Fuentes'), ('settings', 'Ajustes'))
+         ('git', 'Git'), ('sources', 'Fuentes'), ('settings', 'Ajustes'))
 HIDDEN_VIEWS = ('flows', 'tmux')       # sin botón en la barra por ahora: el código sigue ahí
 SIDEBAR_W = 180
 NAV_EDGES = (1000, 1250)        # ancho de la ventana: bajo el primero, casi todas las vistas van en «Vista ▾»; bajo el segundo, las menos usadas en «Más ▾»
-NAV_MORE = {responsive.WIDE: (), responsive.MEDIUM: ('projects', 'pomodoro', 'sources', 'settings'),
+NAV_MORE = {responsive.WIDE: (), responsive.MEDIUM: ('projects', 'pomodoro', 'git', 'sources', 'settings'),
             responsive.COMPACT: tuple(k for k, _t in VIEWS if k not in ('board', 'chat'))}
 FOLD_W = 640                    # más angosta que esto, la barra lateral se pliega y el texto conserva su tamaño
 
@@ -257,6 +257,8 @@ class Frame:
             nav.append(btn)
             self.buttons[key] = btn
         self.nav_mode = None
+        self.palette = palette.Palette()
+        self.palette_extra = []         # (texto, nota, callback) que da quien arma la ventana: ajustes y acciones
         self.more = Gtk.MenuButton(label='Más ▾')
         self.more.add_css_class('elyares-more')
         self.more.set_visible(False)
@@ -459,10 +461,39 @@ class Frame:
 
     def _shortcut(self, _ctl, keyval, _code, state):
         """Alt+1…9 salta de vista, aunque el foco esté en la terminal (Ctrl+dígito le toca a nvim y a tmux)."""
+        ctrl = state & Gdk.ModifierType.CONTROL_MASK
+        if keyval in (Gdk.KEY_k, Gdk.KEY_K) and ctrl and not state & Gdk.ModifierType.ALT_MASK:
+            # Ctrl+K a secas le toca al shell y a nvim (borrar hasta el final de la línea): con el foco en la
+            # terminal solo abre la paleta Ctrl+Shift+K.
+            shifted = bool(state & Gdk.ModifierType.SHIFT_MASK)
+            if shifted or not self._focus_in_terminal():
+                self.open_palette()
+                return True
+            return False
         if state & Gdk.ModifierType.ALT_MASK and not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK) \
                 and Gdk.KEY_1 <= keyval <= Gdk.KEY_9:
             return self.go(keyval - Gdk.KEY_0)
         return False
+
+    def _focus_in_terminal(self):
+        widget = self.header.get_root().get_focus() if self.header.get_root() else None
+        while widget is not None:
+            if type(widget).__name__ == 'Terminal':
+                return True
+            widget = widget.get_parent()
+        return False
+
+    def open_palette(self):
+        """Las vistas de la barra (con su Alt+n) y, detrás, lo que dé `palette_extra`."""
+        shown = [k for k, _t in VIEWS if k not in HIDDEN_VIEWS]
+        entries = []
+        for key, text in VIEWS:
+            if key in HIDDEN_VIEWS:
+                continue
+            note = f'Alt+{shown.index(key) + 1}' if shown.index(key) < 9 else ''
+            entries.append((f'Ir a {text}', note, lambda k=key: self.buttons[k].set_active(True)))
+        self.palette.set_entries(entries + self.palette_extra)
+        self.palette.show_at(self.body)
 
     def _show_side(self):
         """Ancha: la lista de agentes a un lado. Angosta: oculta, y «Agentes» la pone en lugar del contenido."""

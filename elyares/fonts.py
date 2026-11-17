@@ -36,6 +36,7 @@ CHOICES = (
 _BY_KEY = {c[0]: c for c in CHOICES}
 
 # Cuánto agranda la vista cansada, en %: los tres niveles que ofrece Ajustes.
+MIN_PT = 9            # el suelo de la letra dibujada con Cairo: nada se pinta más chico
 TIRED_SCALES = (125, 150, 200)
 TIRED_SCALE = 1.25
 TIRED_GLASS = .9      # el mínimo de opacidad del vidrio con la vista cansada
@@ -88,10 +89,11 @@ def glass(alpha):
 
 
 def scaled(size):
-    """El tamaño en puntos, agrandado si hay vista cansada ('9' -> '11.2')."""
-    if not tired:
-        return size
-    return f'{float(size) * TIRED_SCALE:.1f}'.rstrip('0').rstrip('.')
+    """El tamaño en puntos, con el suelo `MIN_PT` y agrandado si hay vista cansada ('9' -> '11.2')."""
+    pt = max(float(size), MIN_PT)
+    if tired:
+        pt *= TIRED_SCALE
+    return f'{pt:.1f}'.rstrip('0').rstrip('.')
 
 
 def pick(font):

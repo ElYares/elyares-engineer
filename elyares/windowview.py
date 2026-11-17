@@ -17,7 +17,7 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import (containers, containerview, editorpanel, fonts, gitview, hypr, mascot, pomodoro, settings, tallerpanel, terminal, terminalpanel,
+from . import (containers, containerview, editorpanel, fonts, gitpanel, gitview, hypr, mascot, pomodoro, settings, tallerpanel, terminal, terminalpanel,
                themes, tmuxsessions, windowframe)
 from .state import MAIN_ROLE, elapsed
 
@@ -140,6 +140,10 @@ class WindowView:
         win.connect('notify::is-active', self.on_window_focus)
         self.frame = windowframe.Frame(self.window_view, self.window_pick)
         self.frame.attach(win)
+        self.frame.palette_extra = [
+            (f'Alternar: {label}', 'ajuste', lambda k=key: self.window_setting(k))
+            for key, label in (('glass', 'Vidrio'), ('chat_tech', 'Chat técnico'), ('tech_style', 'Estilo técnico'),
+                               ('reduce_motion', 'Movimiento reducido'), ('tired_eyes', 'Vista cansada'))]
         self.overlay.add_overlay(self.frame.flows)     # y la lista de Flujos, con el estilo de la app
         self.overlay.add_overlay(self.frame.focus)     # el desglose de un agente, igual
         self.overlay.add_overlay(self.frame.board)     # encima del dibujo, solo con el tablero a la vista
@@ -149,6 +153,8 @@ class WindowView:
         self.overlay.add_overlay(self.frame.settings)
         self.overlay.add_overlay(self.frame.tmux)
         self.overlay.add_overlay(self.frame.pomodoro)
+        self.frame.git = gitpanel.GitPanel()
+        self.overlay.add_overlay(self.frame.git)
         self.frame.editor = editorpanel.EditorPanel()      # en su archivo: importa de windowframe, no al revés
         self.overlay.add_overlay(self.frame.editor)
         self.frame.terminal = terminalpanel.TerminalPanel()
@@ -156,7 +162,7 @@ class WindowView:
         self.overlay.add_overlay(self.frame.taller)
         self.frame.containers = containerview.ContainersPanel()
         self.overlay.add_overlay(self.frame.containers)
-        self.frame.extra += [self.frame.editor, self.frame.terminal, self.frame.taller, self.frame.containers]     # `hide_panels` los esconde con los demás
+        self.frame.extra += [self.frame.editor, self.frame.terminal, self.frame.taller, self.frame.containers, self.frame.git]     # `hide_panels` los esconde con los demás
         self.overlay.add_overlay(self.frame.terminal)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
@@ -171,7 +177,7 @@ class WindowView:
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
         self.sources_open = key == 'sources'
-        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'containers', 'editor', 'terminal', 'taller') else ''
+        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'containers', 'editor', 'terminal', 'taller', 'git') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -472,6 +478,10 @@ class WindowView:
             status, tasks = self.pomo_watch.read()
             frame.pomodoro.set_pomodoro(status, tasks, dict(act=self.window_pomodoro,
                                                             agent=self.window_pomodoro_agent))
+        frame.git.set_visible(self.panel_open == 'git')
+        if self.panel_open == 'git':
+            frame.git.set_prs((self.sources.get('github') or {}).get('items') or [], self.source_state('github'),
+                              dict(open=self.window_open_url, log=self.window_git_log))
         frame.containers.set_visible(self.panel_open == 'containers')
         if self.panel_open == 'containers':
             data = self.box_watch.read()
@@ -496,6 +506,8 @@ class WindowView:
                     ('chat_tech', 'Chat técnico', bool(st['chat_tech']), 'Bloques y tablas con borde fino y títulos en mayúsculas.'),
                     ('tech_style', 'Estilo técnico', bool(st['tech_style']),
                      'Esquinas rectas, bordes de 1 px y toda la letra monoespaciada.'),
+                    ('reduce_motion', 'Movimiento reducido', bool(st['reduce_motion']),
+                     'La isla quieta no parpadea y redibuja a 2 fps en vez de 12.'),
                     ('tired_eyes', 'Vista cansada', bool(st['tired_eyes']),
                      'Letra más grande y más gruesa, y textos apagados más claros (tamaño abajo).')]
             rows += [(key, f'Fuente: {label}', bool(st[key]), '') for key, label in sources.SOURCES if key != 'claude']
@@ -658,6 +670,10 @@ class WindowView:
             self.chat_theme()
             self.ensure_tick()
             self.overlay.queue_draw()
+        elif key == 'reduce_motion':
+            self.settings['reduce_motion'] = not self.settings['reduce_motion']
+            settings.save(self.settings)
+            self.ensure_tick()
         elif key == 'tired_eyes':
             self.set_tired(not self.settings['tired_eyes'])
             self.settings['tired_eyes'] = fonts.tired
@@ -724,6 +740,20 @@ class WindowView:
         """Reintentar: la fuente consulta ya, sin esperar su turno."""
         from . import devherd, github
         {'github': github, 'devherd': devherd}[key].retry()
+
+    def window_git_log(self, item, done):
+        """Las últimas líneas del log del CI caído de un PR, pedidas en un hilo; `done(líneas)` corre en la
+        interfaz. [] si el check no es de Actions o no se pudo traer."""
+        import threading
+        from . import github
+
+        def work():
+            pr = dict(slug=item['where'], number=item['number'], url=item['url'])
+            runs = [run for _name, run in github.failed_checks(item['who'], pr) if run]
+            lines = github.log_tail(item['who'], pr, runs[0]) if runs else []
+            GLib.idle_add(lambda: (done(lines), self.ensure_tick(), False)[-1])
+        threading.Thread(target=work, daemon=True, name='git-log').start()
+        self.ensure_tick()
 
     @staticmethod
     def window_open_url(url):

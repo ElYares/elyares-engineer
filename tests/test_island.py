@@ -313,6 +313,10 @@ class Consulta(IslandCase):
         self.isl.draw_tip(self.cr, app.WIN_W, 0, 100.0)
         return self.isl.source_tip(key)
 
+    def test_movimiento_reducido_sigue_al_ajuste(self):
+        self.isl.settings['reduce_motion'] = True
+        self.assertTrue(self.isl.motion_reduced())
+
     def test_las_pastillas_caben_en_la_isla_mas_estrecha(self):
         width = app.SIZES['open'][0]
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
