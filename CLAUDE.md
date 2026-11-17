@@ -44,11 +44,11 @@ trabajar en el repo.
 
 ## Flujo de git
 
-- Rama `feat/…` desde `v2`, PR contra `v2`; a `main` (PR `v2` → `main`) cuando
-  el usuario lo pida. Commit, PR y merge solo cuando se piden. No borrar
+- Rama `feat/…` desde `v3`, PR contra `v3`; a `main` (PR `v3` → `main`) cuando
+  el usuario lo pida. `v3` = `v2` (mergeada en `main`) + el tester (HU-011). Commit, PR y merge solo cuando se piden. No borrar
   carpetas, ramas ni preferencias.
 - `gh` tiene otra cuenta activa: `GH_TOKEN=$(gh auth token --user ElYares) gh …`.
-  Nunca `gh auth switch`. La base es `v2`, no `main`.
+  Nunca `gh auth switch`. La base es `v3`, no `main`.
 - Mensajes en español, Conventional Commits (`feat:`, `fix:`).
 - **Commits de ~300 líneas como tope** (medido: 20 de 110 pasaron de 500). Si un cambio pasa de eso, partirlo; un `refactor:` por cada 5 `feat:` (`app.py` pasa de 3100 líneas).
 
