@@ -640,9 +640,9 @@ class Tablero(Dibujo):
     def test_con_pocos_libres_la_banca_es_una_lista(self):
         self.isl.expanded = True
         self.work('a', 'elyares-architect', 'elyares-auditor', 'elyares-reviewer',
-                  'elyares-designer')
+                  'elyares-designer', 'elyares-mobile')
         self.draw()
-        self.assertEqual(len(self.hit('member')), 5)
+        self.assertEqual(len(self.hit('member')), 6)
         # Cinco en la banca: uno debajo de otro, con su nombre y «libre».
         briefs = [x for kind, _, x, *_ in self.isl.hits if kind == 'brief']
         self.assertEqual((len(briefs), len(set(briefs))), (5, 1))

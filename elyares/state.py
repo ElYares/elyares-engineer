@@ -104,7 +104,7 @@ AGENT_ROLES = {'elyares-architect': 'architect', 'elyares-auditor': 'auditor',
                'elyares-reviewer': 'reviewer', 'elyares-designer': 'designer',
                'elyares-mobile': 'mobile', 'elyares-devops': 'devops',
                'elyares-researcher': 'researcher', 'elyares-coach': 'coach',
-               'elyares-analyst': 'analyst'}
+               'elyares-analyst': 'analyst', 'elyares-tester': 'tester'}
 # Quien trabaja en una sesión mientras no lo haga un subagente de la familia,
 # y su personaje.
 MAIN_AGENT, MAIN_ROLE = 'elyares-engineer', 'engineer'
