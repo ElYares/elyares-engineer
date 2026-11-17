@@ -481,7 +481,7 @@ class WindowView:
         frame.git.set_visible(self.panel_open == 'git')
         if self.panel_open == 'git':
             frame.git.set_prs((self.sources.get('github') or {}).get('items') or [], self.source_state('github'),
-                              dict(open=self.window_open_url))
+                              dict(open=self.window_open_url, log=self.window_git_log))
         frame.containers.set_visible(self.panel_open == 'containers')
         if self.panel_open == 'containers':
             data = self.box_watch.read()
@@ -740,6 +740,20 @@ class WindowView:
         """Reintentar: la fuente consulta ya, sin esperar su turno."""
         from . import devherd, github
         {'github': github, 'devherd': devherd}[key].retry()
+
+    def window_git_log(self, item, done):
+        """Las últimas líneas del log del CI caído de un PR, pedidas en un hilo; `done(líneas)` corre en la
+        interfaz. [] si el check no es de Actions o no se pudo traer."""
+        import threading
+        from . import github
+
+        def work():
+            pr = dict(slug=item['where'], number=item['number'], url=item['url'])
+            runs = [run for _name, run in github.failed_checks(item['who'], pr) if run]
+            lines = github.log_tail(item['who'], pr, runs[0]) if runs else []
+            GLib.idle_add(lambda: (done(lines), self.ensure_tick(), False)[-1])
+        threading.Thread(target=work, daemon=True, name='git-log').start()
+        self.ensure_tick()
 
     @staticmethod
     def window_open_url(url):
