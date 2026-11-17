@@ -14,11 +14,11 @@ from . import fonts, mascot, palette, responsive, themes
 VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
          ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'), ('containers', 'Contenedores'),
          ('editor', 'Editor'), ('terminal', 'Terminal'), ('taller', 'Taller'),
-         ('sources', 'Fuentes'), ('settings', 'Ajustes'))
+         ('git', 'Git'), ('sources', 'Fuentes'), ('settings', 'Ajustes'))
 HIDDEN_VIEWS = ('flows', 'tmux')       # sin botón en la barra por ahora: el código sigue ahí
 SIDEBAR_W = 180
 NAV_EDGES = (1000, 1250)        # ancho de la ventana: bajo el primero, casi todas las vistas van en «Vista ▾»; bajo el segundo, las menos usadas en «Más ▾»
-NAV_MORE = {responsive.WIDE: (), responsive.MEDIUM: ('projects', 'pomodoro', 'sources', 'settings'),
+NAV_MORE = {responsive.WIDE: (), responsive.MEDIUM: ('projects', 'pomodoro', 'git', 'sources', 'settings'),
             responsive.COMPACT: tuple(k for k, _t in VIEWS if k not in ('board', 'chat'))}
 FOLD_W = 640                    # más angosta que esto, la barra lateral se pliega y el texto conserva su tamaño
 
