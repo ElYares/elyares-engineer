@@ -19,6 +19,11 @@ def order(items):
     return sorted(items, key=lambda it: ORDER.get(it.get('tone'), 4))
 
 
+def repos(items):
+    """Los repositorios que tienen PRs, en orden de aparición y sin repetir."""
+    return list(dict.fromkeys(it['where'] for it in items))
+
+
 def chip(item):
     """(texto, índice de color de aviso o None) del chip de un PR."""
     index, text = CHIPS.get(item.get('tone'), (None, 'sin checks'))
@@ -37,12 +42,13 @@ class GitPanel(Gtk.ScrolledWindow):
             getattr(self.page, f'set_margin_{side}')(SPACE[2])
         self.set_child(self.page)
         self.signature = None
+        self.only = ''                  # el repositorio elegido; '' = todos
         self.logs = {}                  # url -> 'cargando' o las líneas del log de su CI; sobrevive al redibujo
         self.set_visible(False)
 
     def set_prs(self, items, state, handlers):
         """`items`: lo de `github.items`; `state`: 'on', 'bad' u 'off' de la fuente. `handlers`: open(url)."""
-        sig = (state, repr(items), themes.is_light(), repr(self.logs))
+        sig = (state, repr(items), themes.is_light(), repr(self.logs), self.only)
         if sig == self.signature:
             return
         self.signature = sig
@@ -60,8 +66,36 @@ class GitPanel(Gtk.ScrolledWindow):
             note.add_css_class('elyares-muted')
             self.page.append(note)
             return
+        names = repos(items)
+        if self.only not in names:
+            self.only = ''
+        if len(names) > 1:
+            self.page.append(self._filter(names, items, handlers))
         for item in order(items):
-            self.page.append(self._block(item, handlers))
+            if not self.only or item['where'] == self.only:
+                self.page.append(self._block(item, handlers))
+
+    def _filter(self, names, items, handlers):
+        """Chips «Todos» y uno por repositorio, con su conteo."""
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE[0])
+        first = None
+        for name in ('', *names):
+            count = len(items) if not name else sum(it['where'] == name for it in items)
+            label = f'Todos · {count}' if not name else f'{name.split("/")[-1]} · {count}'
+            btn = Gtk.ToggleButton(label=label)
+            if first is None:
+                first = btn
+            else:
+                btn.set_group(first)
+            btn.set_active(name == self.only)
+            btn.connect('toggled', lambda b, n=name: self._choose(n, b.get_active(), handlers))
+            bar.append(btn)
+        return bar
+
+    def _choose(self, name, active, handlers):
+        if active and name != self.only:
+            self.only = name
+            self.signature = None
 
     def _block(self, item, handlers):
         """El PR y, si su CI está en rojo, el botón del log y lo que se trajo."""

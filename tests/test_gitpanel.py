@@ -36,5 +36,25 @@ class Log(unittest.TestCase):
         self.assertEqual(len(asked), 1)
 
 
+@unittest.skipIf(gitpanel is None, 'sin gi')
+class Filtro(unittest.TestCase):
+    def test_los_repos_salen_una_vez_y_en_orden(self):
+        items = [dict(where='a/x'), dict(where='b/y'), dict(where='a/x')]
+        self.assertEqual(gitpanel.repos(items), ['a/x', 'b/y'])
+
+    def test_elegir_un_repo_obliga_a_redibujar(self):
+        panel = gitpanel.GitPanel()
+        panel.signature = 'viejo'
+        panel._choose('a/x', True, {})
+        self.assertEqual(panel.only, 'a/x')
+        self.assertIsNone(panel.signature)
+
+    def test_un_repo_que_ya_no_tiene_prs_vuelve_a_todos(self):
+        panel = gitpanel.GitPanel()
+        panel.only = 'borrado/z'
+        panel.set_prs([dict(where='a/x', number=1, title='t', who='u', note='', tone='ok', url='u1')], 'on', {})
+        self.assertEqual(panel.only, '')
+
+
 if __name__ == '__main__':
     unittest.main()
