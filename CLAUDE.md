@@ -6,7 +6,7 @@ trabajar en el repo.
 
 ## Comandos
 
-- `make test` — pruebas (`unittest`, ~440). Corren con `/usr/bin/python3`.
+- `make test` — pruebas (`unittest`, ~760). Corren con `/usr/bin/python3`.
 - `elyares-ctl reload` — ver un cambio de código en la isla que corre.
 - `elyares-ctl status` · `elyares-demo` — fuentes y eventos falsos, sin Claude.
 - Servicio: `systemctl --user status elyares-engineer` · logs
@@ -50,6 +50,7 @@ trabajar en el repo.
 - `gh` tiene otra cuenta activa: `GH_TOKEN=$(gh auth token --user ElYares) gh …`.
   Nunca `gh auth switch`. La base es `v2`, no `main`.
 - Mensajes en español, Conventional Commits (`feat:`, `fix:`).
+- **Commits de ~300 líneas como tope** (medido: 20 de 110 pasaron de 500). Si un cambio pasa de eso, partirlo; un `refactor:` por cada 5 `feat:` (`app.py` pasa de 3100 líneas).
 
 ## Contexto del proyecto
 
