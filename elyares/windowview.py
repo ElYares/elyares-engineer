@@ -142,7 +142,7 @@ class WindowView:
         self.frame.attach(win)
         self.frame.palette_extra = [
             (f'Alternar: {label}', 'ajuste', lambda k=key: self.window_setting(k))
-            for key, label in (('glass', 'Vidrio'), ('chat_tech', 'Chat técnico'), ('tech_style', 'Estilo técnico'),
+            for key, label in (('glass', 'Vidrio'), ('glass_fx', 'Brillo y filo del vidrio'), ('chat_tech', 'Chat técnico'), ('tech_style', 'Estilo técnico'),
                                ('reduce_motion', 'Movimiento reducido'), ('tired_eyes', 'Vista cansada'))]
         self.overlay.add_overlay(self.frame.flows)     # y la lista de Flujos, con el estilo de la app
         self.overlay.add_overlay(self.frame.focus)     # el desglose de un agente, igual
@@ -501,6 +501,8 @@ class WindowView:
         elif self.panel_open == 'settings':
             st = self.settings
             rows = [('glass', 'Vidrio', bool(st['glass']), 'La ventana translúcida, desenfocada por Hyprland.'),
+                    ('glass_fx', 'Brillo y filo del vidrio', bool(st['glass_fx']),
+                     'Apagado: solo transparencia con el desenfoque de Hyprland, sin brillo ni borde claro.'),
                     ('compact', 'Modo compacto', bool(st['compact']), 'De la isla suelta; la ventana no lo usa.'),
                     ('pinned', 'Isla fijada', bool(st['pinned']), 'De la isla suelta; la ventana ya está abierta.'),
                     ('chat_tech', 'Chat técnico', bool(st['chat_tech']), 'Bloques y tablas con borde fino y títulos en mayúsculas.'),
@@ -646,8 +648,8 @@ class WindowView:
             self.act(s, key)
 
     def window_setting(self, key):
-        if key == 'glass':
-            self.settings['glass'] = not self.settings['glass']
+        if key in ('glass', 'glass_fx'):
+            self.settings[key] = not self.settings[key]
             settings.save(self.settings)
             self.ensure_tick()
         elif key == 'compact':

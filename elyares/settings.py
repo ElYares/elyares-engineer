@@ -24,7 +24,7 @@ import os
 # `files_collapsed`: la lista de archivos del Editor y del Taller, plegada (nvim ocupa todo el ancho).
 # `term_font`: tamaño del texto de la Terminal, el Editor y el Taller (Ctrl+− / Ctrl++ / Ctrl+0).
 # `window_size`: [ancho, alto] que Yared le dejó a la ventana; [] hasta que la estira.
-DEFAULTS = {'compact': True, 'glass': False, 'pinned': False, 'pinned_monitor': '', 'position': 50, 'position_y': 0, 'window': False, 'window_size': [], 'font': 'Sans', 'theme': 'omarchy', 'chat_tech': False, 'tired_eyes': False, 'tech_style': False, 'reduce_motion': False, 'tired_scale': 125, 'adhd': True,
+DEFAULTS = {'compact': True, 'glass': False, 'glass_fx': True, 'pinned': False, 'pinned_monitor': '', 'position': 50, 'position_y': 0, 'window': False, 'window_size': [], 'font': 'Sans', 'theme': 'omarchy', 'chat_tech': False, 'tired_eyes': False, 'tech_style': False, 'reduce_motion': False, 'tired_scale': 125, 'adhd': True,
             'chat_model': '',
             'chat_effort': '', 'devherd': True,
             'flows_collapsed': False, 'files_collapsed': False, 'term_font': 11,

@@ -770,6 +770,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.settings['glass'] = not self.settings['glass']
             settings.save(self.settings)
             self.ensure_tick()
+        elif order == 'glass_fx':
+            self.settings['glass_fx'] = not self.settings['glass_fx']
+            settings.save(self.settings)
+            self.ensure_tick()
         elif order == 'reload':
             answer = self.reload()
             if req:
@@ -1664,8 +1668,9 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         glass = self.settings['glass']
         cr.set_source_rgba(*ISLAND_BG[:3], fonts.glass(WIN_GLASS_ALPHA if self.windowed else GLASS_ALPHA) if glass else ISLAND_BG[3])
         cr.fill_preserve()
-        # Una ventana no lleva el filo claro: ya tiene su borde de Hyprland.
-        return cr.copy_path() if glass and not self.windowed else None
+        # Una ventana no lleva el filo claro: ya tiene su borde de Hyprland. Sin `glass_fx`
+        # tampoco: queda solo la transparencia, con el desenfoque de Hyprland.
+        return cr.copy_path() if glass and self.settings['glass_fx'] and not self.windowed else None
 
     def draw(self, _da, cr, width, _height):
         cr.set_operator(cairo.OPERATOR_SOURCE)
@@ -2644,7 +2649,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         # Con comandos se lee más rato: en vidrio va más opaca que la isla.
         cr.set_source_rgba(*ISLAND_BG[:3], (TIP_GLASS_ALPHA if glass else ISLAND_BG[3]) * alpha)
         cr.fill_preserve()
-        if glass:
+        if glass and self.settings['glass_fx']:
             sheen = cairo.LinearGradient(0, y, 0, y + h / 2)
             sheen.add_color_stop_rgba(0, *themes.glow(), TIP_SHEEN * alpha)
             sheen.add_color_stop_rgba(1, *themes.glow(), 0)

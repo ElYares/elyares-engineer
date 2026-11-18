@@ -3261,6 +3261,20 @@ class Ventana(Dibujo):
             isl.window_setting('glass')
         self.assertEqual(isl.settings['glass'], not before)
 
+    def test_el_brillo_del_vidrio_se_apaga_aparte_y_deja_solo_la_transparencia(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        self.assertTrue(isl.settings['glass_fx'])               # de fábrica, como siempre
+        with mock.patch('elyares.settings.save'):
+            isl.window_setting('glass_fx')
+        self.assertFalse(isl.settings['glass_fx'])
+        isl.settings['glass'], isl.windowed = True, False
+        import cairo
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 300, 100)
+        self.assertIsNone(isl.island_fill(cairo.Context(surf), 0, 300, 100))   # sin filo: no hay camino que trazar
+        isl.settings['glass_fx'] = True
+        self.assertIsNotNone(isl.island_fill(cairo.Context(surf), 0, 300, 100))
+
     def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
         isl = self.isl
         isl.frame, isl.windowed, isl.focus = mock.Mock(), True, None
