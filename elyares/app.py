@@ -2513,6 +2513,23 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             self.draw_button(cr, key, label, x, y, n == 0 and key != 'dismiss', alpha, bw)
             x -= BUTTON_GAP
 
+    def _pills_fit(self, cr, left, right):
+        """Relleno y hueco de las pastillas de las fuentes, achicados a la par
+        cuando con los de siempre pisarían a las de la derecha (Flujos, Chat...)."""
+        def width(text, extra):
+            return self._layout(cr, text, FONT_PILL).get_pixel_size()[0] + extra
+        tail = width('?', 16)
+        if not (self.frame is not None and self.windowed):
+            tail += sum(PILL_GAP + width(t, e) for t, e in (('Chat', 20), ('+', 16), ('Flujos', 16), ('⚙', 16)))
+        texts = sum(width(label, 0) for _, label in sources.SOURCES)
+        n = len(sources.SOURCES)
+        room = right - tail - 2 * PILL_GAP - left - texts
+        need = n * PILL_PAD + (n - 1) * PILL_GAP
+        if room >= need:
+            return PILL_PAD, PILL_GAP
+        k = max(room, 0) / need
+        return max(PILL_PAD * k, 15), PILL_GAP * k
+
     def draw_pills(self, cr, x0, w, bottom, alpha):
         """Una pastilla por fuente, pegadas al borde de abajo, y al final la
         de los atajos de elyares-engineer."""
@@ -2523,11 +2540,12 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
         cr.fill()
         px, py = self.pointer or (-1, -1)
         x, y = left, top + (PILLS_H - PILL_H) / 2 + 1
+        pad, gap = self._pills_fit(cr, left, right)
         for key, label in sources.SOURCES:
             state = self.source_state(key)
             layout = self._layout(cr, label, FONT_PILL)
             lw, lh = layout.get_pixel_size()
-            pw = lw + PILL_PAD
+            pw = lw + pad
             over = x <= px <= x + pw and y <= py <= y + PILL_H
             mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
             cr.set_source_rgba(*themes.glow(), (.13 if over else .07) * alpha)
@@ -2544,13 +2562,13 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
                 cr.arc(x + 10, y + PILL_H / 2, 3, 0, 2 * math.pi)
                 cr.set_source_rgba(*mascot.rgba(color, alpha))
                 cr.fill()
-            cr.move_to(x + 17, y + (PILL_H - lh) / 2)
+            cr.move_to(x + pad - 3, y + (PILL_H - lh) / 2)
             cr.set_source_rgba(*(MUTED_COLOR if state == 'off' else TITLE_COLOR)[:3], alpha)
             PangoCairo.show_layout(cr, layout)
             self.pills.append((key, x, y, pw, PILL_H))
             if over:
                 self.tip = (key, x + pw / 2, alpha)
-            x += pw + PILL_GAP
+            x += pw + gap
         # La de los atajos no es una fuente: va sin punto, al otro extremo, y
         # a su lado la del chat.
         layout = self._layout(cr, '?', FONT_PILL)
