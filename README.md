@@ -556,20 +556,38 @@ pero a veces el cambio es intencional y lo decide la persona.
   y `config-protection`); el código es propio. Sus casos están en
   `tests/test_guard.py`.
 
+### Ajustes y Contenedores en la isla
+
+Sin abrir la ventana de la app, la isla suelta tiene dos paneles chicos (en la
+ventana, los mismos viven en sus vistas **Ajustes** y **Contenedores**):
+
+- **Ajustes** (pastilla **⚙** o `elyares-ctl prefs`): los interruptores que más
+  se tocan y la **opacidad del vidrio** con − y + (de 5 en 5, de 50 a 100 %).
+  Tema, letra, posición y fuentes siguen en la vista Ajustes de la ventana.
+  Cada cambio pasa por el mismo camino que la ventana y la paleta.
+- **Contenedores** (pastilla **▣** o `elyares-ctl containers`): una fila por
+  proyecto de DevHerd con su `n/m` arriba, lo que gasta de CPU y memoria y
+  **Levantar** / **Parar** (`devherd up` / `devherd stop`, nunca borra
+  volúmenes); un clic en el nombre despliega sus contenedores, cada uno con su
+  ■ o ▶. Muestra hasta 10 filas; el buscador, los filtros y el log en vivo
+  están en la ventana.
+
 ### Fuentes
 
 Abierta a mano (con el atajo, un clic en la pastilla compacta o el ratón
-encima), la isla lleva al pie una pastilla por fuente: Claude, devherd, coffe,
-GitHub, terminal y uso. El punto dice cómo está:
+encima), la isla lleva al pie una fuente por punto, a la izquierda: Claude,
+devherd, coffe, GitHub, terminal y uso (el nombre sale en la burbuja al pasar el
+cursor). A la derecha, tras una rayita, las acciones: **▣** Contenedores, **⚙**
+Ajustes, **Flujos**, **+** Proyectos, **Chat** y **?**. El punto dice cómo está:
 
 | Punto | Significa |
 |---|---|
 | verde | conectada: responde, o su enganche está instalado |
-| rojo | prendida pero con problemas: no responde o falta instalarla |
+| rojo con «!» | prendida pero con problemas: no responde o falta instalarla |
 | gris | prendida, todavía sin datos |
 | aro hueco | apagada |
 
-Un clic en la pastilla prende o apaga la fuente, sin reiniciar nada; al
+Un clic en el punto prende o apaga la fuente, sin reiniciar nada; al
 apagarla se van sus alertas y deja de consultarse. Claude no se apaga desde
 ahí. La preferencia se guarda en `settings.json` con la clave de la fuente
 (`devherd`, `coffe`, `github`, `terminal`, `usage`).
@@ -908,6 +926,8 @@ la mascota completa y se abre al pasar el ratón. La preferencia se guarda en
 | `elyares-ctl open` | abre la isla con lo que hace Claude; se cierra sola a los 6 s o al repetir |
 | `elyares-ctl chat [quién] [--dir carpeta]` | abre el chat con Claude, listo para escribir; otra vez lo cierra. Con `architect`, `auditor`, `reviewer` o `engineer`, el de ese agente. Con `--dir`, en el proyecto de esa carpeta |
 | `elyares-ctl projects` | abre el panel de proyectos, para empezar a trabajar en uno; otra vez lo cierra |
+| `elyares-ctl prefs` | abre el panel de ajustes de la isla (vidrio, brillo, compacto, fijada, estilo, chat técnico, movimiento reducido, vista cansada y la opacidad del vidrio de 50 a 100 %); otra vez lo cierra |
+| `elyares-ctl containers` | abre el panel de contenedores de la isla: proyectos de DevHerd con sus contenedores; otra vez lo cierra |
 | `elyares-ctl workflows` | abre el panel de workflows: cadenas de agentes que se guardan y se lanzan sobre un proyecto; otra vez lo cierra |
 | `elyares-ctl move <dónde>` | corre la isla a lo ancho de la pantalla: `left` y `right`, al siguiente sitio de ese lado; `center`, a su sitio de siempre; `up` y `down`, la suben y la bajan; `reset`, arriba al centro; o un número del 0 (izquierda) al 100 (derecha) |
 | `elyares-ctl hide` | la esconde del todo (ni la ceja ni el hover); otra vez la muestra |
