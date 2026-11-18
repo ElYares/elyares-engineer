@@ -482,7 +482,7 @@ class ChatView:
             self.chat_cache.clear()
             self.chat_scroll, self.chat_menu = 0.0, None
         self.chat_open, self.off = True, False
-        self.projects_open = self.prefs_open = False
+        self.projects_open = self.prefs_open = self.boxes_open = False
         self.chat_claim('chat')
         if carry:
             self.chat_recall()          # y la caja muestra el de la que se abre (vacío si no tiene)

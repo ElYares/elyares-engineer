@@ -322,7 +322,7 @@ class Consulta(IslandCase):
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
         keys = [key for key, *_ in self.isl.pills]
         self.assertEqual(keys, [key for key, _ in sources.SOURCES]
-                         + [app.prefsview.PREFS_PILL, app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
+                         + [app.boxview.BOXES_PILL, app.prefsview.PREFS_PILL, app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
                             commands.HELP])
         for (_, x, _, w, _), (_, nx, *_) in zip(self.isl.pills, self.isl.pills[1:]):
             self.assertLessEqual(x + w, nx)
@@ -3322,6 +3322,36 @@ class Ventana(Dibujo):
         isl.windowed = True
         isl.toggle_prefs()                                   # en la ventana tiene su vista Ajustes
         self.assertFalse(isl.prefs_open)
+
+    def test_el_panel_de_contenedores_despliega_un_proyecto_y_manda_las_ordenes_a_docker(self):
+        isl = self.isl
+        box = lambda n, st: dict(name=n, service=n.split('-')[1], state=st, path='/a')
+        data = dict(projects=[dict(name='uno', path='/a', running=1, total=2, cpu=3.0, mem=1e8,
+                                   containers=[box('a-web', 'running'), box('a-db', 'exited')]),
+                              dict(name='dos', path='/b', running=0, total=0, cpu=0, mem=0, containers=[])],
+                    totals=dict(up=1, total=2, cpu=3.0, mem=1e8, host_mem=8e9))
+        isl.box_watch = mock.Mock(loaded=True, read=lambda: data)
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open = False, False, False, False
+        isl.ensure_tick, isl.window_containers = mock.Mock(), mock.Mock()
+        isl.toggle_boxes()
+        self.assertEqual(isl.target(), 'boxes')
+        self.assertEqual(len(isl.box_rows()), 2)
+        isl.on_hit('boxes', ('fold', '/a'))
+        self.assertEqual(len(isl.box_rows()), 4)
+        self.draw()
+        keys = self.hit('boxes')
+        self.assertEqual(len(keys), 7)                      # cerrar; de cada proyecto, abrirlo y su botón; el botón de cada contenedor
+        self.assertIn(('act', 'stop-project', '/a'), keys)
+        self.assertIn(('act', 'up', '/b'), keys)
+        self.assertIn(('act', 'start', 'a-db'), keys)
+        isl.on_hit('boxes', ('act', 'stop', 'a-web'))
+        isl.window_containers.assert_called_with('stop', 'a-web')
+        self.assertTrue(isl.box_pending_for(('stop', 'a-web')))
+        isl.on_hit('boxes', ('close',))
+        self.assertFalse(isl.boxes_open)
+        isl.windowed = True
+        isl.toggle_boxes()                                  # en la ventana tiene su vista Contenedores
+        self.assertFalse(isl.boxes_open)
 
     def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
         isl = self.isl

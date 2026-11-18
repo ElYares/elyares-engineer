@@ -51,7 +51,7 @@ import subprocess
 import sys
 import time
 
-ORDERS = ('open', 'chat', 'window', 'projects', 'prefs', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
+ORDERS = ('open', 'chat', 'window', 'projects', 'prefs', 'containers', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
           'glass', 'allow', 'deny', 'status', 'sessions', 'toggle')
 REPLIES = ('allow', 'deny', 'status', 'sessions', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')

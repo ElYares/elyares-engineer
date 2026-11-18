@@ -83,7 +83,7 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import (actions, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
+from . import (actions, boxview, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
                preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
@@ -95,7 +95,7 @@ DETAIL_LINES = 4      # líneas del detalle cuando se muestra entero
 MAX_EXTRA = 54        # alto de más que puede pedir el detalle entero
 PILLS_H = 34          # la franja de pastillas de las fuentes
 PILL_H, PILL_GAP = 20, 4
-PILL_PAD = 20         # lo que mide una pastilla además de su texto: el punto y los bordes
+SOURCE_W, SOURCE_GAP = 28, 4    # la pastilla de una fuente: solo su punto
 PREVIEW_W = 600       # con vista previa la isla se ensancha: el código pide ancho
 CODE_LINE_H, PREVIEW_HEAD, PREVIEW_PAD = 15, 24, 8
 PREVIEW_MAX = PREVIEW_HEAD + (preview.MAX_LINES + 1) * CODE_LINE_H + 2 * PREVIEW_PAD
@@ -259,7 +259,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, boxview.BoxesView, workflowview.WorkflowView, windowview.WindowView):
     def __init__(self, app):
         self.gtk_app = app              # la ventana de los flujos se crea con ella, la primera vez que se abre
         self.model = Model()
@@ -566,10 +566,10 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
     @staticmethod
     def set_tired(on):
         """Vista cansada: letra más grande y grises más claros, en la isla y la ventana."""
-        global MUTED_COLOR, PILL_PAD, PILL_GAP
+        global MUTED_COLOR, PILL_GAP
         on = fonts.use_tired(on)
         MUTED_COLOR = MUTED_TIRED if on else MUTED_NORMAL
-        PILL_PAD, PILL_GAP = (18, 3) if on else (22, 5)
+        PILL_GAP = 3 if on else 5
 
     @staticmethod
     def set_techno(on):
@@ -782,6 +782,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             self.toggle_projects()
         elif order == 'prefs':
             self.toggle_prefs()
+        elif order == 'containers':
+            self.toggle_boxes()
         elif order == 'workflows':
             self.toggle_workflows()
         elif order == 'move':
@@ -1185,6 +1187,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             return 'projects'
         if self.prefs_open and not self.windowed:
             return 'prefs'
+        if self.boxes_open and not self.windowed:
+            return 'boxes'
         mode = self.view.mode
         if self.expanded or self.windowed:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
@@ -1288,6 +1292,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             return self.projects_goal()
         if mode == 'prefs':
             return self.prefs_goal()
+        if mode == 'boxes':
+            return self.boxes_goal()
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
@@ -1732,8 +1738,9 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
                 cr.stroke()
             self.chat_place(h)
             return
-        if mode == 'prefs':
-            self.draw_prefs(cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
+        if mode in ('prefs', 'boxes'):
+            (self.draw_prefs if mode == 'prefs' else self.draw_boxes)(
+                cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
                 cr.append_path(edge)
@@ -2513,22 +2520,22 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             self.draw_button(cr, key, label, x, y, n == 0 and key != 'dismiss', alpha, bw)
             x -= BUTTON_GAP
 
-    def _pills_fit(self, cr, left, right):
-        """Relleno y hueco de las pastillas de las fuentes, achicados a la par
-        cuando con los de siempre pisarían a las de la derecha (Flujos, Chat...)."""
-        def width(text, extra):
-            return self._layout(cr, text, FONT_PILL).get_pixel_size()[0] + extra
-        tail = width('?', 16)
-        if not (self.frame is not None and self.windowed):
-            tail += sum(PILL_GAP + width(t, e) for t, e in (('Chat', 20), ('+', 16), ('Flujos', 16), ('⚙', 16)))
-        texts = sum(width(label, 0) for _, label in sources.SOURCES)
-        n = len(sources.SOURCES)
-        room = right - tail - 2 * PILL_GAP - left - texts
-        need = n * PILL_PAD + (n - 1) * PILL_GAP
-        if room >= need:
-            return PILL_PAD, PILL_GAP
-        k = max(room, 0) / need
-        return max(PILL_PAD * k, 15), PILL_GAP * k
+    def _glyph_pill(self, cr, glyph, right_of, y, alpha, px, py, key, at=2):
+        """Una pastilla de un solo glifo a la izquierda de `right_of`; entra en `self.pills` `at` lugares
+        antes del final (en su orden, de izquierda a derecha). Devuelve su x."""
+        layout = self._layout(cr, glyph, FONT_PILL)
+        gw, gh = layout.get_pixel_size()
+        pw = gw + 16
+        x = right_of - PILL_GAP - pw
+        over = x <= px <= x + pw and y <= py <= y + PILL_H
+        mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
+        cr.set_source_rgba(*themes.glow(), (.13 if over else .07) * alpha)
+        cr.fill()
+        cr.move_to(x + (pw - gw) / 2, y + (PILL_H - gh) / 2)
+        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+        PangoCairo.show_layout(cr, layout)
+        self.pills.insert(len(self.pills) - at, (key, x, y, pw, PILL_H))
+        return x
 
     def draw_pills(self, cr, x0, w, bottom, alpha):
         """Una pastilla por fuente, pegadas al borde de abajo, y al final la
@@ -2540,35 +2547,36 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
         cr.fill()
         px, py = self.pointer or (-1, -1)
         x, y = left, top + (PILLS_H - PILL_H) / 2 + 1
-        pad, gap = self._pills_fit(cr, left, right)
+        # Las fuentes van a la izquierda como puntos (el nombre sale en la burbuja), y luego,
+        # tras una rayita, las acciones: así nada se aprieta ni se pisa.
         for key, label in sources.SOURCES:
             state = self.source_state(key)
-            layout = self._layout(cr, label, FONT_PILL)
-            lw, lh = layout.get_pixel_size()
-            pw = lw + pad
-            over = x <= px <= x + pw and y <= py <= y + PILL_H
-            mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
+            over = x <= px <= x + SOURCE_W and top <= py <= top + PILLS_H
+            mascot.box(cr, x, y, SOURCE_W, PILL_H, PILL_H / 2)
             cr.set_source_rgba(*themes.glow(), (.13 if over else .07) * alpha)
             cr.fill()
+            cx, cy = x + SOURCE_W / 2, y + PILL_H / 2
             cr.new_sub_path()
             if state == 'off':
                 # Apagada va hueca, como una sesión en reposo.
-                cr.arc(x + 10, y + PILL_H / 2, 2.5, 0, 2 * math.pi)
-                cr.set_source_rgba(*mascot.rgba('metal', .6 * alpha))
-                cr.set_line_width(1.3)
+                cr.arc(cx, cy, 3.5, 0, 2 * math.pi)
+                cr.set_source_rgba(*mascot.rgba('metal', .7 * alpha))
+                cr.set_line_width(1.5)
                 cr.stroke()
             else:
                 color = {'on': 'green', 'bad': 'red'}.get(state, 'metal')
-                cr.arc(x + 10, y + PILL_H / 2, 3, 0, 2 * math.pi)
+                cr.arc(cx, cy, 5 if state == 'bad' else 4, 0, 2 * math.pi)
                 cr.set_source_rgba(*mascot.rgba(color, alpha))
                 cr.fill()
-            cr.move_to(x + pad - 3, y + (PILL_H - lh) / 2)
-            cr.set_source_rgba(*(MUTED_COLOR if state == 'off' else TITLE_COLOR)[:3], alpha)
-            PangoCairo.show_layout(cr, layout)
-            self.pills.append((key, x, y, pw, PILL_H))
+                if state == 'bad':
+                    self.put(cr, '!', 'Sans Bold 7', cx, cy - 5, (1, 1, 1), alpha, align=.5)
+            self.pills.append((key, x, top, SOURCE_W, PILLS_H))
             if over:
-                self.tip = (key, x + pw / 2, alpha)
-            x += pw + gap
+                self.tip = (key, cx, alpha)
+            x += SOURCE_W + SOURCE_GAP
+        cr.set_source_rgba(*themes.glow(), .14 * alpha)
+        cr.rectangle(x + 3, y + 3, 1, PILL_H - 6)
+        cr.fill()
         # La de los atajos no es una fuente: va sin punto, al otro extremo, y
         # a su lado la del chat.
         layout = self._layout(cr, '?', FONT_PILL)
@@ -2614,19 +2622,9 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, flows)
             self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
-            # Y la de los ajustes de la isla: un engranaje, que la franja no da para más texto.
-            prefs = self._layout(cr, '⚙', FONT_PILL)
-            aw, ah = prefs.get_pixel_size()
-            apw = aw + 16
-            ax = fx - PILL_GAP - apw
-            over_prefs = ax <= px <= ax + apw and y <= py <= y + PILL_H
-            mascot.box(cr, ax, y, apw, PILL_H, PILL_H / 2)
-            cr.set_source_rgba(*themes.glow(), (.13 if over_prefs else .07) * alpha)
-            cr.fill()
-            cr.move_to(ax + (apw - aw) / 2, y + (PILL_H - ah) / 2)
-            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-            PangoCairo.show_layout(cr, prefs)
-            self.pills.insert(len(self.pills) - 2, (prefsview.PREFS_PILL, ax, y, apw, PILL_H))
+            # Y las de los ajustes y los contenedores de la isla: un glifo cada una, que la franja no da para más texto.
+            ax = self._glyph_pill(cr, '⚙', fx, y, alpha, px, py, prefsview.PREFS_PILL)
+            self._glyph_pill(cr, '▣', ax, y, alpha, px, py, boxview.BOXES_PILL, 3)
             self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
@@ -3048,6 +3046,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
                     self.toggle_projects()
                 elif key == prefsview.PREFS_PILL:
                     self.toggle_prefs()
+                elif key == boxview.BOXES_PILL:
+                    self.toggle_boxes()
                 elif key == workflowview.WF_PILL:
                     self.toggle_workflows()
                 return
@@ -3066,7 +3066,7 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'boxes') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3082,6 +3082,9 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             return
         if kind == 'prefs':
             self.on_prefs_hit(key)
+            return
+        if kind == 'boxes':
+            self.on_boxes_hit(key)
             return
         if kind == 'chat':
             self.on_chat_hit(key)
