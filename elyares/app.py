@@ -2100,6 +2100,9 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             size, fx, fy = 42, x + 27, y + ch / 2 + 2
             tx, ty, tw = x + 46, y + 9, cw - 52
             sx, sw = tx, tw
+            if cw < 130:
+                size, fx, tx, tw = 32, x + 20, x + 38, cw - 42     # muy estrecho: más chica aún
+                sx, sw = tx, tw
         elif quad:
             size, fx, fy = 54, x + 38, y + ch / 2 + 2
             tx, ty, tw = x + 74, y + 9, cw - 86
@@ -2121,33 +2124,35 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
                   now - s.changed)
         name_color = rgb(mascot.accent(role)) if busy else MUTED_COLOR
         # Si el nombre entero no cabe (y todos empiezan igual), va el del personaje.
-        fits = self._layout(cr, member.name, FONT_ROW).get_pixel_size()[0] <= (tw if column else tw - 22)
+        dot = 0 if quad and cw < 130 else 14        # sin el punto del estado, que el nombre entero valga más
+        fits = self._layout(cr, member.name, FONT_ROW).get_pixel_size()[0] <= (tw if column else tw - dot - 8)
         name = member.name if fits else role
         if column:
             self.put(cr, name, FONT_ROW, x + cw / 2, ty, name_color, alpha, tw, .5)
         else:
-            cr.new_sub_path()
-            cr.arc(tx + 4, ty + 8, 3.5, 0, 2 * math.pi)
-            cr.set_source_rgba(*mascot.rgba(tint if busy else 'metal', alpha * (1 if busy else .6)))
-            cr.fill()
+            if dot:
+                cr.new_sub_path()
+                cr.arc(tx + 4, ty + 8, 3.5, 0, 2 * math.pi)
+                cr.set_source_rgba(*mascot.rgba(tint if busy else 'metal', alpha * (1 if busy else .6)))
+                cr.fill()
             took = elapsed(now - member.since) if member.state == 'working' and member.since else ''
             if wide or quad:
                 # Cuánto lleva, a la derecha del nombre; a medias no cabe y va
                 # debajo. En un cuadro estrecho, si se comería el nombre, no va.
-                room = tw - 22 - (self._layout(cr, took, FONT_DETAIL).get_pixel_size()[0] if took else 0)
+                room = tw - dot - 8 - (self._layout(cr, took, FONT_DETAIL).get_pixel_size()[0] if took else 0)
                 if took and room < self._layout(cr, name, FONT_ROW).get_pixel_size()[0]:
                     took = ''
                 took_w = self.put(cr, took, FONT_DETAIL, tx + tw, ty + 1, MUTED_COLOR, alpha, align=1) \
                     if took else 0
-                self.put(cr, name, FONT_ROW, tx + 14, ty, name_color, alpha, tw - 22 - took_w)
+                self.put(cr, name, FONT_ROW, tx + dot, ty, name_color, alpha, tw - dot - 8 - took_w)
             else:
-                self.put(cr, name, FONT_ROW, tx + 14, ty, name_color, alpha, tw - 14)
+                self.put(cr, name, FONT_ROW, tx + dot, ty, name_color, alpha, tw - dot)
                 if took:
                     self.put(cr, took, FONT_DETAIL, tx + 14, ty + 19, MUTED_COLOR, alpha, tw - 14)
         if not busy:
             note = (('esperando' if s.delegating else 'en reposo') if role == MAIN_ROLE
                     else 'encargar ›' if over else 'libre')
-            self.put(cr, note, FONT_DETAIL, x + cw / 2 if column else tx + 14, ty + 20, MUTED_COLOR,
+            self.put(cr, note, FONT_DETAIL, x + cw / 2 if column else tx + dot, ty + 20, MUTED_COLOR,
                      alpha * .8, tw, .5 if column else 0)
             return
         if member.state == 'permission':
