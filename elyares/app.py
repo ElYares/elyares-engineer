@@ -185,7 +185,7 @@ BOARD_MAX = (TABS_H + max(BOARD_H + PREVIEW_MAX, FOCUS_H + chatview.MINI_H) + BO
              + ALERT_ROWS * ROW_H + LIST_PAD)
 WIN_H = max(HEAD_MAX, BOARD_MAX) + PILLS_H + 8 + TIP_ROOM
 SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
-         'open': (630, OPEN_H), 'ask': (560, 108)}
+         'open': (600, OPEN_H), 'ask': (560, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
@@ -2591,8 +2591,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, flows)
             self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
-            # Y la de los ajustes de la isla.
-            prefs = self._layout(cr, 'Ajustes', FONT_PILL)
+            # Y la de los ajustes de la isla: un engranaje, que la franja no da para más texto.
+            prefs = self._layout(cr, '⚙', FONT_PILL)
             aw, ah = prefs.get_pixel_size()
             apw = aw + 16
             ax = fx - PILL_GAP - apw
