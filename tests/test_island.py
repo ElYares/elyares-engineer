@@ -3362,7 +3362,8 @@ class Ventana(Dibujo):
         cards[6].update(busy=True, ask=True, state='Pide permiso', steps=['Bash: git push'])
         isl.home_cards = lambda: cards
         isl.window_editor_root = lambda: '/x/elyares-engineer'
-        isl.tab_session = lambda: object()
+        isl.tab_session = lambda: mock.Mock(sid='x')
+        isl.focused = lambda: None                                  # sin pasos que leer: elegir no abre el desglose
         isl.windowed = isl.chat_open = isl.projects_open = isl.prefs_open = isl.boxes_open = False
         isl.ensure_tick, isl.window_decide, isl.toggle_boxes = mock.Mock(), mock.Mock(), mock.Mock()
         isl.toggle_home()
@@ -3405,10 +3406,13 @@ class Ventana(Dibujo):
         isl.settings['home_main'] = False
         self.assertEqual(isl.target(), 'board')
         isl.settings['home_main'] = True
-        isl.pomo_watch = mock.Mock(read=lambda: (None, [dict(id='7', title='Escribir', project='p', repo='')]))
+        isl.pomo_watch = mock.Mock(read=lambda: (None, [dict(id='7', title='Escribir', project='p', repo='/x/p'),
+                                                        dict(id='8', title='Otra', project='q', repo='/x/q')]),
+                                   project_of=lambda root: 'p')
         isl.window_pomodoro = mock.Mock()
         isl.on_hit('home', ('pane', 'tasks'))
         self.draw()
+        self.assertEqual([k for k in self.hit('home') if k[0] == 'start'], [('start', '7')])    # solo las de su proyecto
         isl.on_hit('home', ('start', '7'))
         isl.window_pomodoro.assert_called_with('start', '7')
         isl.on_hit('home', ('pane', 'habits'))
@@ -3418,6 +3422,44 @@ class Ventana(Dibujo):
         self.assertTrue(app.homeview.habits.items()[0]['done_today'])
         isl.on_hit('home', ('pane', 'habits'))                      # otra vez, vuelve al agente
         self.assertEqual(isl.home_pane, 'agent')
+
+    def test_en_inicio_un_agente_con_pasos_abre_su_desglose_y_volver_regresa_a_inicio(self):
+        isl = self.isl
+        self.work('a', 'devops')
+        isl.windowed, isl.expanded, isl.chat_open = False, True, False
+        isl.settings['home_main'] = True
+        self.assertEqual(isl.target(), 'home')
+        isl.on_hit('home', ('pick', 'devops'))
+        self.assertEqual(isl.target(), 'board')                     # el desglose de siempre
+        self.assertEqual(isl.focused()[1].role, 'devops')
+        isl.on_hit('back', None)
+        self.assertEqual(isl.target(), 'home')
+        isl.home_open = True                                        # abierto con ⌂: «volver» lo reabre
+        isl.on_hit('home', ('pick', 'devops'))
+        self.assertFalse(isl.home_open)
+        isl.on_hit('back', None)
+        self.assertTrue(isl.home_open)
+
+    def test_el_pomodoro_de_inicio_quita_las_tarjetas_y_pone_la_taza_con_las_tareas_del_proyecto(self):
+        isl = self.isl
+        isl.home_cards = lambda: [dict(role='engineer', name='engineer', color='#ffffff', state='libre', steps=[],
+                                       busy=False, ask=False, pet='idle')]
+        isl.window_editor_root = lambda: '/x/p'
+        isl.tab_session = lambda: object()
+        isl.windowed, isl.home_open = False, True
+        status = app.homeview.pomodoro.describe({'phase': 'focus', 'remaining_secs': 600, 'progress': .4, 'task': {'title': 'HU-1'}})
+        tasks = [dict(id='7', title='Escribir', project='p', repo='/x/p'), dict(id='8', title='Otra', project='q', repo='/x/q')]
+        isl.pomo_watch = mock.Mock(read=lambda: (status, tasks), project_of=lambda root: 'p' if root == '/x/p' else '')
+        isl.on_hit('home', ('pane', 'pomodoro'))
+        self.draw()
+        keys = self.hit('home')
+        self.assertFalse([k for k in keys if k[0] == 'pick'])           # sin tarjetas de agentes
+        self.assertEqual([k for k in keys if k[0] == 'start'], [('start', '7')])
+        self.assertIn(('pomo', 'done'), keys)
+        self.assertIn('10:00', self.shown)
+        isl.window_editor_root = lambda: '/x/nuevo'                     # una carpeta que coffe no conoce
+        self.draw()
+        self.assertIn('coffe project add nuevo --repo /x/nuevo', self.shown)      # fuera de ~, la ruta entera
 
     def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
         isl = self.isl

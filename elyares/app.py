@@ -1139,7 +1139,7 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
         self.expanded = self.settings['pinned'] or self.windowed
         if not self.expanded:
             self.tab_manual = False     # al cerrarse, la próxima vez vuelve a seguir lo que pasa
-            self.focus = None           # al volver a abrirla, el tablero y no un desglose
+            self.focus, self.home_back = None, False     # al volver a abrirla, el tablero y no un desglose
         if self.pin:
             self.pin = ''
             self.refresh()
@@ -1198,7 +1198,7 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
             # la cabecera de siempre: es donde están las fuentes.
             if self.claude():
-                return 'home' if self.home_main() else 'board'
+                return 'home' if self.home_main() and not self.focused() else 'board'     # un desglose abierto desde Inicio
             return 'list' if self.view.others else 'open'
         if mode == 'open' and self.view.ask:
             return 'ask'
@@ -3124,6 +3124,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             return
         elif kind == 'back':
             self.focus = None
+            if self.home_back:
+                self.home_open, self.home_back = True, False
         elif kind == 'jump':
             s = self.model.sessions.get(key)
             if s is not None:
