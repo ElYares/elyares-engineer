@@ -322,7 +322,7 @@ class Consulta(IslandCase):
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
         keys = [key for key, *_ in self.isl.pills]
         self.assertEqual(keys, [key for key, _ in sources.SOURCES]
-                         + [app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
+                         + [app.prefsview.PREFS_PILL, app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
                             commands.HELP])
         for (_, x, _, w, _), (_, nx, *_) in zip(self.isl.pills, self.isl.pills[1:]):
             self.assertLessEqual(x + w, nx)
@@ -3289,6 +3289,39 @@ class Ventana(Dibujo):
         self.assertEqual(save.call_count, 3)
         isl.settings['glass_alpha'] = 'basura'                      # un settings.json mal escrito
         self.assertEqual(isl.glass_pct(), 85)
+
+    def test_el_panel_de_ajustes_de_la_isla_cambia_lo_mismo_que_la_ventana(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        isl.windowed = False
+        isl.chat_open = isl.projects_open = False
+        isl.toggle_prefs()
+        self.assertEqual(isl.target(), 'prefs')
+        with mock.patch('elyares.settings.save'):
+            was = isl.settings['glass_fx']
+            isl.on_hit('prefs', 'glass_fx')
+            self.assertEqual(isl.settings['glass_fx'], not was)
+            isl.on_hit('prefs', 'alpha-')
+            self.assertEqual(isl.glass_pct(), 80)
+            isl.on_hit('prefs', 'alpha+')
+            isl.on_hit('prefs', 'alpha+')
+            self.assertEqual(isl.glass_pct(), 90)
+        isl.on_hit('prefs', 'close')
+        self.assertFalse(isl.prefs_open)
+
+    def test_el_panel_de_ajustes_se_dibuja_con_un_clic_por_renglon_y_no_abre_en_la_ventana(self):
+        isl = self.isl
+        isl.windowed, isl.chat_open, isl.projects_open = False, False, False
+        isl.prefs_open = True
+        self.draw()
+        keys = self.hit('prefs')
+        for key, *_ in __import__('elyares').prefsview.PREFS_ROWS:
+            self.assertIn(key, keys)
+        self.assertTrue({'close', 'alpha+', 'alpha-'} <= set(keys))
+        isl.prefs_open = False
+        isl.windowed = True
+        isl.toggle_prefs()                                   # en la ventana tiene su vista Ajustes
+        self.assertFalse(isl.prefs_open)
 
     def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
         isl = self.isl

@@ -84,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
+               preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
@@ -185,7 +185,7 @@ BOARD_MAX = (TABS_H + max(BOARD_H + PREVIEW_MAX, FOCUS_H + chatview.MINI_H) + BO
              + ALERT_ROWS * ROW_H + LIST_PAD)
 WIN_H = max(HEAD_MAX, BOARD_MAX) + PILLS_H + 8 + TIP_ROOM
 SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
-         'open': (560, OPEN_H), 'ask': (560, 108)}
+         'open': (630, OPEN_H), 'ask': (560, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
@@ -259,7 +259,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
     def __init__(self, app):
         self.gtk_app = app              # la ventana de los flujos se crea con ella, la primera vez que se abre
         self.model = Model()
@@ -780,6 +780,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 req.reply(answer)
         elif order == 'projects':
             self.toggle_projects()
+        elif order == 'prefs':
+            self.toggle_prefs()
         elif order == 'workflows':
             self.toggle_workflows()
         elif order == 'move':
@@ -1181,6 +1183,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return 'chat'
         if self.projects_open:
             return 'projects'
+        if self.prefs_open and not self.windowed:
+            return 'prefs'
         mode = self.view.mode
         if self.expanded or self.windowed:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
@@ -1282,6 +1286,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return chatview.CHAT_W, chatview.CHAT_H
         if mode == 'projects':
             return self.projects_goal()
+        if mode == 'prefs':
+            return self.prefs_goal()
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
@@ -1718,6 +1724,16 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return
         if mode == 'projects':
             self.draw_projects(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 90) / 60))
+            cr.restore()
+            if edge:
+                cr.append_path(edge)
+                cr.set_source_rgba(*themes.glow(), GLASS_EDGE)
+                cr.set_line_width(1)
+                cr.stroke()
+            self.chat_place(h)
+            return
+        if mode == 'prefs':
+            self.draw_prefs(cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
                 cr.append_path(edge)
@@ -2575,6 +2591,19 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, flows)
             self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
+            # Y la de los ajustes de la isla.
+            prefs = self._layout(cr, 'Ajustes', FONT_PILL)
+            aw, ah = prefs.get_pixel_size()
+            apw = aw + 16
+            ax = fx - PILL_GAP - apw
+            over_prefs = ax <= px <= ax + apw and y <= py <= y + PILL_H
+            mascot.box(cr, ax, y, apw, PILL_H, PILL_H / 2)
+            cr.set_source_rgba(*themes.glow(), (.13 if over_prefs else .07) * alpha)
+            cr.fill()
+            cr.move_to(ax + (apw - aw) / 2, y + (PILL_H - ah) / 2)
+            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, prefs)
+            self.pills.insert(len(self.pills) - 2, (prefsview.PREFS_PILL, ax, y, apw, PILL_H))
             self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
@@ -2994,6 +3023,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                     self.open_chat(typing=True)
                 elif key == projectview.PROJECTS_PILL:
                     self.toggle_projects()
+                elif key == prefsview.PREFS_PILL:
+                    self.toggle_prefs()
                 elif key == workflowview.WF_PILL:
                     self.toggle_workflows()
                 return
@@ -3012,7 +3043,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3025,6 +3056,9 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         de proyectos y sus atajos para empezar en uno."""
         if kind in ('project', 'projects', 'start'):
             self.on_project_hit(kind, key)
+            return
+        if kind == 'prefs':
+            self.on_prefs_hit(key)
             return
         if kind == 'chat':
             self.on_chat_hit(key)
