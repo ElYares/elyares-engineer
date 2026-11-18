@@ -17,7 +17,8 @@ TASKS_EVERY = 10.0        # la lista de tareas cambia menos
 MAX_TASKS = 12
 FOCUS_PHASES = ('focus', 'overlearning')
 PHASES = {'idle': 'Parado', 'focus': 'En foco', 'overlearning': 'En foco',
-          'break': 'Descanso', 'break-long': 'Descanso largo'}
+          'short_break': 'Descanso', 'long_break': 'Descanso largo'}
+BREAKS = ('short_break', 'long_break')
 # `coffe task list`: id, estado, tiempo, prioridad, título (con «…») y [pomodoros] y proyecto.
 TASK_LINE = re.compile(r'^\s*(\d+)\s+(\S+)\s+\S+\s+(\S+)\s+(.*?)\s+(\[[^\]]*\])\s+(.*\S)\s*$')
 
@@ -70,6 +71,25 @@ def describe(status):
                 running=phase != 'idle')
 
 
+def cup(status):
+    """La taza de `coffe` para este estado: (cómo está, cuánto café queda de 0 a 1).
+    En foco se vacía, en el descanso se llena y en el refri se queda a medias."""
+    if status is None:
+        return 'fria', .3
+    phase, progress = status['phase'], min(1.0, max(0.0, status['progress']))
+    if phase in FOCUS_PHASES:
+        return ('vaciando' if phase == 'focus' else 'repaso'), 1 - progress
+    if phase in BREAKS:
+        return 'llenando', progress
+    return ('refri', .55) if status['parked'] else ('vacia', 0.0)
+
+
+def of_project(tasks, root):
+    """Las tareas del proyecto de la carpeta `root`: las de su repo o de un repo que la contiene."""
+    root = root.rstrip('/')
+    return [t for t in tasks if t.get('repo') and (root == t['repo'].rstrip('/') or root.startswith(t['repo'].rstrip('/') + '/'))]
+
+
 def run(*args):
     """Una orden a `coffe`. Devuelve (ok, lo que dijo)."""
     if not shutil.which('coffe'):
@@ -112,13 +132,18 @@ class Watcher:
     def refresh(self):
         self.at = self.tasks_at = 0.0
 
+    def project_of(self, root):
+        """El proyecto de `coffe` de la carpeta `root` (el de repo más hondo que la contiene), o ''."""
+        found = [(len(repo), name) for name, repo in self.repos.items() if of_project([dict(repo=repo)], root)]
+        return max(found)[1] if found else ''
+
     def _fetch(self, with_tasks):
         try:
             self.status = snapshot()
             if with_tasks:
                 ok, text = run('task', 'list')
                 if ok:
-                    self.tasks, self.tasks_at = parse_tasks(text)[:MAX_TASKS], time.monotonic()
+                    self.tasks, self.tasks_at = parse_tasks(text), time.monotonic()     # todas: cada vista filtra y recorta
                 ok, text = run('project', 'list')
                 if ok:
                     self.repos = parse_projects(text)

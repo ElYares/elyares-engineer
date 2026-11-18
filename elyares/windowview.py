@@ -487,7 +487,7 @@ class WindowView:
         frame.pomodoro.set_visible(self.panel_open == 'pomodoro')
         if self.panel_open == 'pomodoro':
             status, tasks = self.pomo_watch.read()
-            frame.pomodoro.set_pomodoro(status, tasks, dict(act=self.window_pomodoro,
+            frame.pomodoro.set_pomodoro(status, tasks[:pomodoro.MAX_TASKS], dict(act=self.window_pomodoro,
                                                             agent=self.window_pomodoro_agent))
         frame.git.set_visible(self.panel_open == 'git')
         if self.panel_open == 'git':

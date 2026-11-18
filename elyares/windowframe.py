@@ -1019,7 +1019,7 @@ class PomodoroPanel(Gtk.ScrolledWindow):
     """El pomodoro de `coffe`: el reloj, la tarea en curso con sus botones y
     las tareas pendientes para empezar una. Sin estado propio: la llena la isla."""
 
-    TONES = {'focus': 'green', 'overlearning': 'green', 'break': 'yellow', 'break-long': 'yellow'}
+    TONES = {'focus': 'green', 'overlearning': 'green', 'short_break': 'yellow', 'long_break': 'yellow'}
 
     def __init__(self):
         super().__init__()
