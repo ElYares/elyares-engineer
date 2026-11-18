@@ -16,6 +16,9 @@ Uso: elyares-ctl <orden>
               Con la ventana ya abierta, la enfoca; con `toggle`, la cierra.
               Si elyares-engineer no corre, lo arranca
     projects  abre el panel de proyectos, para empezar a trabajar en uno; otra vez, lo cierra
+    home      abre el panel Inicio de la isla: el proyecto, los agentes y el contexto del elegido; otra vez, lo cierra
+    habit add <texto> | rm <texto> | list
+              los hábitos de Inicio: una casilla por día con su racha (se marcan en la isla)
     prefs     abre el panel de ajustes de la isla (vidrio, compacto, opacidad…); otra vez, lo cierra
     workflows abre el panel de workflows: cadenas de agentes que se guardan y se
               lanzan sobre un proyecto; otra vez, lo cierra
@@ -51,7 +54,7 @@ import subprocess
 import sys
 import time
 
-ORDERS = ('open', 'chat', 'window', 'projects', 'prefs', 'containers', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
+ORDERS = ('open', 'chat', 'window', 'projects', 'prefs', 'containers', 'home', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
           'glass', 'allow', 'deny', 'status', 'sessions', 'toggle')
 REPLIES = ('allow', 'deny', 'status', 'sessions', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
@@ -100,6 +103,23 @@ def wake(path):
         time.sleep(0.2)
 
 
+def habit(args):
+    """`habit add <texto>`, `habit rm <texto>` o `habit list`: lee y escribe el archivo, sin pasar por la isla."""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    from elyares import habits
+    what, name = (args[0] if args else ''), ' '.join(args[1:])
+    if what == 'list':
+        for h in habits.items():
+            print(('[x] ' if h['done_today'] else '[ ] ') + h['name'] + (f' · racha {h["streak"]}' if h['streak'] else ''))
+        return 0
+    if what not in ('add', 'rm'):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    ok, said = habits.add(name) if what == 'add' else habits.remove(name)
+    print(said, file=sys.stderr if not ok else sys.stdout)
+    return 0 if ok else 1
+
+
 def main():
     args = sys.argv[1:]
     line = '--line' in args
@@ -112,6 +132,8 @@ def main():
         del args[at:at + 2]
     order = args[0] if args else ''
     source = args[1] if len(args) > 1 else ''
+    if order == 'habit':
+        return habit(args[1:])
     if folder is not None and (order != 'chat' or not os.path.isdir(folder)):
         print(__doc__.strip(), file=sys.stderr)
         return 2
