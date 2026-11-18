@@ -193,7 +193,7 @@ TEXT_INSET = 12 + PET + 10 + 18   # lo que le quitan al texto la mascota y los m
 ISLAND_BG = (5 / 255, 6 / 255, 8 / 255, .97)
 GLASS_ALPHA, GLASS_EDGE = .85, .16  # modo vidrio: fondo translúcido y filo claro
 WIN_GLASS_ALPHA = .5                 # la ventana de la app, en vidrio (igual que la isla suelta)
-TIP_GLASS_ALPHA = .92                # la burbuja, en vidrio: más opaca que la isla, que se lee más rato
+TIP_EXTRA = .07                      # la burbuja, en vidrio: más opaca que la isla (se lee más rato), tope .97
 TITLE_COLOR = (.95, .96, 1, 1)
 MUTED_NORMAL = (.44, .49, .63, 1)
 MUTED_TIRED = (.78, .82, .92, 1)         # vista cansada: el gris apagado, mucho más claro
@@ -1650,6 +1650,11 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         w = clamp(self.w, 0, width)
         return (width - w) / 2, w, h
 
+    def glass_pct(self):
+        """La opacidad del vidrio de la isla, en %: el ajuste, o la de siempre si no es un número."""
+        value = self.settings.get('glass_alpha')
+        return int(max(50, min(100, value))) if isinstance(value, (int, float)) else int(GLASS_ALPHA * 100)
+
     def island_fill(self, cr, x0, w, h):
         """El cuerpo de una isla: colgada del borde de arriba, con las esquinas
         de abajo redondas, y su fondo (translúcido en modo vidrio). Deja el
@@ -1666,7 +1671,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.arc(x0 + r, h - r, r, math.pi / 2, math.pi)
         cr.close_path()
         glass = self.settings['glass']
-        cr.set_source_rgba(*ISLAND_BG[:3], fonts.glass(WIN_GLASS_ALPHA if self.windowed else GLASS_ALPHA) if glass else ISLAND_BG[3])
+        cr.set_source_rgba(*ISLAND_BG[:3], fonts.glass(WIN_GLASS_ALPHA if self.windowed else self.glass_pct() / 100) if glass else ISLAND_BG[3])
         cr.fill_preserve()
         # Una ventana no lleva el filo claro: ya tiene su borde de Hyprland. Sin `glass_fx`
         # tampoco: queda solo la transparencia, con el desenfoque de Hyprland.
@@ -2647,7 +2652,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.tip_shadow(cr, shape, top, width, alpha)
         cr.append_path(shape)
         # Con comandos se lee más rato: en vidrio va más opaca que la isla.
-        cr.set_source_rgba(*ISLAND_BG[:3], (TIP_GLASS_ALPHA if glass else ISLAND_BG[3]) * alpha)
+        cr.set_source_rgba(*ISLAND_BG[:3], (min(.97, self.glass_pct() / 100 + TIP_EXTRA) if glass else ISLAND_BG[3]) * alpha)
         cr.fill_preserve()
         if glass and self.settings['glass_fx']:
             sheen = cairo.LinearGradient(0, y, 0, y + h / 2)

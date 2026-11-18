@@ -3275,6 +3275,21 @@ class Ventana(Dibujo):
         isl.settings['glass_fx'] = True
         self.assertIsNotNone(isl.island_fill(cairo.Context(surf), 0, 300, 100))
 
+    def test_la_opacidad_del_vidrio_se_ajusta_y_se_guarda_entre_50_y_100(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        self.assertEqual(isl.glass_pct(), 85)                       # de fábrica
+        with mock.patch('elyares.settings.save') as save:
+            isl.window_glass_alpha(70)
+            self.assertEqual((isl.settings['glass_alpha'], isl.glass_pct()), (70, 70))
+            isl.window_glass_alpha(5)                               # nunca casi invisible
+            self.assertEqual(isl.glass_pct(), 50)
+            isl.window_glass_alpha(500)
+            self.assertEqual(isl.glass_pct(), 100)
+        self.assertEqual(save.call_count, 3)
+        isl.settings['glass_alpha'] = 'basura'                      # un settings.json mal escrito
+        self.assertEqual(isl.glass_pct(), 85)
+
     def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
         isl = self.isl
         isl.frame, isl.windowed, isl.focus = mock.Mock(), True, None

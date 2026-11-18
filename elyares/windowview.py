@@ -516,8 +516,10 @@ class WindowView:
             frame.settings.set_rows(rows, st['position'], dict(toggle=self.window_setting, move=self.move,
                                                                theme=self.window_theme, font=self.window_font,
                                                                tired_scale=self.window_tired_scale,
+                                                               glass_alpha=self.window_glass_alpha,
                                                                pick_theme=self.pick_theme),
-                                    fonts.current, themes.current, round(fonts.TIRED_SCALE * 100))
+                                    fonts.current, themes.current, round(fonts.TIRED_SCALE * 100),
+                                    self.glass_pct())
 
     def window_code_views(self, frame):
         """Editor, Terminal y Taller: los tres miran el mismo proyecto. Cada uno solo trabaja a la vista."""
@@ -687,6 +689,12 @@ class WindowView:
             self.overlay.queue_draw()
         else:
             self.toggle_source(key)
+
+    def window_glass_alpha(self, pct):
+        """Cambia la opacidad del vidrio de la isla (50 a 100 %) y lo guarda."""
+        self.settings['glass_alpha'] = int(max(50, min(100, pct)))
+        settings.save(self.settings)
+        self.ensure_tick()
 
     def window_tired_scale(self, pct):
         """Cambia cuánto agranda la vista cansada (125, 150 o 200 %) y lo guarda."""
