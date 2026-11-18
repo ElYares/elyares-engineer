@@ -44,7 +44,7 @@ class BoxesView:
         if self.boxes_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.prefs_open = False
+            self.projects_open = self.prefs_open = self.home_open = False
             self.box_unfolded, self.box_pending = set(), {}
             self.box_watch.refresh()
         self.ensure_tick()

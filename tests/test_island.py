@@ -83,6 +83,7 @@ class IslandCase(unittest.TestCase):
         self.saved = saver.start()
         self.addCleanup(saver.stop)
         isl.ensure_tick = isl.collapse = lambda: None
+        isl.settings['home_main'] = False        # las pruebas del tablero lo miran a él; Inicio tiene las suyas
         isl.refresh()
         self.isl = isl
 
@@ -322,7 +323,7 @@ class Consulta(IslandCase):
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
         keys = [key for key, *_ in self.isl.pills]
         self.assertEqual(keys, [key for key, _ in sources.SOURCES]
-                         + [app.boxview.BOXES_PILL, app.prefsview.PREFS_PILL, app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
+                         + [app.homeview.HOME_PILL, app.boxview.BOXES_PILL, app.prefsview.PREFS_PILL, app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
                             commands.HELP])
         for (_, x, _, w, _), (_, nx, *_) in zip(self.isl.pills, self.isl.pills[1:]):
             self.assertLessEqual(x + w, nx)
@@ -3352,6 +3353,71 @@ class Ventana(Dibujo):
         isl.windowed = True
         isl.toggle_boxes()                                  # en la ventana tiene su vista Contenedores
         self.assertFalse(isl.boxes_open)
+
+    def test_el_panel_inicio_de_la_isla_elige_agentes_decide_y_lleva_a_los_atajos(self):
+        isl = self.isl
+        roles = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', 'devops')
+        cards = [dict(role=r, name=r, color='#ffffff', state='libre', steps=[], busy=False, ask=False, pet='idle')
+                 for r in roles]
+        cards[6].update(busy=True, ask=True, state='Pide permiso', steps=['Bash: git push'])
+        isl.home_cards = lambda: cards
+        isl.window_editor_root = lambda: '/x/elyares-engineer'
+        isl.tab_session = lambda: object()
+        isl.windowed = isl.chat_open = isl.projects_open = isl.prefs_open = isl.boxes_open = False
+        isl.ensure_tick, isl.window_decide, isl.toggle_boxes = mock.Mock(), mock.Mock(), mock.Mock()
+        isl.toggle_home()
+        self.assertEqual(isl.target(), 'home')
+        self.draw()
+        self.assertEqual(isl.home_picked, 'devops')                 # quien pide permiso queda elegido
+        keys = self.hit('home')
+        self.assertIn(('all',), keys)                               # 7 agentes: cinco y «+ 2 más»
+        self.assertIn(('decide', True), keys)
+        isl.on_hit('home', ('decide', True))
+        isl.window_decide.assert_called_with(True)
+        isl.on_hit('home', ('pick', 'mobile'))
+        self.assertEqual(isl.home_picked, 'mobile')
+        isl.on_hit('home', ('all',))
+        self.assertGreater(isl.home_goal()[1], 0)
+        isl.on_hit('home', ('go', 'boxes'))
+        isl.toggle_boxes.assert_called_once()
+        self.assertFalse(isl.home_open)
+        isl.windowed = True
+        isl.toggle_home()                                           # en la ventana tiene su vista Inicio
+        self.assertFalse(isl.home_open)
+
+    def test_inicio_es_la_vista_al_abrir_la_isla_y_sus_paneles_hacen_lo_suyo(self):
+        isl = self.isl
+        import os, tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.object(app.homeview.habits, 'PATH', os.path.join(tmp.name, 'habits.json'))
+        patch.start()
+        self.addCleanup(patch.stop)
+        app.homeview.habits.add('Agua')
+        isl.home_cards = lambda: [dict(role='engineer', name='engineer', color='#ffffff', state='libre', steps=[],
+                                       busy=False, ask=False, pet='idle')]
+        isl.window_editor_root = lambda: '/x/p'
+        isl.tab_session = lambda: object()
+        isl.claude = lambda: [object()]
+        isl.windowed, isl.expanded = False, True
+        isl.settings['home_main'] = True
+        self.assertEqual(isl.target(), 'home')                      # abierta a mano: Inicio, no el tablero
+        isl.settings['home_main'] = False
+        self.assertEqual(isl.target(), 'board')
+        isl.settings['home_main'] = True
+        isl.pomo_watch = mock.Mock(read=lambda: (None, [dict(id='7', title='Escribir', project='p', repo='')]))
+        isl.window_pomodoro = mock.Mock()
+        isl.on_hit('home', ('pane', 'tasks'))
+        self.draw()
+        isl.on_hit('home', ('start', '7'))
+        isl.window_pomodoro.assert_called_with('start', '7')
+        isl.on_hit('home', ('pane', 'habits'))
+        self.draw()
+        self.assertIn(('habit', 'Agua'), self.hit('home'))
+        isl.on_hit('home', ('habit', 'Agua'))
+        self.assertTrue(app.homeview.habits.items()[0]['done_today'])
+        isl.on_hit('home', ('pane', 'habits'))                      # otra vez, vuelve al agente
+        self.assertEqual(isl.home_pane, 'agent')
 
     def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
         isl = self.isl

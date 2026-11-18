@@ -25,7 +25,7 @@ import os
 # `glass_alpha`: opacidad del fondo de la isla en modo vidrio, de 50 a 100 %.
 # `term_font`: tamaño del texto de la Terminal, el Editor y el Taller (Ctrl+− / Ctrl++ / Ctrl+0).
 # `window_size`: [ancho, alto] que Yared le dejó a la ventana; [] hasta que la estira.
-DEFAULTS = {'compact': True, 'glass': False, 'glass_fx': True, 'glass_alpha': 85, 'pinned': False, 'pinned_monitor': '', 'position': 50, 'position_y': 0, 'window': False, 'window_size': [], 'font': 'Sans', 'theme': 'omarchy', 'chat_tech': False, 'tired_eyes': False, 'tech_style': False, 'reduce_motion': False, 'tired_scale': 125, 'adhd': True, 'home_main': False,
+DEFAULTS = {'compact': True, 'glass': False, 'glass_fx': True, 'glass_alpha': 85, 'pinned': False, 'pinned_monitor': '', 'position': 50, 'position_y': 0, 'window': False, 'window_size': [], 'font': 'Sans', 'theme': 'omarchy', 'chat_tech': False, 'tired_eyes': False, 'tech_style': False, 'reduce_motion': False, 'tired_scale': 125, 'adhd': True, 'home_main': True,
             'chat_model': '',
             'chat_effort': '', 'devherd': True,
             'flows_collapsed': False, 'files_collapsed': False, 'term_font': 11,

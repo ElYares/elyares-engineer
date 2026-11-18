@@ -120,7 +120,7 @@ class ProjectView:
         self.off = False
         if self.projects_open:
             self.close_chat()
-            self.boxes_open = False
+            self.boxes_open = self.home_open = False
             self.projects_due = 0       # al abrirlo, lo de ahora
         self.ensure_tick()
 

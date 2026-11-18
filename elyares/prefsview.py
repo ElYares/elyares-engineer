@@ -28,6 +28,7 @@ ALPHA_STEP = 5
 PREFS_ROWS = (
     ('glass', 'Vidrio', 'La isla translúcida, desenfocada por Hyprland.'),
     ('glass_fx', 'Brillo y filo del vidrio', 'Apagado: solo transparencia con desenfoque.'),
+    ('home_main', 'Inicio al abrir la isla', 'Al abrirla a mano sale Inicio en vez del tablero.'),
     ('compact', 'Modo compacto', 'Una pastilla pequeña hasta que pasa algo.'),
     ('pinned', 'Isla fijada', 'Se queda abierta y no se esconde.'),
     ('tech_style', 'Estilo técnico', 'Esquinas rectas, bordes de 1 px y letra monoespaciada.'),
@@ -51,7 +52,7 @@ class PrefsView:
         if self.prefs_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.boxes_open = False
+            self.projects_open = self.boxes_open = self.home_open = False
         self.ensure_tick()
 
     def prefs_goal(self):

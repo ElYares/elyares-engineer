@@ -84,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, boxview, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
+               homeview, preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
@@ -259,7 +259,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, boxview.BoxesView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, boxview.BoxesView, homeview.HomeView, workflowview.WorkflowView, windowview.WindowView):
     def __init__(self, app):
         self.gtk_app = app              # la ventana de los flujos se crea con ella, la primera vez que se abre
         self.model = Model()
@@ -784,6 +784,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             self.toggle_prefs()
         elif order == 'containers':
             self.toggle_boxes()
+        elif order == 'home':
+            self.toggle_home()
         elif order == 'workflows':
             self.toggle_workflows()
         elif order == 'move':
@@ -1189,12 +1191,14 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             return 'prefs'
         if self.boxes_open and not self.windowed:
             return 'boxes'
+        if self.home_open and not self.windowed:
+            return 'home'
         mode = self.view.mode
         if self.expanded or self.windowed:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
             # la cabecera de siempre: es donde están las fuentes.
             if self.claude():
-                return 'board'
+                return 'home' if self.home_main() else 'board'
             return 'list' if self.view.others else 'open'
         if mode == 'open' and self.view.ask:
             return 'ask'
@@ -1294,6 +1298,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             return self.prefs_goal()
         if mode == 'boxes':
             return self.boxes_goal()
+        if mode == 'home':
+            return self.home_goal()
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
@@ -1738,8 +1744,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
                 cr.stroke()
             self.chat_place(h)
             return
-        if mode in ('prefs', 'boxes'):
-            (self.draw_prefs if mode == 'prefs' else self.draw_boxes)(
+        if mode in ('prefs', 'boxes', 'home'):
+            {'prefs': self.draw_prefs, 'boxes': self.draw_boxes, 'home': self.draw_home}[mode](
                 cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
@@ -2624,7 +2630,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
             # Y las de los ajustes y los contenedores de la isla: un glifo cada una, que la franja no da para más texto.
             ax = self._glyph_pill(cr, '⚙', fx, y, alpha, px, py, prefsview.PREFS_PILL)
-            self._glyph_pill(cr, '▣', ax, y, alpha, px, py, boxview.BOXES_PILL, 3)
+            bx = self._glyph_pill(cr, '▣', ax, y, alpha, px, py, boxview.BOXES_PILL, 3)
+            self._glyph_pill(cr, '⌂', bx, y, alpha, px, py, homeview.HOME_PILL, 4)
             self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
@@ -3048,6 +3055,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
                     self.toggle_prefs()
                 elif key == boxview.BOXES_PILL:
                     self.toggle_boxes()
+                elif key == homeview.HOME_PILL:
+                    self.toggle_home()
                 elif key == workflowview.WF_PILL:
                     self.toggle_workflows()
                 return
@@ -3066,7 +3075,7 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'boxes') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'boxes', 'home') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3085,6 +3094,9 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             return
         if kind == 'boxes':
             self.on_boxes_hit(key)
+            return
+        if kind == 'home':
+            self.on_home_hit(key)
             return
         if kind == 'chat':
             self.on_chat_hit(key)
