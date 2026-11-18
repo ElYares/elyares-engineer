@@ -12,12 +12,13 @@ modos está; la isla lo mira para no tocar el layer-shell mientras no se ve y pa
 quedarse siempre abierta, sin esconderse ni asomarse.
 """
 
+import os
 import threading
 import time
 
 from gi.repository import GLib, Gtk
 
-from . import (containers, containerview, editorpanel, fonts, gitpanel, gitview, hypr, mascot, pomodoro, settings, tallerpanel, terminal, terminalpanel,
+from . import (containers, containerview, editorpanel, homepanel, fonts, gitpanel, gitview, hypr, mascot, pomodoro, settings, tallerpanel, terminal, terminalpanel,
                themes, tmuxsessions, windowframe)
 from .state import MAIN_ROLE, elapsed
 
@@ -94,6 +95,9 @@ class WindowView:
         self.win.set_visible(False)
         self.app_win.present()
         self.expand()
+        if self.settings['home_main']:
+            self.window_view('home')            # la ventana abre en Inicio, como la isla
+            self.frame.sync('home')
         kept = self.window_kept()
         if kept:
             # La dejó a su medida la última vez: se respeta, y no se ajusta sola.
@@ -160,9 +164,11 @@ class WindowView:
         self.frame.terminal = terminalpanel.TerminalPanel()
         self.frame.taller = tallerpanel.TallerPanel()
         self.overlay.add_overlay(self.frame.taller)
+        self.frame.home = homepanel.HomePanel()
+        self.overlay.add_overlay(self.frame.home)
         self.frame.containers = containerview.ContainersPanel()
         self.overlay.add_overlay(self.frame.containers)
-        self.frame.extra += [self.frame.editor, self.frame.terminal, self.frame.taller, self.frame.containers, self.frame.git]     # `hide_panels` los esconde con los demás
+        self.frame.extra += [self.frame.editor, self.frame.terminal, self.frame.taller, self.frame.containers, self.frame.git, self.frame.home]     # `hide_panels` los esconde con los demás
         self.overlay.add_overlay(self.frame.terminal)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
@@ -177,7 +183,7 @@ class WindowView:
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
         self.sources_open = key == 'sources'
-        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'containers', 'editor', 'terminal', 'taller', 'git') else ''
+        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'containers', 'editor', 'terminal', 'taller', 'git', 'home') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -230,18 +236,8 @@ class WindowView:
                 and not self.panel_open and not self.wf_open
                 and self.target() == 'board' and self.tab_session() is not None)
 
-    def window_board(self):
-        from . import app           # hasta aquí: app importa este módulo
-        board = self.frame.board
-        if self.focus_widgets():
-            board.place(0)
-            self.window_focus(app)
-            return
-        self.frame.focus.place(0)
-        if not self.board_widgets():
-            board.place(0)
-            self.window_body = 0
-            return
+    def window_team_cards(self, app):
+        """Un dict por agente de la sesión de la pestaña: (los que trabajan, los libres)."""
         s = self.tab_session()
         asking = self.asking()
         now, cards, free = time.monotonic(), [], []
@@ -261,6 +257,21 @@ class WindowView:
                 note = ('esperando' if s.delegating else 'en reposo') if m.role == MAIN_ROLE else 'libre'
                 free.append(dict(role=m.role, name=m.role, color=color, state=note, steps=[], busy=False,
                                  ask=False, pet=pet))
+        return cards, free
+
+    def window_board(self):
+        from . import app           # hasta aquí: app importa este módulo
+        board = self.frame.board
+        if self.focus_widgets():
+            board.place(0)
+            self.window_focus(app)
+            return
+        self.frame.focus.place(0)
+        if not self.board_widgets():
+            board.place(0)
+            self.window_body = 0
+            return
+        cards, free = self.window_team_cards(app)
         board.set_cards(cards, free, dict(face=self.window_face, pick=self.window_card, decide=self.window_decide))
         board.animate()
         # Las tarjetas piden lo que miden: si no caben en el alto de siempre,
@@ -482,6 +493,9 @@ class WindowView:
         if self.panel_open == 'git':
             frame.git.set_prs((self.sources.get('github') or {}).get('items') or [], self.source_state('github'),
                               dict(open=self.window_open_url, log=self.window_git_log))
+        frame.home.set_visible(self.panel_open == 'home')
+        if self.panel_open == 'home':
+            self.window_home(frame)
         frame.containers.set_visible(self.panel_open == 'containers')
         if self.panel_open == 'containers':
             data = self.box_watch.read()
@@ -520,6 +534,29 @@ class WindowView:
                                                                pick_theme=self.pick_theme),
                                     fonts.current, themes.current, round(fonts.TIRED_SCALE * 100),
                                     self.glass_pct())
+
+    def window_home(self, frame):
+        """La vista Inicio: el proyecto, los atajos y los agentes de la sesión de la pestaña."""
+        from . import app, state
+        s = self.tab_session()
+        if s is None:
+            frame.home.set_data('', [], {})
+            return
+        cards, free = self.window_team_cards(app)
+
+        def to_view(key):
+            self.window_view(key)
+            frame.sync(key)
+
+        def to_chat(role):
+            self.window_view('chat')
+            frame.sync('chat')
+            self.open_chat(typing=True, agent=state.ROLE_AGENTS[role], cwd=self.tab_place(s))
+
+        root = self.window_editor_root()
+        frame.home.set_data(os.path.basename(root.rstrip('/')) if root else '', cards + free,
+                            dict(face=self.window_face, decide=self.window_decide, view=to_view, chat=to_chat))
+        frame.home.animate()
 
     def window_code_views(self, frame):
         """Editor, Terminal y Taller: los tres miran el mismo proyecto. Cada uno solo trabaja a la vista."""
@@ -652,6 +689,10 @@ class WindowView:
     def window_setting(self, key):
         if key in ('glass', 'glass_fx'):
             self.settings[key] = not self.settings[key]
+            settings.save(self.settings)
+            self.ensure_tick()
+        elif key == 'home_main':
+            self.settings['home_main'] = not self.settings['home_main']
             settings.save(self.settings)
             self.ensure_tick()
         elif key == 'compact':

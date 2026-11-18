@@ -11,7 +11,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango
 from . import fonts, mascot, palette, responsive, themes
 
 # (clave, texto) en el orden de la barra de título.
-VIEWS = (('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
+VIEWS = (('home', 'Inicio'), ('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
          ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'), ('containers', 'Contenedores'),
          ('editor', 'Editor'), ('terminal', 'Terminal'), ('taller', 'Taller'),
          ('git', 'Git'), ('sources', 'Fuentes'), ('settings', 'Ajustes'))
