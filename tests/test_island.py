@@ -322,7 +322,7 @@ class Consulta(IslandCase):
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
         keys = [key for key, *_ in self.isl.pills]
         self.assertEqual(keys, [key for key, _ in sources.SOURCES]
-                         + [app.moreview.MORE_PILL, app.CHAT_PILL, commands.HELP])
+                         + [app.spotifyview.SPOTIFY_PILL, app.moreview.MORE_PILL, app.CHAT_PILL, commands.HELP])
         for (_, x, _, w, _), (_, nx, *_) in zip(self.isl.pills, self.isl.pills[1:]):
             self.assertLessEqual(x + w, nx)
         self.assertLessEqual(self.isl.pills[-1][1] + self.isl.pills[-1][3], 100 + width - 18)
@@ -3375,6 +3375,66 @@ class Ventana(Dibujo):
         isl.windowed = True
         isl.toggle_more()                                    # en la ventana no hay: tiene sus vistas
         self.assertFalse(isl.more_open)
+
+    def _spotify_listo(self, data, cover=None):
+        from elyares import spotify
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open, isl.more_open = False, False, False, False, False
+        isl.sp_watch = spotify.Watcher()
+        isl.sp_watch.data, isl.sp_watch.loaded, isl.sp_watch.at = data, True, 1e12
+        isl.sp_watch.read = lambda: isl.sp_watch.data
+        isl.sp_watch.cover = lambda: cover
+        isl.sp_open = True
+        return isl
+
+    def test_el_panel_de_spotify_dibuja_la_cancion_la_portada_y_tres_botones(self):
+        import tempfile
+        from gi.repository import GdkPixbuf
+        data = dict(playing=True, status='Playing', artist='Soda Stereo', title='De música ligera', album='Signos',
+                    art='https://x/y', position=65.0, length=187.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'cover')
+            GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 64, 64).savev(path, 'png', [], [])
+            isl = self._spotify_listo(data, path)
+            self.assertEqual(isl.target(), 'spotify')
+            self.draw()
+            keys = self.hit('spotify')
+            for key in ('close', 'prev', 'play', 'next'):
+                self.assertIn(key, keys)
+            self.draw()                                      # la portada ya está en caché y no rompe un segundo cuadro
+
+    def test_el_panel_de_spotify_cerrado_o_sin_portada_se_dibuja_igual(self):
+        isl = self._spotify_listo(None)
+        self.draw()
+        self.assertEqual(self.hit('spotify'), ['close'])     # sin Spotify, solo el botón de cerrar
+        isl.sp_watch.data = dict(playing=False, status='Paused', artist='', title='', album='', art='', position=0.0, length=0.0)
+        self.draw()                                          # sin portada ni duración
+        self.assertIn('play', self.hit('spotify'))
+
+    def test_un_clic_en_play_cambia_el_icono_al_instante_y_manda_la_orden(self):
+        data = dict(playing=True, status='Playing', artist='a', title='t', album='b', art='', position=1.0, length=9.0)
+        isl = self._spotify_listo(data)
+        with mock.patch('elyares.spotify.control') as control, mock.patch('threading.Thread') as thread:
+            isl.on_hit('spotify', 'play')
+            self.assertFalse(isl.sp_watch.data['playing'])
+            thread.return_value.start.assert_called_once()
+            thread.call_args.kwargs['target']()
+            control.assert_called_once_with('play')
+
+    def test_spotify_se_abre_desde_mas_y_cierra_a_los_demas_paneles(self):
+        isl = self._spotify_listo(None)
+        isl.sp_open = False
+        isl.toggle_more()
+        isl.on_hit('more', 'spotify')
+        self.assertTrue(isl.sp_open)
+        self.assertFalse(isl.more_open)
+        isl.toggle_prefs()
+        self.assertFalse(isl.sp_open)
+        isl.windowed = True
+        isl.sp_open = False
+        isl.toggle_spotify()                                 # en la ventana no hay
+        self.assertFalse(isl.sp_open)
 
     def _boxes_listos(self, loaded=True):
         isl = self.isl

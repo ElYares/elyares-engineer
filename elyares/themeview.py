@@ -35,7 +35,7 @@ class ThemesView:
         if self.themes_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.prefs_open = self.more_open = self.boxes_open = self.gf_open = False
+            self.projects_open = self.prefs_open = self.more_open = self.boxes_open = self.gf_open = self.sp_open = False
         self.ensure_tick()
 
     def themes_rows(self):

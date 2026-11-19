@@ -17,6 +17,7 @@ Uso: elyares-ctl <orden>
               Si elyares-engineer no corre, lo arranca
     projects  abre el panel de proyectos, para empezar a trabajar en uno; otra vez, lo cierra
     prefs     abre el panel de ajustes de la isla; otra vez, lo cierra
+    spotify   abre el panel de Spotify: qué suena, la portada y ⏮ ⏯ ⏭; otra vez, lo cierra
     gitflow   abre el panel Git: ramas del proyecto, subir, PR y merge paso a paso; otra vez, lo cierra
     themes    abre el panel de temas de la isla; otra vez, lo cierra
     containers abre el panel de contenedores de DevHerd; otra vez, lo cierra
@@ -55,7 +56,7 @@ import subprocess
 import sys
 import time
 
-ORDERS = ('open', 'chat', 'window', 'projects', 'prefs', 'more', 'containers', 'gitflow', 'themes', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
+ORDERS = ('open', 'chat', 'window', 'projects', 'prefs', 'more', 'containers', 'gitflow', 'spotify', 'themes', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
           'glass', 'allow', 'deny', 'status', 'sessions', 'toggle')
 REPLIES = ('allow', 'deny', 'status', 'sessions', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
