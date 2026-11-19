@@ -149,10 +149,14 @@ textview.elyares-chat, textview.elyares-chat text {
 class ChatAsk:
     """El permiso que pide un chat, para el tablero: se porta como el de un
     hook `ask` (`ipc.Request`), así que contestarlo en la tarjeta del tablero
-    lo contesta en el chat."""
+    lo contesta en el chat. Solo lo suelta el chat (`sticky`), no los hooks
+    de su Claude. `after` se llama tras contestarlo, para el que esperaba en
+    cola."""
+    sticky = True
 
-    def __init__(self, conversation):
+    def __init__(self, conversation, after=None):
         self.chat, self.done, self.born = conversation, False, time.time()
+        self.after = after
 
     def reply(self, answer):
         if self.done:
@@ -160,6 +164,8 @@ class ChatAsk:
         self.done = True
         if answer and answer.get('behavior') in ('allow', 'deny'):
             self.chat.answer(answer['behavior'] == 'allow')
+            if self.after is not None:
+                self.after()
 
 
 def plain(text):
@@ -482,7 +488,7 @@ class ChatView:
             self.chat_cache.clear()
             self.chat_scroll, self.chat_menu = 0.0, None
         self.chat_open, self.off = True, False
-        self.projects_open = self.prefs_open = self.boxes_open = self.home_open = False
+        self.projects_open = self.prefs_open = self.boxes_open = self.home_open = self.tasks_open = False
         self.chat_claim('chat')
         if carry:
             self.chat_recall()          # y la caja muestra el de la que se abre (vacío si no tiene)
@@ -638,8 +644,11 @@ class ChatView:
         for proc in procs:
             try:
                 proc.wait(timeout=2)
-            except Exception:           # no acabó a tiempo: se va con la isla
-                pass
+            except Exception:           # no acabó a tiempo: que no siga suelto retomando la conversación
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
     # ── el mini chat: encargarle algo a uno desde el tablero ────────────────
 
@@ -714,6 +723,10 @@ class ChatView:
         asked, cut = c.asking, c.cut
         if not c.feed(event):
             return GLib.SOURCE_REMOVE
+        if asked and (not c.asking or c.asking['id'] != asked['id']):
+            self.chat_release(c)            # ya no espera: se cortó, falló o acabó el turno
+        if event.get('type') in ('result', 'exit'):
+            self.chat_ended(c, event, cut)
         if c.session:
             self.chat_sessions.add(c.session)
             if self.chat_watch:
@@ -726,7 +739,7 @@ class ChatView:
                 # Otro turno en curso: el «terminó» del anterior ya no es verdad.
                 self.model.sessions.pop(f'chat:{c.session}', None)
         self.chat_context(c)
-        if c.asking and not asked:
+        if c.asking and (not asked or asked['id'] != c.asking['id']):
             self.chat_ask(c)
         # Si era el paso de un workflow, con esto sale el siguiente.
         chained = self.workflow_event(c, event, cut)
@@ -776,19 +789,47 @@ class ChatView:
             self.show_chat(c)
             self.expand(None if self.settings['pinned'] else CHAT_WATCH_SECS * 10)
             return
+        # Tras contestarlo en la tarjeta, el siguiente de la cola (si hay) sale cuando el
+        # tablero acabe con este: `decide` aún lo está quitando.
+        after = lambda: GLib.idle_add(self.chat_answered, c)  # noqa: E731
         self.model.handle({'event': 'ask', 'session_id': c.session, 'cwd': c.cwd,
-                           'tool_name': c.asking['tool'], 'tool_input': c.asking['input']}, ChatAsk(c))
+                           'tool_name': c.asking['tool'], 'tool_input': c.asking['input']}, ChatAsk(c, after))
         self.tab = c.session
         if not self.chat_open:
             self.expand(None if self.settings['pinned'] else CHAT_WATCH_SECS * 10)
 
-    def chat_release(self):
-        """Contestado en el chat: la tarjeta del tablero ya no espera."""
-        s = self.model.sessions.get(self.chat.session) if self.chat else None
+    def chat_release(self, c=None):
+        """Contestado en el chat (o ya sin turno): la tarjeta del tablero ya no espera."""
+        c = c or self.chat
+        s = self.model.sessions.get(c.session) if c is not None and c.session else None
         if s is not None and isinstance(s.ask, ChatAsk):
             s.ask.done = True
             s.ask = None
             s.set('working', s.last_tool or 'Trabajando…')
+
+    def chat_answered(self, c=None):
+        """Se contestó un permiso: suelta su tarjeta y, si otro esperaba en cola, sale ahora."""
+        c = c or self.chat
+        self.chat_release(c)
+        if c is not None and c.asking:
+            self.chat_ask(c)
+        return GLib.SOURCE_REMOVE
+
+    def chat_ended(self, c, event, cut):
+        """Acabó un turno del chat (o su Claude): su pestaña no se queda «trabajando».
+        Un turno cortado o un Claude que se cae no mandan el hook `Stop`."""
+        self.chat_release(c)
+        s = self.model.sessions.get(c.session) if c.session else None
+        if s is None or s.state not in ('working', 'permission'):
+            return
+        if event.get('type') == 'exit':
+            s.set('waiting', 'Claude se cerró')
+        elif cut:
+            s.set('waiting', 'Turno cortado')
+        elif event.get('is_error'):
+            s.set('waiting', 'El turno falló')
+        else:
+            s.set('done', 'Listo')
 
     @staticmethod
     def log(text):
@@ -919,11 +960,11 @@ class ChatView:
     def on_chat_enter(self):
         found = self.suggestions()
         text = self.chat_text()
-        if self.quiz() is not None and text.strip():
-            # Con una pregunta delante, lo escrito es «otra respuesta».
+        if self.chat_open and self.quiz() is not None and text.strip():
+            # Con una pregunta delante, lo escrito es «otra respuesta» (la del chat, no la de un mini chat).
             self.quiz_answer(text.strip())
             self.chat_set_text('')
-            self.chat_release()
+            self.chat_answered()
             self.refresh()
             self.ensure_tick()
             return
@@ -988,6 +1029,7 @@ class ChatView:
         if keyval in (Gdk.KEY_c, Gdk.KEY_C) and ctrl and c is not None:
             if not self.entry.get_buffer().get_has_selection():
                 c.interrupt()
+                self.chat_release(c)        # lo que pedía ya se denegó: la tarjeta se va
                 self.ensure_tick()
                 return True
         if keyval in (Gdk.KEY_v, Gdk.KEY_V) and ctrl:
@@ -1074,6 +1116,7 @@ class ChatView:
         menu, self.chat_menu = self.chat_menu, None
         if key == 'stop' and self.chat is not None:
             self.chat.interrupt()
+            self.chat_release()             # lo que pedía ya se denegó: la tarjeta se va
         elif key == 'new':
             self.new_chat()
         elif key == 'close':
@@ -1129,7 +1172,7 @@ class ChatView:
         else:
             self.chat.answer(key == 'chat-allow')
             self.chat_quiz = None
-        self.chat_release()
+        self.chat_answered()
         self.refresh()
         self.ensure_tick()
 
@@ -1198,6 +1241,9 @@ class ChatView:
             return ('Te pregunta' if c.questions() else 'Pide permiso'), 'bad'
         if c.busy:
             return ('Escribiendo…' if c.streaming else 'Pensando…'), 'cmd'
+        last = next((e for e in reversed(c.entries) if e.kind != 'foot'), None)
+        if last is not None and last.kind == 'error':
+            return 'Falló el último turno', 'bad'
         return 'Listo', 'pass'
 
     def chat_input_h(self, cr, width, most=CHAT_INPUT_LINES, text=None):
@@ -1497,7 +1543,7 @@ class ChatView:
     def draw_chat_clash(self, cr, left, y, width, alpha, names):
         """El aviso de que otra conversación que modifica el repo ya trabaja en
         esta carpeta, en el ámbar de los avisos."""
-        r, g, b = mascot.rgba(paint.AMBER)[:3]
+        r, g, b = themes.tuple_of(themes.signal()[1])     # el ámbar de aviso, en su paso legible del tema
         mascot.box(cr, left, y, width, CHAT_WARN_H - 4, 8)
         cr.set_source_rgba(r, g, b, .14 * alpha)
         cr.fill()
@@ -1589,6 +1635,10 @@ class ChatView:
             hit = (layout, layout.get_pixel_size()[1], 'bad' if entry.kind == 'error' else 'text', [])
         if len(self.chat_cache) > 600:
             self.chat_cache.clear()
+        # La misma entrada con otro texto (la respuesta mientras se escribe) ya no se dibuja:
+        # sin esto, cada trozo dejaría guardado su layout.
+        for old in [k for k in self.chat_cache if k[0] == index and k[4] == width and k[2] != entry.text]:
+            del self.chat_cache[old]
         self.chat_cache[key] = hit
         return hit
 

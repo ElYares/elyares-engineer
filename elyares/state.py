@@ -590,7 +590,11 @@ class Model:
             s.used = True
         root = project_root(s.cwd)
 
-        if s.ask is not None and agent == s.ask_agent and (
+        # El permiso de un chat de la isla (`sticky`) lo suelta el propio chat, que es quien
+        # lo contesta por su stdio: los hooks de su Claude (otra herramienta igual que
+        # acaba en paralelo, un subagente) no dicen nada de él.
+        held = s.ask is not None and getattr(s.ask, 'sticky', False)
+        if s.ask is not None and not held and agent == s.ask_agent and (
                 ev in ('start', 'stop', 'failure', 'agent-stop')
                 or (ev == 'tool-done' and msg.get('tool_name') == s.ask_tool)):
             # Se contestó en la terminal, o el turno siguió sin esperar.
@@ -625,6 +629,8 @@ class Model:
             s.preview = None
             s.steps, s.delegating = [('Pensando…', now)], False
             s.set('working', 'Pensando…', now)
+        elif ev in ('tool', 'tool-done', 'tool-fail') and held:
+            s.updated = now               # la tarjeta sigue a la vista, con su herramienta
         elif ev == 'tool':
             s.last_tool = describe_tool(msg.get('tool_name', ''), msg.get('tool_input'), root)
             # La vista previa dura lo que dura la edición: otra herramienta la quita.

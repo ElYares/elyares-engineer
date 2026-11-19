@@ -77,6 +77,8 @@ EFFORT_TEXT = {'low': 'bajo', 'medium': 'medio', 'high': 'alto', 'xhigh': 'muy a
 MODEL_ID = re.compile(r'claude-([a-z]+)-(\d+)-(\d+)')
 MAX_ENTRIES = 400         # lo que se recuerda de la conversación para dibujarla
 SAVED_ENTRIES = 80        # de eso, lo que se guarda entre reinicios de la isla
+GONE = 'No conversation found'        # lo que dice Claude al retomar una conversación que ya no tiene
+GONE_NOTE = 'Esa conversación ya no existe en Claude; lo siguiente que escribas empieza una nueva'
 CUT_NOTE = 'La isla se reinició a medio turno; lo siguiente que escribas retoma la conversación'
 MAX_FILES = 4000          # archivos del proyecto que se ofrecen al escribir "@"
 MAX_MENTIONS = 40         # lo que cabe en la lista de "@"
@@ -217,7 +219,8 @@ class Chat:
         self.session = ''         # el id que le da Claude a la conversación
         self.entries = []
         self.busy = False         # hay un turno en curso
-        self.asking = None        # el permiso pendiente: {id, tool, input, text}
+        self.asking = None        # el permiso a la vista: {id, tool, input, text}
+        self.waiting = []         # los que llegaron mientras otro estaba a la vista, en orden
         self.commands = local_commands(cwd)   # los "/" que entiende: {nombre: descripción}
         self.agents = list(state.AGENT_ROLES)     # los agentes que se nombran con "@"
         self.files, self.files_at = [], None      # los archivos del proyecto, y cuándo se listaron
@@ -264,7 +267,8 @@ class Chat:
         return c
 
     def start(self):
-        """Arranca el proceso de Claude; si ya hubo conversación, la retoma."""
+        """Arranca el proceso de Claude; si ya hubo conversación, la retoma.
+        False si no se pudo (la carpeta ya no existe, o no está `claude`)."""
         cmd = (CMD + ['--permission-mode', 'plan' if self.plan else BASE_MODE]
                + (['--agent', self.agent] if self.agent else [])
                + (['--append-system-prompt-file', STYLE_FILE]
@@ -272,19 +276,31 @@ class Chat:
                + (['--model', self.model] if self.model else [])
                + (['--effort', self.effort] if self.effort else [])
                + (['--resume', self.session] if self.session else []))
-        self.proc = self.spawn(cmd, cwd=self.cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        try:
+            self.proc = self.spawn(cmd, cwd=self.cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, text=True, bufsize=1,
+                                   encoding='utf-8', errors='replace')
+        except OSError as e:
+            self.proc = None
+            self._add('error', f'No se pudo abrir Claude en {state.tilde(self.cwd)}: {e.strerror or e}')
+            return False
+        self.closing = False
         threading.Thread(target=self._read, args=(self.proc,), daemon=True, name='chat').start()
+        return True
 
     def _read(self, proc):
-        for line in proc.stdout:
-            try:
-                event = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(event, dict):
-                self.emit(event)
-        self.emit({'type': 'exit', 'proc': proc})
+        # Pase lo que pase al leer, el chat se entera de que el proceso ya no habla:
+        # si no, se quedaría ocupado para siempre.
+        try:
+            for line in proc.stdout:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(event, dict):
+                    self.emit(event)
+        finally:
+            self.emit({'type': 'exit', 'proc': proc})
 
     def _write(self, obj):
         try:
@@ -300,7 +316,8 @@ class Chat:
 
     @property
     def alive(self):
-        return self.proc is not None and self.proc.poll() is None
+        # Uno que se está cerrando ya no lee: lo siguiente que se escriba abre otro.
+        return self.proc is not None and not self.closing and self.proc.poll() is None
 
     @property
     def name(self):
@@ -337,8 +354,8 @@ class Chat:
         text = text.strip()
         if not text and not images:
             return False
-        if not self.alive:
-            self.start()
+        if not self.alive and not self.start():
+            return False
         self.touched = time.monotonic()
         content = text
         if images:
@@ -349,7 +366,8 @@ class Chat:
             self._add('error', 'No se pudo hablar con Claude')
             return False
         self._add(kind, text if shown is None else shown, len(images))
-        self.busy, self.cut = True, False
+        # Si se está cortando el turno, lo que se escribe va después: el corte sigue en pie.
+        self.busy, self.cut = True, self.cut and self.busy
         return True
 
     def _control(self, request):
@@ -379,23 +397,34 @@ class Chat:
             self._control({'subtype': 'set_permission_mode', 'mode': 'plan' if self.plan else BASE_MODE})
 
     def reply(self):
-        """Lo último que contestó Claude, o ''."""
-        return next((e.text for e in reversed(self.entries) if e.kind == 'claude'), '')
+        """Lo que contestó Claude a lo último que se le mandó, o '' (un turno
+        sin texto no devuelve la respuesta de uno anterior)."""
+        for e in reversed(self.entries):
+            if e.kind in ('you', 'flow'):
+                return ''
+            if e.kind == 'claude':
+                return e.text
+        return ''
 
     def interrupt(self):
         """Corta el turno en curso, como Esc en la terminal. La conversación sigue."""
         if not self.busy:
             return False
-        if self.asking:
-            self.answer(False)
+        while self.asking:
+            self.answer(False)         # los que esperaban en cola, también
         self.cut = True
         return self._control({'subtype': 'interrupt'})
 
+    def _next(self):
+        """Quita el permiso a la vista y pone el siguiente de la cola, si hay: (el quitado o None)."""
+        ask, self.asking = self.asking, self.waiting.pop(0) if self.waiting else None
+        return ask
+
     def answer(self, allow):
-        """Contesta el permiso pendiente."""
-        ask, self.asking = self.asking, None
-        if ask is None:
+        """Contesta el permiso a la vista; si había otro en cola, pasa a la vista."""
+        if self.asking is None:
             return False
+        ask = self._next()
         plan = ask['tool'] == PLAN_TOOL
         decision = ({'behavior': 'allow', 'updatedInput': ask['input']} if allow
                     else {'behavior': 'deny', 'message': PLAN_DENY_MESSAGE if plan else DENY_MESSAGE})
@@ -427,9 +456,9 @@ class Chat:
     def answer_questions(self, answers):
         """Contesta las preguntas pendientes: `answers` va de cada pregunta a
         lo que se eligió (varias opciones, separadas por coma)."""
-        ask, self.asking = self.asking, None
-        if ask is None:
+        if self.asking is None:
             return False
+        ask = self._next()
         self._add('note', 'Respondiste: ' + ' · '.join(answers.values()))
         decision = {'behavior': 'allow', 'updatedInput': {**ask['input'], 'answers': answers}}
         return self._write({'type': 'control_response',
@@ -468,6 +497,9 @@ class Chat:
             return True
         if kind in ('stream_event', 'assistant') and event.get('parent_tool_use_id'):
             return False                      # lo de un subagente: ni es la respuesta ni gasta este contexto
+        if kind in ('stream_event', 'assistant'):
+            # Sigue (o empieza) un turno: p. ej. el de un mensaje que esperaba en cola tras el `result` de otro.
+            self.busy = True
         if kind == 'stream_event':
             return self._stream(event.get('event') or {})
         if kind == 'assistant':
@@ -482,21 +514,36 @@ class Chat:
         if kind == 'control_request':
             req = event.get('request') or {}
             if req.get('subtype') != 'can_use_tool':
+                # Uno que no se sabe contestar se contesta igual: si no, Claude lo espera para siempre.
+                self._write({'type': 'control_response', 'response': {
+                    'subtype': 'error', 'request_id': event.get('request_id'),
+                    'error': f'elyares-engineer no sabe contestar {req.get("subtype")}'}})
                 return False
             tool_input = req.get('input') if isinstance(req.get('input'), dict) else {}
-            self.asking = {'id': event.get('request_id'), 'tool': req.get('tool_name') or '',
-                           'input': tool_input, 'text': self.describe(req.get('tool_name'), tool_input)}
+            ask = {'id': event.get('request_id'), 'tool': req.get('tool_name') or '',
+                   'input': tool_input, 'text': self.describe(req.get('tool_name'), tool_input)}
+            if self.asking is not None:
+                # Dos a la vez (p. ej. dos subagentes): espera a que se conteste el de delante.
+                self.waiting.append(ask)
+                return True
+            self.asking = ask
             plan = tool_input.get('plan')
-            if self.asking['tool'] == PLAN_TOOL and isinstance(plan, str) and plan.strip():
+            if ask['tool'] == PLAN_TOOL and isinstance(plan, str) and plan.strip():
                 self._add('plan', plan.strip())      # el plan, a la vista en la conversación, para aprobarlo leyéndolo
             return True
         if kind == 'result':
             self.busy = self.streaming = False
-            self.asking = None
-            if self.cut:
+            self.asking, self.waiting = None, []
+            errors = [e for e in event.get('errors') or [] if isinstance(e, str)]
+            if any(GONE in e for e in errors):
+                # Claude ya no la tiene (borró la conversación vieja): retomarla fallaría siempre.
+                self.session = ''
+                self._add('error', GONE_NOTE)
+            elif self.cut:
                 self._add('note', 'Turno cortado')
             elif event.get('is_error'):
-                self._add('error', str(event.get('result') or event.get('subtype') or 'Algo falló'))
+                self._add('error', str(event.get('result') or '; '.join(errors) or event.get('subtype')
+                                       or 'Algo falló'))
             took = (event.get('duration_ms') or 0) / 1000
             when = f'{took:.1f} s' if took < 60 else state.elapsed(took)
             if took or self.model_id:
@@ -513,7 +560,7 @@ class Chat:
             if event.get('proc') is not self.proc:
                 return False                  # uno viejo, tras empezar de nuevo
             self.busy = self.streaming = False
-            self.asking = None
+            self.asking, self.waiting = None, []
             if not self.closing:
                 self._add('note', 'Claude se cerró; lo siguiente que escribas lo vuelve a abrir')
             self.proc, self.closing = None, False
