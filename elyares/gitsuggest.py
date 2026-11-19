@@ -53,7 +53,7 @@ def is_risky(path):
 def changes(root):
     """Lo que cambió en el árbol: rutas (los renombrados cuentan por su destino), riesgosas aparte y líneas."""
     out = gitflow._git(root, 'status', '--porcelain', '-z', '--untracked-files=all') or ''
-    paths, parts, i = [], out.split('\0'), 0
+    paths, parts, i = [], out.split('\0'), 0       # un renombrado cuenta con sus dos rutas: si no, el commit lo partiría
     while i < len(parts):
         entry = parts[i]
         i += 1
@@ -61,7 +61,9 @@ def changes(root):
             continue
         paths.append(entry[3:])
         if entry[0] in 'RC':
-            i += 1                       # con -z, el origen de un renombrado viene aparte
+            if entry[0] == 'R' and i < len(parts) and parts[i]:
+                paths.append(parts[i])   # con -z, el origen de un renombrado viene aparte
+            i += 1
     risky = [p for p in paths if is_risky(p)]
     files = [p for p in paths if p not in risky]
     lines = 0

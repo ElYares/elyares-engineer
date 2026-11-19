@@ -170,7 +170,7 @@ def changed(root):
 def _slug(root):
     """«dueño/repo» del remoto origin, o ''."""
     url = (_git(root, 'remote', 'get-url', 'origin') or '').strip()
-    found = re.search(r'github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$', url)
+    found = re.search(r'[:/]([^/:\s]+/[^/\s]+?)(?:\.git)?/?$', url)       # también con un alias de ssh (`github-personal:dueño/repo`)
     return found.group(1) if found else ''
 
 
@@ -222,6 +222,8 @@ def status(root, flow):
     if grand:
         ahead = _ahead(root, _tip(root, grand), _tip(root, parent))
         gpr = find_pr(root, acct, parent, grand) if acct and ahead else None
+        if gpr and gpr['state'] == 'MERGED':
+            gpr = None                  # un PR viejo ya mergeado: el padre tiene commits nuevos y necesita otro
         gdone = bool(gpr) and gpr['state'] == 'MERGED'
         steps.append(Step('gpr', f'PR {parent} → {grand}', 'done' if gpr else 'todo' if ahead else 'na',
                           f'#{gpr["number"]} {gpr["state"].lower()}' if gpr else f'{ahead} commits por subir' if ahead else 'al día',
@@ -235,7 +237,8 @@ def status(root, flow):
 def _title_and_body(root, base, head):
     """Título y cuerpo de un PR sacados de sus commits: el asunto del primero (o de uno solo) y la lista."""
     log = (_git(root, 'log', '--reverse', '--format=%s', f'{_tip(root, base)}..{_tip(root, head)}') or '').splitlines()
-    title = log[0] if len(log) == 1 else f'{head} → {base}' if not log else log[0]
+    # Con un solo commit, su asunto; con varios, ninguno resume a los demás: la rama y cuántos trae.
+    title = log[0] if len(log) == 1 else f'{head} → {base}' + (f' ({len(log)} commits)' if log else '')
     body = ('## Cambios\n\n' + '\n'.join(f'- {s}' for s in log) + '\n\n' if log else '') + SIGNATURE
     return title[:120], body
 
@@ -263,6 +266,9 @@ def act(root, flow, key):
         if out is None:
             return False, f'gh no pudo mergear el PR #{pr["number"]} (revisa el CI)'
         _ok(root, 'fetch', 'origin', timeout=60)          # solo trae lo nuevo; no cambia de rama ni toca el árbol
+        # Y deja al día la rama de destino local si se puede sin tocar nada (solo avance rápido; si está
+        # abierta en otra carpeta o no avanza limpio, git se niega y se deja como estaba).
+        _ok(root, 'fetch', 'origin', f'{base}:{base}', timeout=60)
         return True, f'PR #{pr["number"]} mergeado'
     return False, f'paso desconocido: {key}'
 

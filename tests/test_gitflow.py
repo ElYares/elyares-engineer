@@ -63,6 +63,16 @@ class Cadena(unittest.TestCase):
             self.assertEqual(gitflow.declared_chain(os.path.join(tmp, 'nada')), [])
 
 
+class Remoto(unittest.TestCase):
+    def test_el_dueno_y_el_repo_salen_de_cualquier_forma_de_url_incluido_un_alias_de_ssh(self):
+        for url in ('git@github.com:ElYares/patio.git', 'git@github-personal:ElYares/patio.git',
+                    'https://github.com/ElYares/patio.git', 'https://github.com/ElYares/patio', 'ssh://git@github.com/ElYares/patio.git'):
+            with mock.patch.object(gitflow, '_git', return_value=url + '\n'):
+                self.assertEqual(gitflow._slug('/x'), 'ElYares/patio', url)
+        with mock.patch.object(gitflow, '_git', return_value='\n'):
+            self.assertEqual(gitflow._slug('/x'), '')
+
+
 class Padre(Repo):
     def test_una_rama_del_patron_tiene_a_v2_de_padre_y_pregunta_por_develop_que_no_existe(self):
         flow = gitflow.resolve(self.root, CHAIN)
@@ -165,6 +175,41 @@ class Pasos(Repo):
         self.assertTrue(ok, said)
         self.assertIn('--merge', calls[0])
         self.assertNotIn('--delete-branch', calls[0])
+
+    def test_el_pr_del_padre_al_abuelo_viejo_ya_mergeado_no_cuenta_si_el_padre_tiene_commits_nuevos(self):
+        flow = gitflow.resolve(self.root, CHAIN)
+        gitflow.act(self.root, flow, 'push')
+        old = {'number': 117, 'state': 'MERGED', 'url': ''}
+        with mock.patch.object(gitflow, 'account', return_value='yo'), \
+                mock.patch.object(gitflow, 'find_pr', return_value=old):
+            steps = {s.key: s for s in gitflow.status(self.root, flow)}
+        self.assertEqual((steps['gpr'].state, steps['gpr'].go), ('todo', 'Abrir PR'))   # v2 tiene un commit que main no
+        self.assertIn('por subir', steps['gpr'].note)
+        self.assertEqual(steps['gmerge'].state, 'wait')
+
+    def test_con_varios_commits_el_titulo_del_pr_es_la_rama_y_con_uno_su_asunto(self):
+        commit(self.root, 'd')
+        title, body = gitflow._title_and_body(self.root, 'v2', 'v2-x')
+        self.assertEqual(title, 'v2-x → v2 (2 commits)')           # no el asunto del primero, que no resume a los demás
+        self.assertIn('- feat: c', body)
+        self.assertIn(gitflow.SIGNATURE, body)
+        git(self.root, 'reset', '-q', '--hard', 'HEAD~1')
+        self.assertEqual(gitflow._title_and_body(self.root, 'v2', 'v2-x')[0], 'feat: c')
+
+    def test_tras_el_merge_la_rama_destino_local_se_pone_al_dia_si_avanza_limpio(self):
+        flow = gitflow.resolve(self.root, CHAIN)
+        other = os.path.join(self.tmp.name, 'otro')
+        subprocess.run(['git', 'clone', '-q', self.remote, other], check=True)
+        git(other, 'switch', '-q', 'v2')
+        commit(other, 'merge-simulado')
+        git(other, 'push', '-q', 'origin', 'v2')                    # lo que haría GitHub al mergear
+        before = gitflow._git(self.root, 'rev-parse', 'v2').strip()
+        with mock.patch.object(gitflow, 'account', return_value='yo'), \
+                mock.patch.object(gitflow, 'find_pr', return_value={'number': 7, 'state': 'OPEN', 'url': ''}), \
+                mock.patch.object(gitflow.github, '_gh', return_value='ok'):
+            self.assertTrue(gitflow.act(self.root, flow, 'merge')[0])
+        self.assertNotEqual(gitflow._git(self.root, 'rev-parse', 'v2').strip(), before)
+        self.assertEqual(gitflow.current_branch(self.root), 'v2-x')   # y sin cambiar de rama a quien trabaja
 
     def test_sin_pr_abierto_no_se_mergea_y_sin_cuenta_de_gh_se_dice(self):
         flow = gitflow.resolve(self.root, CHAIN)
