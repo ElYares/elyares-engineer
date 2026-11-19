@@ -83,8 +83,8 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import (actions, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
+from . import (actions, boxview, chatview, coffe, commands, devherd, fonts, github, gitflowview, hypr, ipc, mascot, paint,  # noqa: E402
+               moreview, preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, themeview, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
@@ -193,7 +193,7 @@ TEXT_INSET = 12 + PET + 10 + 18   # lo que le quitan al texto la mascota y los m
 ISLAND_BG = (5 / 255, 6 / 255, 8 / 255, .97)
 GLASS_ALPHA, GLASS_EDGE = .5, .16    # modo vidrio: fondo translúcido y filo claro
 WIN_GLASS_ALPHA = .5                 # la ventana de la app, en vidrio (igual que la isla suelta)
-TIP_GLASS_ALPHA = .7                 # la burbuja, en vidrio: más opaca que la isla, que se lee más rato
+TIP_EXTRA = .2                       # la burbuja, en vidrio: más opaca que la isla (se lee más rato), tope .97
 TITLE_COLOR = (.95, .96, 1, 1)
 MUTED_NORMAL = (.44, .49, .63, 1)
 MUTED_TIRED = (.78, .82, .92, 1)         # vista cansada: el gris apagado, mucho más claro
@@ -259,7 +259,9 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitflowview.GitFlowView, themeview.ThemesView, moreview.MoreView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
+    _pills_need = (None, 0)             # (con qué letra se midió, ancho): lo que pide el pie de pastillas
+
     def __init__(self, app):
         self.gtk_app = app              # la ventana de los flujos se crea con ella, la primera vez que se abre
         self.model = Model()
@@ -399,6 +401,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.overlay = overlay
         self.da = da
         self.chat_widgets(overlay)
+        self.boxes_widgets(overlay)
 
         css = Gtk.CssProvider()
         css.load_from_string('window, window.background { background: transparent; }')
@@ -509,6 +512,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     def on_second(self):
         self.seconds += 1
         self.chat_tick(time.monotonic())
+        self.boxes_tick(time.monotonic())
+        self.gf_tick(time.monotonic())
         self.projects_tick(self.seconds)
         self.workflows_tick()
         if self.seconds % REAP_SECS == 0:
@@ -590,6 +595,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         MUTED_COLOR = MUTED_TIRED if fonts.tired else MUTED_NORMAL
         SEP_COLOR = '#%02x%02x%02x' % tuple(round(c * 255) for c in MUTED_NORMAL[:3])
         paint.ISLAND = look['island']
+        fonts.light = themes.is_light()          # antes del CSS de la ventana: el vidrio de un tema claro va casi opaco
         fonts.TIRED_MUTED, fonts.TIRED_INK = look['tired'], look['ink']
         windowframe.use_theme()
         palette = themes.palette()
@@ -770,12 +776,26 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.settings['glass'] = not self.settings['glass']
             settings.save(self.settings)
             self.ensure_tick()
+        elif order == 'glass_fx':
+            self.settings['glass_fx'] = not self.settings['glass_fx']
+            settings.save(self.settings)
+            self.ensure_tick()
         elif order == 'reload':
             answer = self.reload()
             if req:
                 req.reply(answer)
         elif order == 'projects':
             self.toggle_projects()
+        elif order == 'prefs':
+            self.toggle_prefs()
+        elif order == 'more':
+            self.toggle_more()
+        elif order == 'containers':
+            self.toggle_boxes()
+        elif order == 'themes':
+            self.toggle_themes()
+        elif order == 'gitflow':
+            self.toggle_gitflow()
         elif order == 'workflows':
             self.toggle_workflows()
         elif order == 'move':
@@ -1177,6 +1197,16 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return 'chat'
         if self.projects_open:
             return 'projects'
+        if self.more_open and not self.windowed:
+            return 'more'
+        if self.gf_open and not self.windowed:
+            return 'gitflow'
+        if self.themes_open and not self.windowed:
+            return 'themes'
+        if self.boxes_open and not self.windowed:
+            return 'boxes'
+        if self.prefs_open and not self.windowed:
+            return 'prefs'
         mode = self.view.mode
         if self.expanded or self.windowed:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
@@ -1266,7 +1296,28 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         by_hand = self.expanded or self.hover
         return PILLS_H if by_hand and mode in ('open', 'list', 'board') else 0
 
+    def pills_need(self):
+        """El ancho que piden juntas las pastillas del pie (fuentes y atajos, con los márgenes de
+        la isla) con la letra de ahora: la monoespaciada del estilo técnico las ensancha."""
+        key = (PILL_PAD, PILL_GAP, fonts.tired, self.settings.get('font'), self.settings.get('tech_style'))
+        if self._pills_need[0] != key:
+            cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1))
+            width = lambda text: self._layout(cr, text, FONT_PILL).get_pixel_size()[0]
+            sources_w = sum(width(label) + PILL_PAD + PILL_GAP for _, label in sources.SOURCES)
+            # «?», Chat y Más: el relleno de cada una es el de draw_pills.
+            tools_w = sum(width(text) + pad + PILL_GAP for text, pad in (('?', 16), ('Chat', 20), ('Más', 16)))
+            self._pills_need = (key, int(sources_w + tools_w + 36))
+        return self._pills_need[1]
+
     def goal(self):
+        """Tamaño al que va la isla: el de `base_goal`, y nunca más angosta de lo que piden las
+        pastillas del pie (si no, se empalman)."""
+        w, h = self.base_goal()
+        if self.pills_h(self.target()):
+            w = max(w, self.pills_need())
+        return w, h
+
+    def base_goal(self):
         """Tamaño al que va la isla: el del modo, más el detalle entero, las
         filas y las fuentes."""
         if self.windowed and self.wf_open:
@@ -1278,6 +1329,16 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return chatview.CHAT_W, chatview.CHAT_H
         if mode == 'projects':
             return self.projects_goal()
+        if mode == 'more':
+            return self.more_goal()
+        if mode == 'boxes':
+            return self.boxes_goal()
+        if mode == 'themes':
+            return self.themes_goal()
+        if mode == 'gitflow':
+            return self.gitflow_goal()
+        if mode == 'prefs':
+            return self.prefs_goal()
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
@@ -1558,7 +1619,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
 
         widget.queue_draw()
         # Una burbuja a medio irse sigue pidiendo cuadros hasta que termina.
-        if settled and not self.hover and not self.override and not self.tip_pop:
+        if settled and not self.hover and not self.override and not self.tip_pop and not self.boxes_busy() and not self.gitflow_busy():
             # Quieta: escondida no dibuja nada y asomada basta con IDLE_FPS. El
             # reloj de GTK despierta al proceso 60 veces por segundo aunque no
             # haya nada que redibujar.
@@ -1646,6 +1707,11 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         w = clamp(self.w, 0, width)
         return (width - w) / 2, w, h
 
+    def glass_pct(self):
+        """La opacidad del vidrio de la isla, en %: el ajuste, o la de siempre si no es un número."""
+        value = self.settings.get('glass_alpha')
+        return int(max(50, min(100, value))) if isinstance(value, (int, float)) else int(GLASS_ALPHA * 100)
+
     def island_fill(self, cr, x0, w, h):
         """El cuerpo de una isla: colgada del borde de arriba, con las esquinas
         de abajo redondas, y su fondo (translúcido en modo vidrio). Deja el
@@ -1662,10 +1728,11 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.arc(x0 + r, h - r, r, math.pi / 2, math.pi)
         cr.close_path()
         glass = self.settings['glass']
-        cr.set_source_rgba(*ISLAND_BG[:3], fonts.glass(WIN_GLASS_ALPHA if self.windowed else GLASS_ALPHA) if glass else ISLAND_BG[3])
+        cr.set_source_rgba(*ISLAND_BG[:3], fonts.glass(WIN_GLASS_ALPHA if self.windowed else self.glass_pct() / 100) if glass else ISLAND_BG[3])
         cr.fill_preserve()
-        # Una ventana no lleva el filo claro: ya tiene su borde de Hyprland.
-        return cr.copy_path() if glass and not self.windowed else None
+        # Una ventana no lleva el filo claro: ya tiene su borde de Hyprland. Sin `glass_fx`
+        # tampoco: queda solo la transparencia, con el desenfoque de Hyprland.
+        return cr.copy_path() if glass and self.settings['glass_fx'] and not self.windowed else None
 
     def draw(self, _da, cr, width, _height):
         cr.set_operator(cairo.OPERATOR_SOURCE)
@@ -1681,6 +1748,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.tip = self.card_span = self.chat_box = None
             return                      # lo tapa un panel de widgets: nada de lo de debajo se ve
 
+        self.boxes_away()               # el buscador de Contenedores no se queda en otro panel
         x0, w, h = self.island_rect(width)
         if h < 0.5 or w < 1:
             self.tip_pop = 0.0
@@ -1708,6 +1776,17 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return
         if mode == 'projects':
             self.draw_projects(cr, x0, w, h, clamp((w - 420) / 120) * clamp((h - 90) / 60))
+            cr.restore()
+            if edge:
+                cr.append_path(edge)
+                cr.set_source_rgba(*themes.glow(), GLASS_EDGE)
+                cr.set_line_width(1)
+                cr.stroke()
+            self.chat_place(h)
+            return
+        if mode in ('more', 'prefs', 'boxes', 'themes', 'gitflow'):
+            {'more': self.draw_more, 'prefs': self.draw_prefs, 'boxes': self.draw_boxes, 'themes': self.draw_themes,
+             'gitflow': self.draw_gitflow}[mode](cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
                 cr.append_path(edge)
@@ -2064,10 +2143,18 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         # sus pasos.
         quad, column = ch < 100, cw < 200 and ch >= 100
         wide = cw >= 300 and not quad
-        if column:
-            size, fx, fy = 56, x + cw / 2, y + 42
-            tx, ty, tw = x + 12, y + 78, cw - 24
+        # Un libre en un cuadro estrecho (los diez en cinco columnas): la cara arriba y el nombre y su
+        # estado centrados debajo, a todo el ancho de la tarjeta. De lado el nombre se quedaba en 3 letras.
+        stacked = quad and cw < 180 and not busy
+        if column or stacked:
+            if stacked:
+                size, fx, fy = 34, x + cw / 2, y + 24
+                tx, ty, tw = x + 8, y + 44, cw - 16
+            else:
+                size, fx, fy = 56, x + cw / 2, y + 42
+                tx, ty, tw = x + 12, y + 78, cw - 24
             sx, sw = tx, tw
+            column = True
         elif quad and cw < 180:
             # En cuadro y estrecho (toda la familia a la vez): la cara más
             # chica, para que quepa el nombre del personaje.
@@ -2121,7 +2208,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         if not busy:
             note = (('esperando' if s.delegating else 'en reposo') if role == MAIN_ROLE
                     else 'encargar ›' if over else 'libre')
-            self.put(cr, note, FONT_DETAIL, x + cw / 2 if column else tx + 14, ty + 20, MUTED_COLOR,
+            self.put(cr, note, FONT_DETAIL, x + cw / 2 if column else tx + 14, ty + (17 if stacked else 20), MUTED_COLOR,
                      alpha * .8, tw, .5 if column else 0)
             return
         if member.state == 'permission':
@@ -2539,32 +2626,19 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             cr.move_to(cx + (cpw - cw) / 2, y + (PILL_H - ch) / 2)
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, chat)
-            # Y, antes, la de los proyectos, para empezar en cualquiera.
-            plus = self._layout(cr, '+', FONT_PILL)
-            qw, qh = plus.get_pixel_size()
-            qpw = qw + 16
-            qx = cx - PILL_GAP - qpw
-            over_plus = qx <= px <= qx + qpw and y <= py <= y + PILL_H
-            mascot.box(cr, qx, y, qpw, PILL_H, PILL_H / 2)
-            cr.set_source_rgba(*themes.glow(), (.13 if over_plus else .07) * alpha)
+            # Y, antes, la de «Más»: Flujos, Proyectos y Ajustes, que no caben en el pie.
+            more = self._layout(cr, 'Más', FONT_PILL)
+            mw, mh = more.get_pixel_size()
+            mpw = mw + 16
+            mx = cx - PILL_GAP - mpw
+            over_more = mx <= px <= mx + mpw and y <= py <= y + PILL_H
+            mascot.box(cr, mx, y, mpw, PILL_H, PILL_H / 2)
+            cr.set_source_rgba(*themes.glow(), (.13 if over_more else .07) * alpha)
             cr.fill()
-            cr.move_to(qx + (qpw - qw) / 2, y + (PILL_H - qh) / 2)
+            cr.move_to(mx + (mpw - mw) / 2, y + (PILL_H - mh) / 2)
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-            PangoCairo.show_layout(cr, plus)
-            self.pills.append((projectview.PROJECTS_PILL, qx, y, qpw, PILL_H))
-            # Y la de los workflows: sus cadenas de agentes.
-            flows = self._layout(cr, 'Flujos', FONT_PILL)
-            fw, fh = flows.get_pixel_size()
-            fpw = fw + 16
-            fx = qx - PILL_GAP - fpw
-            over_flows = fx <= px <= fx + fpw and y <= py <= y + PILL_H
-            mascot.box(cr, fx, y, fpw, PILL_H, PILL_H / 2)
-            cr.set_source_rgba(*themes.glow(), (.13 if over_flows else .07) * alpha)
-            cr.fill()
-            cr.move_to(fx + (fpw - fw) / 2, y + (PILL_H - fh) / 2)
-            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-            PangoCairo.show_layout(cr, flows)
-            self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
+            PangoCairo.show_layout(cr, more)
+            self.pills.append((moreview.MORE_PILL, mx, y, mpw, PILL_H))
             self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
@@ -2642,9 +2716,9 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.tip_shadow(cr, shape, top, width, alpha)
         cr.append_path(shape)
         # Con comandos se lee más rato: en vidrio va más opaca que la isla.
-        cr.set_source_rgba(*ISLAND_BG[:3], (TIP_GLASS_ALPHA if glass else ISLAND_BG[3]) * alpha)
+        cr.set_source_rgba(*ISLAND_BG[:3], (fonts.glass(min(.97, self.glass_pct() / 100 + TIP_EXTRA)) if glass else ISLAND_BG[3]) * alpha)
         cr.fill_preserve()
-        if glass:
+        if glass and self.settings['glass_fx']:
             sheen = cairo.LinearGradient(0, y, 0, y + h / 2)
             sheen.add_color_stop_rgba(0, *themes.glow(), TIP_SHEEN * alpha)
             sheen.add_color_stop_rgba(1, *themes.glow(), 0)
@@ -2982,10 +3056,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                     self.toggle_source(key)
                 elif key == CHAT_PILL:
                     self.open_chat(typing=True)
-                elif key == projectview.PROJECTS_PILL:
-                    self.toggle_projects()
-                elif key == workflowview.WF_PILL:
-                    self.toggle_workflows()
+                elif key == moreview.MORE_PILL:
+                    self.toggle_more()
                 return
         for s, ry, rh in self.rows:
             if ry <= y < ry + rh:
@@ -3002,7 +3074,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'more', 'boxes', 'themes', 'gitflow') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3015,6 +3087,21 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         de proyectos y sus atajos para empezar en uno."""
         if kind in ('project', 'projects', 'start'):
             self.on_project_hit(kind, key)
+            return
+        if kind == 'prefs':
+            self.on_prefs_hit(key)
+            return
+        if kind == 'more':
+            self.on_more_hit(key)
+            return
+        if kind == 'boxes':
+            self.on_boxes_hit(key)
+            return
+        if kind == 'themes':
+            self.on_themes_hit(key)
+            return
+        if kind == 'gitflow':
+            self.on_gitflow_hit(key)
             return
         if kind == 'chat':
             self.on_chat_hit(key)

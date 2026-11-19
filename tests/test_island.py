@@ -322,8 +322,7 @@ class Consulta(IslandCase):
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
         keys = [key for key, *_ in self.isl.pills]
         self.assertEqual(keys, [key for key, _ in sources.SOURCES]
-                         + [app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
-                            commands.HELP])
+                         + [app.moreview.MORE_PILL, app.CHAT_PILL, commands.HELP])
         for (_, x, _, w, _), (_, nx, *_) in zip(self.isl.pills, self.isl.pills[1:]):
             self.assertLessEqual(x + w, nx)
         self.assertLessEqual(self.isl.pills[-1][1] + self.isl.pills[-1][3], 100 + width - 18)
@@ -517,7 +516,20 @@ class Tablero(Dibujo):
         self.assertEqual(self.isl.target(), 'board')
         self.isl.hover, self.isl.expanded = False, True
         self.assertEqual(self.isl.target(), 'board')
-        self.assertEqual(self.isl.goal()[0], app.BOARD_W)
+        self.assertEqual(self.isl.goal()[0], max(app.BOARD_W, self.isl.pills_need()))
+
+    def test_los_libres_en_cuadro_estrecho_llevan_la_cara_arriba_y_el_nombre_a_todo_el_ancho(self):
+        kinds = ['elyares-architect', 'elyares-auditor', 'elyares-reviewer', 'elyares-designer', 'elyares-mobile',
+                 'elyares-devops', 'elyares-researcher', 'elyares-coach', 'elyares-analyst']
+        self.send('start', 'a')
+        for kind in kinds:
+            self.send('agent-start', 'a', agent_id=f'a-{kind}', agent_type=kind)
+            self.send('agent-stop', 'a', agent_id=f'a-{kind}', agent_type=kind)
+        self.isl.expanded = True
+        with mock.patch.object(state.Member, 'busy', new_callable=mock.PropertyMock, return_value=False):
+            self.draw()
+        self.assertEqual(self.shown.count('libre'), len(state.TEAM) - 1)
+        self.assertIn('elyares-auditor', self.shown)     # de lado quedaba en «aud…»: ahora cabe el nombre entero
 
     def test_cambiar_de_tema_repinta_la_isla_y_se_guarda(self):
         self.isl.expanded = True
@@ -640,9 +652,9 @@ class Tablero(Dibujo):
     def test_con_pocos_libres_la_banca_es_una_lista(self):
         self.isl.expanded = True
         self.work('a', 'elyares-architect', 'elyares-auditor', 'elyares-reviewer',
-                  'elyares-designer')
+                  'elyares-designer', 'elyares-mobile')
         self.draw()
-        self.assertEqual(len(self.hit('member')), 5)
+        self.assertEqual(len(self.hit('member')), 6)
         # Cinco en la banca: uno debajo de otro, con su nombre y «libre».
         briefs = [x for kind, _, x, *_ in self.isl.hits if kind == 'brief']
         self.assertEqual((len(briefs), len(set(briefs))), (5, 1))
@@ -674,7 +686,7 @@ class Tablero(Dibujo):
         self.assertEqual(self.hit('member'), [])
         self.assertEqual(self.shown.count('libre'), len(state.TEAM) - 1)
         for role in state.TEAM:
-            self.assertIn(role, self.shown)
+            self.assertTrue(role in self.shown or f'elyares-{role}' in self.shown)    # el nombre entero si cabe; si no, el del personaje
         # Más de seis no caben en una fila con su nombre: van en dos.
         self.assertEqual(len({y for kind, _, _, y, _, _ in self.isl.hits if kind == 'brief'}), 2)
 
@@ -2169,9 +2181,12 @@ class Proyectos(Dibujo):
     def test_la_pastilla_mas_abre_el_panel(self):
         self.isl.expanded = True
         self.draw()
-        key, x, y, w, h = next(p for p in self.isl.pills if p[0] == app.projectview.PROJECTS_PILL)
+        key, x, y, w, h = next(p for p in self.isl.pills if p[0] == app.moreview.MORE_PILL)
         self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.assertTrue(self.isl.more_open)
+        self.isl.on_hit('more', 'projects')
         self.assertTrue(self.isl.projects_open)
+        self.assertFalse(self.isl.more_open)
 
     def test_la_lista_se_refresca_sola_sin_frenar_la_isla(self):
         self.isl.refresh = mock.Mock()
@@ -2885,8 +2900,9 @@ class FlujosDibujo(FlujosBase):
         isl.tip_pop, isl.tip_at, isl.tip_cx = 0.0, 0.0, None
         isl.sources = {key: {'ok': True, 'note': '', 'tip': [], 'since': 0, 'polled': 0} for key in sources.LABELS}
         isl.draw_pills(self.cr, 100, 560, 50, 1.0)
-        _, x, y, w, h = next(pill for pill in isl.pills if pill[0] == app.workflowview.WF_PILL)
+        _, x, y, w, h = next(pill for pill in isl.pills if pill[0] == app.moreview.MORE_PILL)
         isl.on_click(None, 1, x + w / 2, y + h / 2)
+        isl.on_hit('more', 'flows')
         self.assertTrue(isl.wf_open)
         self.assertEqual(isl.target(), before)                          # la isla de siempre sigue igual
         self.assertEqual(isl.flows_goal(), (app.workflowview.WF_W, isl.workflows_goal()[1]))
@@ -3260,6 +3276,356 @@ class Ventana(Dibujo):
         with mock.patch('elyares.settings.save'):
             isl.window_setting('glass')
         self.assertEqual(isl.settings['glass'], not before)
+
+    def test_el_brillo_del_vidrio_se_apaga_aparte_y_deja_solo_la_transparencia(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        self.assertTrue(isl.settings['glass_fx'])               # de fábrica, como siempre
+        with mock.patch('elyares.settings.save'):
+            isl.window_setting('glass_fx')
+        self.assertFalse(isl.settings['glass_fx'])
+        isl.settings['glass'], isl.windowed = True, False
+        import cairo
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 300, 100)
+        self.assertIsNone(isl.island_fill(cairo.Context(surf), 0, 300, 100))   # sin filo: no hay camino que trazar
+        isl.settings['glass_fx'] = True
+        self.assertIsNotNone(isl.island_fill(cairo.Context(surf), 0, 300, 100))
+
+    def test_la_opacidad_del_vidrio_se_ajusta_y_se_guarda_entre_50_y_100(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        self.assertEqual(isl.glass_pct(), 50)                       # de fábrica
+        with mock.patch('elyares.settings.save') as save:
+            isl.window_glass_alpha(70)
+            self.assertEqual((isl.settings['glass_alpha'], isl.glass_pct()), (70, 70))
+            isl.window_glass_alpha(5)                               # nunca casi invisible
+            self.assertEqual(isl.glass_pct(), 50)
+            isl.window_glass_alpha(500)
+            self.assertEqual(isl.glass_pct(), 100)
+        self.assertEqual(save.call_count, 3)
+        isl.settings['glass_alpha'] = 'basura'                      # un settings.json mal escrito
+        self.assertEqual(isl.glass_pct(), 50)
+
+    def test_el_panel_de_ajustes_de_la_isla_cambia_lo_mismo_que_la_ventana(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        isl.windowed = False
+        isl.chat_open = isl.projects_open = False
+        isl.toggle_prefs()
+        self.assertEqual(isl.target(), 'prefs')
+        with mock.patch('elyares.settings.save'):
+            was = isl.settings['glass_fx']
+            isl.on_hit('prefs', 'glass_fx')
+            self.assertEqual(isl.settings['glass_fx'], not was)
+            isl.on_hit('prefs', 'alpha-')
+            self.assertEqual(isl.glass_pct(), 50)
+            isl.on_hit('prefs', 'alpha+')
+            isl.on_hit('prefs', 'alpha+')
+            self.assertEqual(isl.glass_pct(), 60)
+        isl.on_hit('prefs', 'close')
+        self.assertFalse(isl.prefs_open)
+
+    def test_el_panel_de_ajustes_se_dibuja_con_un_clic_por_renglon_y_no_abre_en_la_ventana(self):
+        isl = self.isl
+        isl.windowed, isl.chat_open, isl.projects_open = False, False, False
+        isl.prefs_open = True
+        self.draw()
+        keys = self.hit('prefs')
+        for key, *_ in __import__('elyares').prefsview.PREFS_ROWS:
+            self.assertIn(key, keys)
+        self.assertTrue({'close', 'alpha+', 'alpha-'} <= set(keys))
+        isl.prefs_open = False
+        isl.windowed = True
+        isl.toggle_prefs()                                   # en la ventana tiene su vista Ajustes
+        self.assertFalse(isl.prefs_open)
+
+    def test_la_isla_se_ensancha_lo_que_piden_las_pastillas_del_pie(self):
+        isl = self.isl
+        isl.windowed, isl.expanded, isl.hover = False, True, True
+        isl.chat_open = isl.projects_open = isl.prefs_open = False
+        need = isl.pills_need()
+        self.assertGreater(need, 0)
+        self.assertGreaterEqual(isl.goal()[0], need)
+        isl.settings['tech_style'] = True                   # la letra monoespaciada es más ancha
+        isl.set_techno(True)
+        try:
+            self.assertGreater(isl.pills_need(), need)
+            self.assertGreaterEqual(isl.goal()[0], isl.pills_need())
+        finally:
+            isl.set_techno(False)
+
+    def test_el_panel_mas_lleva_a_flujos_proyectos_y_ajustes_y_se_dibuja_con_un_clic_por_renglon(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open = False, False, False, False
+        isl.toggle_more()
+        self.assertEqual(isl.target(), 'more')
+        self.draw()
+        keys = self.hit('more')
+        for key, *_ in __import__('elyares').moreview.MORE_ROWS:
+            self.assertIn(key, keys)
+        self.assertIn('close', keys)
+        isl.on_hit('more', 'prefs')
+        self.assertFalse(isl.more_open)
+        self.assertEqual(isl.target(), 'prefs')
+        isl.prefs_open = False
+        isl.toggle_more()
+        isl.on_hit('more', 'close')
+        self.assertFalse(isl.more_open)
+        isl.windowed = True
+        isl.toggle_more()                                    # en la ventana no hay: tiene sus vistas
+        self.assertFalse(isl.more_open)
+
+    def _boxes_listos(self, loaded=True):
+        isl = self.isl
+        box = lambda n, st: dict(name=n, service=n.split('-')[1], state=st, path='/a')
+        data = dict(projects=[dict(name='uno', path='/a', running=1, total=2, cpu=3.0, mem=1e8,
+                                   containers=[box('a-web', 'running'), box('a-db', 'exited')]),
+                              dict(name='dos', path='/b', running=0, total=0, cpu=0, mem=0, containers=[])],
+                    totals=dict(up=1, total=2, cpu=3.0, mem=1e8, host_mem=8e9))
+        isl.box_watch = mock.Mock(loaded=loaded, read=lambda: data if loaded else None)
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open, isl.more_open = False, False, False, False, False
+        isl.ensure_tick, isl.window_containers = mock.Mock(), mock.Mock()
+        return isl
+
+    def test_el_panel_de_contenedores_despliega_un_proyecto_y_manda_las_ordenes_a_docker(self):
+        isl = self._boxes_listos()
+        isl.toggle_boxes()
+        self.assertEqual(isl.target(), 'boxes')
+        self.assertEqual(len(isl.box_rows()), 2)
+        isl.on_hit('boxes', ('fold', '/a'))
+        self.assertEqual(len(isl.box_rows()), 4)
+        self.draw()
+        keys = self.hit('boxes')
+        self.assertEqual(len(keys), 7)                      # cerrar; de cada proyecto, abrirlo y su botón; el botón de cada contenedor
+        self.assertIn(('act', 'stop-project', '/a'), keys)
+        self.assertIn(('act', 'up', '/b'), keys)
+        self.assertIn(('act', 'start', 'a-db'), keys)
+        isl.on_hit('boxes', ('act', 'stop', 'a-web'))
+        isl.window_containers.assert_called_with('stop', 'a-web')
+        self.assertTrue(isl.box_pending_for(('stop', 'a-web')))
+        isl.on_hit('boxes', ('close',))
+        self.assertFalse(isl.boxes_open)
+        isl.windowed = True
+        isl.toggle_boxes()                                  # en la ventana tiene su vista Contenedores
+        self.assertFalse(isl.boxes_open)
+
+    def test_contenedores_muestra_que_trabaja_mientras_docker_contesta_y_mientras_va_una_orden(self):
+        isl = self._boxes_listos(loaded=False)
+        isl.toggle_boxes()
+        self.assertTrue(isl.boxes_busy())                   # docker aún no contesta: la isla sigue a todo cuadro
+        self.assertEqual(isl.boxes_goal()[1], app.boxview.BOXES_ROWS_Y + app.boxview.SKELETON_ROWS * app.boxview.BOXES_ROW
+                         + app.boxview.BOXES_FOOT)          # el esqueleto mide lo mismo que unas filas
+        self.draw()
+        self.assertIn('Preguntando a docker…', self.shown)
+        self.assertEqual(self.hit('boxes'), [('close',)])   # el esqueleto no se puede pulsar
+        isl.box_watch.loaded = True
+        self.assertFalse(isl.boxes_busy())
+        isl.on_hit('boxes', ('act', 'up', '/b'))
+        self.assertTrue(isl.boxes_busy())                   # la orden sale y el aro gira hasta que docker conteste
+        isl.box_pending[('up', '/b')] -= app.boxview.PENDING_SECS + 1
+        self.assertFalse(isl.boxes_busy())
+        isl.boxes_open = False
+        self.assertFalse(isl.boxes_busy())
+
+    def test_contenedores_corre_con_la_rueda_y_filtra_con_el_buscador(self):
+        isl = self._boxes_listos()
+        many = [dict(name=f'p{n:02d}', path=f'/p{n}', running=0, total=1, cpu=0, mem=0,
+                     containers=[dict(name=f'p{n}-web', service='web' if n != 7 else 'redis', state='exited', path=f'/p{n}')])
+                for n in range(25)]
+        data = dict(projects=many, totals=dict(up=0, total=25, cpu=0, mem=0, host_mem=8e9))
+        isl.box_watch = mock.Mock(loaded=True, read=lambda: data)
+        isl.toggle_boxes()
+        self.assertEqual(len(isl.box_rows()), 25)
+        self.assertEqual(isl.boxes_goal()[1], app.boxview.BOXES_ROWS_Y + app.boxview.BOXES_MAX * app.boxview.BOXES_ROW
+                         + app.boxview.BOXES_FOOT)                  # nunca crece más de BOXES_MAX filas
+        self.assertEqual(isl.box_max_scroll(), 25 - app.boxview.BOXES_MAX)
+        isl.on_boxes_scroll(None, 0, 1)
+        isl.on_boxes_scroll(None, 0, 1)
+        self.assertEqual(isl.box_scroll, 2)
+        self.draw()
+        keys = [k for k in self.hit('boxes') if k[0] == 'fold']
+        self.assertEqual(keys[0], ('fold', '/p2'))                   # la primera fila a la vista ya es la tercera
+        for _ in range(40):
+            isl.on_boxes_scroll(None, 0, 1)
+        self.assertEqual(isl.box_scroll, isl.box_max_scroll())      # no pasa del final
+        for _ in range(40):
+            isl.on_boxes_scroll(None, 0, -1)
+        self.assertEqual(isl.box_scroll, 0)
+        isl.on_box_search(mock.Mock(get_text=lambda: ' P1 '))      # por nombre de proyecto
+        self.assertEqual([p['name'] for _, p in isl.box_rows()], ['p01', 'p1-web'] + [f'p1{n}' for n in range(10)])   # p01 coincide por su contenedor
+        isl.on_box_search(mock.Mock(get_text=lambda: 'redis'))     # por servicio: sale el proyecto abierto con ese contenedor
+        self.assertEqual([k for k, _ in isl.box_rows()], ['project', 'box'])
+        isl.on_box_search(mock.Mock(get_text=lambda: 'zzz'))
+        self.draw()
+        self.assertIn('Nada coincide con «zzz».', self.shown)
+        isl.toggle_boxes()
+        isl.toggle_boxes()
+        self.assertEqual((isl.box_filter, isl.box_scroll), ('', 0))   # al reabrir, sin filtro
+
+    def test_el_buscador_de_contenedores_se_esconde_y_suelta_el_teclado_al_salir_del_panel(self):
+        isl = self._boxes_listos()
+        isl.toggle_boxes()
+        isl.box_entry = mock.Mock(**{'get_visible.return_value': True})
+        isl.box_typing = True
+        isl.boxes_type = mock.Mock()
+        isl.boxes_away()
+        isl.box_entry.set_visible.assert_not_called()          # en el panel de contenedores, se queda
+        isl.toggle_more()                                      # pasa a «Más»: el buscador no puede quedarse
+        self.assertEqual(isl.target(), 'more')
+        isl.boxes_away()
+        isl.box_entry.set_visible.assert_called_with(False)
+        isl.boxes_type.assert_called_with(False)
+
+    def test_el_panel_de_temas_los_lista_todos_y_cambia_de_tema_con_un_clic(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open, isl.more_open = False, False, False, False, False
+        isl.boxes_open = False
+        isl.toggle_themes()
+        self.assertEqual(isl.target(), 'themes')
+        self.draw()
+        keys = self.hit('themes')
+        for name in app.themes.THEMES:
+            self.assertIn(name, keys)                       # una fila por cada tema de la ventana
+        self.assertIn('close', keys)
+        with mock.patch.object(isl, 'pick_theme') as pick:
+            isl.on_hit('themes', 'moonfly')
+        pick.assert_called_once_with('moonfly')
+        self.assertTrue(isl.themes_open)                    # sigue abierto para probar otro
+        isl.on_hit('themes', 'close')
+        self.assertFalse(isl.themes_open)
+        isl.toggle_more()
+        isl.on_hit('more', 'themes')                        # desde «Más»
+        self.assertTrue(isl.themes_open)
+        self.assertFalse(isl.more_open)
+        isl.windowed = True
+        isl.themes_open = False
+        isl.toggle_themes()                                 # en la ventana no hay: tiene su vista Ajustes
+        self.assertFalse(isl.themes_open)
+
+    def _gitflow_listo(self):
+        from elyares import gitflow
+        isl = self.isl
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open, isl.more_open = False, False, False, False, False
+        isl.boxes_open = isl.themes_open = False
+        isl.ensure_tick, isl.gf_refresh = mock.Mock(), mock.Mock()
+        isl.toggle_gitflow()
+        flow = gitflow.Flow('/r', 'v2-x', ['main', 'develop', 'v2', 'v2-<tema>'], 'v2', 'main', 'develop', ['v2', 'main'], True)
+        steps = [gitflow.Step('commit', 'Commit', 'todo', '2 archivos sin commitear', 'Pedir commit'),
+                 gitflow.Step('push', 'Subir v2-x', 'todo', 'sin subir', 'Subir'),
+                 gitflow.Step('pr', 'PR a v2', 'wait', 'primero sube la rama', '')]
+        isl.gf_data = ('/r', flow, steps)
+        return isl
+
+    def test_el_panel_git_muestra_la_cadena_los_pasos_y_pregunta_por_la_rama_que_no_existe(self):
+        isl = self._gitflow_listo()
+        self.assertEqual(isl.target(), 'gitflow')
+        self.draw()
+        for text in ('v2-x', 'v2', 'main', 'Subir v2-x', 'PR a v2', '«develop» no existe. ¿A qué rama va en su lugar?'):
+            self.assertIn(text, self.shown)
+        keys = self.hit('gitflow')
+        for key in (('close',), ('step', 'commit'), ('step', 'push'), ('ask', 'develop', 'v2'), ('ask', 'develop', 'main'),
+                    ('prompt', 'new'), ('prompt', 'stay')):
+            self.assertIn(key, keys)
+        self.assertNotIn(('step', 'pr'), keys)                    # un paso que espera no tiene botón
+
+    def test_un_paso_pide_un_segundo_clic_y_solo_entonces_corre_en_un_hilo(self):
+        isl = self._gitflow_listo()
+        ran = []
+
+        class Now:                                              # el hilo, aquí, corre en el acto
+            def __init__(self, target, daemon=None):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        with mock.patch('elyares.gitflowview.threading.Thread', Now), \
+                mock.patch('elyares.gitflowview.gitflow.act', side_effect=lambda *a: ran.append(a[2:]) or (True, 'listo')):
+            isl.on_hit('gitflow', ('step', 'push'))
+            self.assertEqual(ran, [])                           # el primer clic solo pregunta «¿Seguro?»
+            self.assertEqual(isl.gf_confirm[0], 'push')
+            isl.on_hit('gitflow', ('step', 'push'))
+        self.assertEqual(ran, [('push',)])
+        self.assertTrue(isl.gf_result[1])
+        self.assertIsNone(isl.gf_busy)
+        isl.gf_refresh.assert_called()                          # al acabar vuelve a leer git y gh
+
+    def test_el_paso_commit_sugiere_el_mensaje_y_los_botones_commitean_piden_otro_o_siguen_en_el_chat(self):
+        from elyares import gitsuggest
+        isl = self._gitflow_listo()
+        isl.open_chat, isl.gf_prefill = mock.Mock(), mock.Mock()
+
+        class Now:
+            def __init__(self, target, daemon=None):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        found = gitsuggest.Suggestion('fix: x\n\nPor qué.\n\n' + gitsuggest.TRAILER,
+                                      gitsuggest.Changes(['a.py', 'b.py'], ['.env'], 420))
+        with mock.patch('elyares.gitflowview.threading.Thread', Now), \
+                mock.patch('elyares.gitflowview.gitsuggest.suggest', return_value=found) as suggest, \
+                mock.patch('elyares.gitflowview.gitsuggest.commit', return_value=(True, '')) as commit:
+            isl.on_hit('gitflow', ('step', 'commit'))              # sin segundo clic: sugerir no cambia nada
+            suggest.assert_called_once()
+            self.assertEqual(isl.gf_sug['files'], ['a.py', 'b.py'])
+            self.assertEqual(isl.gf_sug['risky'], ['.env'])
+            self.draw()
+            self.assertTrue(any('pasa del tope' in t or 'riesgosos' in t for t in self.shown))
+            keys = self.hit('gitflow')
+            for key in (('sug', 'use'), ('sug', 'again'), ('sug', 'edit'), ('sug', 'drop')):
+                self.assertIn(key, keys)
+            isl.on_hit('gitflow', ('sug', 'again'))
+            self.assertEqual(suggest.call_count, 2)
+            isl.on_hit('gitflow', ('sug', 'use'))
+            commit.assert_called_once_with('/r', found.text, ['a.py', 'b.py'])
+            self.assertIsNone(isl.gf_sug)
+            self.assertTrue(isl.gf_result[1])
+            isl.on_hit('gitflow', ('step', 'commit'))
+            isl.on_hit('gitflow', ('sug', 'edit'))
+        isl.open_chat.assert_called_with(typing=True, cwd='/r')
+        isl.gf_prefill.assert_called_with('/commit fix: x')       # el asunto va como intención del /commit
+        self.assertFalse(isl.gf_open)
+
+    def test_elegir_la_rama_sustituta_se_recuerda_y_la_pregunta_de_seguir_aqui_se_oculta(self):
+        isl = self._gitflow_listo()
+        with mock.patch('elyares.gitflowview.gitflow.remember') as remember:
+            isl.on_hit('gitflow', ('ask', 'develop', 'main'))
+        remember.assert_called_once_with('/r', 'develop', 'main')
+        isl.gf_refresh.assert_called()
+        self.assertTrue(isl.gf_prompt())
+        isl.on_hit('gitflow', ('prompt', 'stay'))
+        self.assertFalse(isl.gf_prompt())
+
+    def test_el_panel_git_anima_mientras_lee_o_corre_una_orden_y_se_abre_desde_mas(self):
+        isl = self._gitflow_listo()
+        isl.gf_data = None
+        self.assertTrue(isl.gitflow_busy())                      # sin lectura: esqueleto y aro
+        self.draw()
+        self.assertIn('Leyendo git y gh…', self.shown)
+        isl.gf_data = ('', None, [])
+        self.assertFalse(isl.gitflow_busy())
+        isl.gf_busy = 'push'
+        self.assertTrue(isl.gitflow_busy())
+        isl.gf_open = False
+        isl.toggle_more()
+        isl.on_hit('more', 'gitflow')
+        self.assertTrue(isl.gf_open)
+        self.assertFalse(isl.more_open)
+        isl.windowed = True
+        isl.gf_open = False
+        isl.toggle_gitflow()                                     # en la ventana no hay
+        self.assertFalse(isl.gf_open)
+
+    def test_el_panel_mas_lleva_a_contenedores(self):
+        isl = self._boxes_listos()
+        isl.toggle_more()
+        isl.on_hit('more', 'boxes')
+        self.assertTrue(isl.boxes_open)
+        self.assertFalse(isl.more_open)
 
     def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
         isl = self.isl

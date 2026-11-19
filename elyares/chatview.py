@@ -235,6 +235,8 @@ class ChatView:
         self.da.add_controller(scroll)
 
     def chat_theme(self):
+        if hasattr(self, 'boxes_theme'):
+            self.boxes_theme()
         """El cursor de la caja, en el color de acento del tema."""
         if getattr(self, 'chat_css', None) is not None:
             self.chat_css.load_from_string(CSS % (themes.get()['chat_ink'], mascot.accent('engineer'), f'{fonts.scaled("10")}pt'))
@@ -482,7 +484,7 @@ class ChatView:
             self.chat_cache.clear()
             self.chat_scroll, self.chat_menu = 0.0, None
         self.chat_open, self.off = True, False
-        self.projects_open = False
+        self.projects_open = self.prefs_open = False
         self.chat_claim('chat')
         if carry:
             self.chat_recall()          # y la caja muestra el de la que se abre (vacío si no tiene)

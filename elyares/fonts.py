@@ -40,6 +40,7 @@ MIN_PT = 9            # el suelo de la letra dibujada con Cairo: nada se pinta m
 TIRED_SCALES = (125, 150, 200)
 TIRED_SCALE = 1.25
 TIRED_GLASS = .9      # el mínimo de opacidad del vidrio con la vista cansada
+LIGHT_GLASS = .9      # y con un tema claro: un fondo claro a medias se mezcla con lo de atrás y el texto oscuro se pierde
 # Los colores apagados de los widgets, más claros, para que se lean con la vista cansada.
 TIRED_MUTED = '#c9d2ea'
 # El texto de lo elegido (pestaña, fila): la tinta del tema, no un blanco fijo.
@@ -50,6 +51,7 @@ MONO = 'JetBrainsMono Nerd Font'
 
 current = SYSTEM
 tired = False
+light = False         # el tema de ahora es claro (lo pone `app.load_theme`)
 techno = False
 
 
@@ -83,9 +85,11 @@ def use_tired(on):
 
 
 def glass(alpha):
-    """La opacidad de un fondo en vidrio: con la vista cansada, casi opaco, porque lo que haya
-    detrás (un fondo claro tras un tema oscuro) se come el contraste del texto."""
-    return max(alpha, TIRED_GLASS) if tired else alpha
+    """La opacidad de un fondo en vidrio: con la vista cansada o un tema claro, casi opaco, porque lo que
+    haya detrás (un fondo claro tras un tema oscuro, o uno oscuro tras uno claro) se come el contraste
+    del texto."""
+    floor = max(TIRED_GLASS if tired else 0, LIGHT_GLASS if light else 0)
+    return max(alpha, floor)
 
 
 def scaled(size):
