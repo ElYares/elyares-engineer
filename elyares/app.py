@@ -84,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, boxview, chatview, coffe, commands, devherd, fonts, github, gitflowview, hypr, ipc, mascot, paint,  # noqa: E402
-               moreview, preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, themeview, windowframe, windowview,
+               moreview, preview, prefsview, projectview, remote, settings, sources, spotifyview, state, store, terminal, testrun, theme, themes, themeview, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
@@ -259,7 +259,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitflowview.GitFlowView, themeview.ThemesView, moreview.MoreView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitflowview.GitFlowView, themeview.ThemesView, spotifyview.SpotifyView, moreview.MoreView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
     _pills_need = (None, 0)             # (con qué letra se midió, ancho): lo que pide el pie de pastillas
 
     def __init__(self, app):
@@ -796,6 +796,8 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             self.toggle_themes()
         elif order == 'gitflow':
             self.toggle_gitflow()
+        elif order == 'spotify':
+            self.toggle_spotify()
         elif order == 'workflows':
             self.toggle_workflows()
         elif order == 'move':
@@ -1199,6 +1201,8 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             return 'projects'
         if self.more_open and not self.windowed:
             return 'more'
+        if self.sp_open and not self.windowed:
+            return 'spotify'
         if self.gf_open and not self.windowed:
             return 'gitflow'
         if self.themes_open and not self.windowed:
@@ -1305,7 +1309,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             width = lambda text: self._layout(cr, text, FONT_PILL).get_pixel_size()[0]
             sources_w = sum(width(label) + PILL_PAD + PILL_GAP for _, label in sources.SOURCES)
             # «?», Chat y Más: el relleno de cada una es el de draw_pills.
-            tools_w = sum(width(text) + pad + PILL_GAP for text, pad in (('?', 16), ('Chat', 20), ('Más', 16)))
+            tools_w = sum(width(text) + pad + PILL_GAP for text, pad in (('?', 16), ('Chat', 20), ('Más', 16), (spotifyview.SPOTIFY_LABEL, 16)))
             self._pills_need = (key, int(sources_w + tools_w + 36))
         return self._pills_need[1]
 
@@ -1337,6 +1341,8 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             return self.themes_goal()
         if mode == 'gitflow':
             return self.gitflow_goal()
+        if mode == 'spotify':
+            return self.spotify_goal()
         if mode == 'prefs':
             return self.prefs_goal()
         prev = self.preview_h(mode)
@@ -1619,7 +1625,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
 
         widget.queue_draw()
         # Una burbuja a medio irse sigue pidiendo cuadros hasta que termina.
-        if settled and not self.hover and not self.override and not self.tip_pop and not self.boxes_busy() and not self.gitflow_busy():
+        if settled and not self.hover and not self.override and not self.tip_pop and not self.boxes_busy() and not self.gitflow_busy() and not self.spotify_busy():
             # Quieta: escondida no dibuja nada y asomada basta con IDLE_FPS. El
             # reloj de GTK despierta al proceso 60 veces por segundo aunque no
             # haya nada que redibujar.
@@ -1784,9 +1790,9 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
                 cr.stroke()
             self.chat_place(h)
             return
-        if mode in ('more', 'prefs', 'boxes', 'themes', 'gitflow'):
+        if mode in ('more', 'prefs', 'boxes', 'themes', 'gitflow', 'spotify'):
             {'more': self.draw_more, 'prefs': self.draw_prefs, 'boxes': self.draw_boxes, 'themes': self.draw_themes,
-             'gitflow': self.draw_gitflow}[mode](cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
+             'gitflow': self.draw_gitflow, 'spotify': self.draw_spotify}[mode](cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
                 cr.append_path(edge)
@@ -2638,6 +2644,19 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             cr.move_to(mx + (mpw - mw) / 2, y + (PILL_H - mh) / 2)
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, more)
+            # Y, antes que «Más», la nota de Spotify: abre su panel.
+            note = self._layout(cr, spotifyview.SPOTIFY_LABEL, FONT_PILL)
+            nw, nh = note.get_pixel_size()
+            npw = nw + 16
+            nx = mx - PILL_GAP - npw
+            over_note = nx <= px <= nx + npw and y <= py <= y + PILL_H
+            mascot.box(cr, nx, y, npw, PILL_H, PILL_H / 2)
+            cr.set_source_rgba(*themes.glow(), (.13 if over_note else .07) * alpha)
+            cr.fill()
+            cr.move_to(nx + (npw - nw) / 2, y + (PILL_H - nh) / 2)
+            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+            PangoCairo.show_layout(cr, note)
+            self.pills.append((spotifyview.SPOTIFY_PILL, nx, y, npw, PILL_H))
             self.pills.append((moreview.MORE_PILL, mx, y, mpw, PILL_H))
             self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
@@ -3058,6 +3077,8 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
                     self.open_chat(typing=True)
                 elif key == moreview.MORE_PILL:
                     self.toggle_more()
+                elif key == spotifyview.SPOTIFY_PILL:
+                    self.toggle_spotify()
                 return
         for s, ry, rh in self.rows:
             if ry <= y < ry + rh:
@@ -3074,7 +3095,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'more', 'boxes', 'themes', 'gitflow') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'more', 'boxes', 'themes', 'gitflow', 'spotify') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3102,6 +3123,9 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             return
         if kind == 'gitflow':
             self.on_gitflow_hit(key)
+            return
+        if kind == 'spotify':
+            self.on_spotify_hit(key)
             return
         if kind == 'chat':
             self.on_chat_hit(key)
