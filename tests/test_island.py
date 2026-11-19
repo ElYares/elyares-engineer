@@ -518,6 +518,19 @@ class Tablero(Dibujo):
         self.assertEqual(self.isl.target(), 'board')
         self.assertEqual(self.isl.goal()[0], max(app.BOARD_W, self.isl.pills_need()))
 
+    def test_los_libres_en_cuadro_estrecho_llevan_la_cara_arriba_y_el_nombre_a_todo_el_ancho(self):
+        kinds = ['elyares-architect', 'elyares-auditor', 'elyares-reviewer', 'elyares-designer', 'elyares-mobile',
+                 'elyares-devops', 'elyares-researcher', 'elyares-coach', 'elyares-analyst']
+        self.send('start', 'a')
+        for kind in kinds:
+            self.send('agent-start', 'a', agent_id=f'a-{kind}', agent_type=kind)
+            self.send('agent-stop', 'a', agent_id=f'a-{kind}', agent_type=kind)
+        self.isl.expanded = True
+        with mock.patch.object(state.Member, 'busy', new_callable=mock.PropertyMock, return_value=False):
+            self.draw()
+        self.assertEqual(self.shown.count('libre'), 9)
+        self.assertIn('elyares-auditor', self.shown)     # de lado quedaba en «aud…»: ahora cabe el nombre entero
+
     def test_cambiar_de_tema_repinta_la_isla_y_se_guarda(self):
         self.isl.expanded = True
         self.isl.overlay = mock.Mock()
@@ -673,7 +686,7 @@ class Tablero(Dibujo):
         self.assertEqual(self.hit('member'), [])
         self.assertEqual(self.shown.count('libre'), len(state.TEAM) - 1)
         for role in state.TEAM:
-            self.assertIn(role, self.shown)
+            self.assertTrue(role in self.shown or f'elyares-{role}' in self.shown)    # el nombre entero si cabe; si no, el del personaje
         # Más de seis no caben en una fila con su nombre: van en dos.
         self.assertEqual(len({y for kind, _, _, y, _, _ in self.isl.hits if kind == 'brief'}), 2)
 

@@ -2128,10 +2128,18 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, more
         # sus pasos.
         quad, column = ch < 100, cw < 200 and ch >= 100
         wide = cw >= 300 and not quad
-        if column:
-            size, fx, fy = 56, x + cw / 2, y + 42
-            tx, ty, tw = x + 12, y + 78, cw - 24
+        # Un libre en un cuadro estrecho (los diez en cinco columnas): la cara arriba y el nombre y su
+        # estado centrados debajo, a todo el ancho de la tarjeta. De lado el nombre se quedaba en 3 letras.
+        stacked = quad and cw < 180 and not busy
+        if column or stacked:
+            if stacked:
+                size, fx, fy = 34, x + cw / 2, y + 24
+                tx, ty, tw = x + 8, y + 44, cw - 16
+            else:
+                size, fx, fy = 56, x + cw / 2, y + 42
+                tx, ty, tw = x + 12, y + 78, cw - 24
             sx, sw = tx, tw
+            column = True
         elif quad and cw < 180:
             # En cuadro y estrecho (toda la familia a la vez): la cara más
             # chica, para que quepa el nombre del personaje.
@@ -2185,7 +2193,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, more
         if not busy:
             note = (('esperando' if s.delegating else 'en reposo') if role == MAIN_ROLE
                     else 'encargar ›' if over else 'libre')
-            self.put(cr, note, FONT_DETAIL, x + cw / 2 if column else tx + 14, ty + 20, MUTED_COLOR,
+            self.put(cr, note, FONT_DETAIL, x + cw / 2 if column else tx + 14, ty + (17 if stacked else 20), MUTED_COLOR,
                      alpha * .8, tw, .5 if column else 0)
             return
         if member.state == 'permission':
