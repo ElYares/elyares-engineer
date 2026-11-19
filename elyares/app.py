@@ -83,7 +83,7 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import (actions, boxview, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
+from . import (actions, boxview, chatview, coffe, commands, devherd, fonts, github, gitflowview, hypr, ipc, mascot, paint,  # noqa: E402
                moreview, preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, themeview, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
@@ -259,7 +259,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, themeview.ThemesView, moreview.MoreView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitflowview.GitFlowView, themeview.ThemesView, moreview.MoreView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
     _pills_need = (None, 0)             # (con qué letra se midió, ancho): lo que pide el pie de pastillas
 
     def __init__(self, app):
@@ -513,6 +513,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, them
         self.seconds += 1
         self.chat_tick(time.monotonic())
         self.boxes_tick(time.monotonic())
+        self.gf_tick(time.monotonic())
         self.projects_tick(self.seconds)
         self.workflows_tick()
         if self.seconds % REAP_SECS == 0:
@@ -793,6 +794,8 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, them
             self.toggle_boxes()
         elif order == 'themes':
             self.toggle_themes()
+        elif order == 'gitflow':
+            self.toggle_gitflow()
         elif order == 'workflows':
             self.toggle_workflows()
         elif order == 'move':
@@ -1196,6 +1199,8 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, them
             return 'projects'
         if self.more_open and not self.windowed:
             return 'more'
+        if self.gf_open and not self.windowed:
+            return 'gitflow'
         if self.themes_open and not self.windowed:
             return 'themes'
         if self.boxes_open and not self.windowed:
@@ -1330,6 +1335,8 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, them
             return self.boxes_goal()
         if mode == 'themes':
             return self.themes_goal()
+        if mode == 'gitflow':
+            return self.gitflow_goal()
         if mode == 'prefs':
             return self.prefs_goal()
         prev = self.preview_h(mode)
@@ -1612,7 +1619,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, them
 
         widget.queue_draw()
         # Una burbuja a medio irse sigue pidiendo cuadros hasta que termina.
-        if settled and not self.hover and not self.override and not self.tip_pop and not self.boxes_busy():
+        if settled and not self.hover and not self.override and not self.tip_pop and not self.boxes_busy() and not self.gitflow_busy():
             # Quieta: escondida no dibuja nada y asomada basta con IDLE_FPS. El
             # reloj de GTK despierta al proceso 60 veces por segundo aunque no
             # haya nada que redibujar.
@@ -1777,8 +1784,9 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, them
                 cr.stroke()
             self.chat_place(h)
             return
-        if mode in ('more', 'prefs', 'boxes', 'themes'):
-            {'more': self.draw_more, 'prefs': self.draw_prefs, 'boxes': self.draw_boxes, 'themes': self.draw_themes}[mode](cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
+        if mode in ('more', 'prefs', 'boxes', 'themes', 'gitflow'):
+            {'more': self.draw_more, 'prefs': self.draw_prefs, 'boxes': self.draw_boxes, 'themes': self.draw_themes,
+             'gitflow': self.draw_gitflow}[mode](cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
                 cr.append_path(edge)
@@ -3066,7 +3074,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, them
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'more', 'boxes', 'themes') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'more', 'boxes', 'themes', 'gitflow') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3091,6 +3099,9 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, them
             return
         if kind == 'themes':
             self.on_themes_hit(key)
+            return
+        if kind == 'gitflow':
+            self.on_gitflow_hit(key)
             return
         if kind == 'chat':
             self.on_chat_hit(key)

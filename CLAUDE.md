@@ -44,6 +44,7 @@ trabajar en el repo.
 
 ## Flujo de git
 
+- Flujo de git: main ← develop ← v2 ← v2-<tema>   (lo lee el panel Git de la isla; `develop` aún no existe y el panel pregunta a qué rama va en su lugar)
 - Rama `feat/…` desde `v2`, PR contra `v2`; a `main` (PR `v2` → `main`) cuando
   el usuario lo pida. Commit, PR y merge solo cuando se piden. No borrar
   carpetas, ramas ni preferencias.

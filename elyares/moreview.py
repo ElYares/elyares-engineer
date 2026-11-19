@@ -1,6 +1,6 @@
 """El panel «Más» de la isla suelta: lo que no cabe en el pie de pastillas.
 
-Una fila por opción (Flujos, Proyectos, Contenedores, Temas, Ajustes), con su nota y un «›», en el mismo formato
+Una fila por opción (Flujos, Proyectos, Contenedores, Git, Temas, Ajustes), con su nota y un «›», en el mismo formato
 del panel de Ajustes. Un clic en la fila cierra este panel y abre el de la opción, igual que
 la pastilla que antes estaba en el pie. Se abre con la pastilla «Más» o `elyares-ctl more`.
 `MoreView` es parte de la isla (`app.Island` la hereda) y usa sus ayudantes de dibujo.
@@ -15,6 +15,7 @@ MORE_ROWS = (
     ('flows', 'Flujos', 'Tus cadenas de agentes guardadas.'),
     ('projects', 'Proyectos', 'Empieza un chat en cualquiera.'),
     ('boxes', 'Contenedores', 'Proyectos de DevHerd: levantar, parar y ver qué corre.'),
+    ('gitflow', 'Git', 'Ramas del proyecto: subir, PR y merge paso a paso.'),
     ('themes', 'Temas', 'Cambia los colores de la isla y de la ventana.'),
     ('prefs', 'Ajustes', 'Vidrio, brillo, estilo y vista cansada.'),
 )
@@ -34,7 +35,7 @@ class MoreView:
         if self.more_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.prefs_open = self.boxes_open = self.themes_open = False
+            self.projects_open = self.prefs_open = self.boxes_open = self.themes_open = self.gf_open = False
         self.ensure_tick()
 
     def more_goal(self):
@@ -78,6 +79,8 @@ class MoreView:
             self.toggle_projects()
         elif key == 'boxes':
             self.toggle_boxes()
+        elif key == 'gitflow':
+            self.toggle_gitflow()
         elif key == 'themes':
             self.toggle_themes()
         elif key == 'prefs':

@@ -3504,6 +3504,122 @@ class Ventana(Dibujo):
         isl.toggle_themes()                                 # en la ventana no hay: tiene su vista Ajustes
         self.assertFalse(isl.themes_open)
 
+    def _gitflow_listo(self):
+        from elyares import gitflow
+        isl = self.isl
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open, isl.more_open = False, False, False, False, False
+        isl.boxes_open = isl.themes_open = False
+        isl.ensure_tick, isl.gf_refresh = mock.Mock(), mock.Mock()
+        isl.toggle_gitflow()
+        flow = gitflow.Flow('/r', 'v2-x', ['main', 'develop', 'v2', 'v2-<tema>'], 'v2', 'main', 'develop', ['v2', 'main'], True)
+        steps = [gitflow.Step('commit', 'Commit', 'todo', '2 archivos sin commitear', 'Pedir commit'),
+                 gitflow.Step('push', 'Subir v2-x', 'todo', 'sin subir', 'Subir'),
+                 gitflow.Step('pr', 'PR a v2', 'wait', 'primero sube la rama', '')]
+        isl.gf_data = ('/r', flow, steps)
+        return isl
+
+    def test_el_panel_git_muestra_la_cadena_los_pasos_y_pregunta_por_la_rama_que_no_existe(self):
+        isl = self._gitflow_listo()
+        self.assertEqual(isl.target(), 'gitflow')
+        self.draw()
+        for text in ('v2-x', 'v2', 'main', 'Subir v2-x', 'PR a v2', '«develop» no existe. ¿A qué rama va en su lugar?'):
+            self.assertIn(text, self.shown)
+        keys = self.hit('gitflow')
+        for key in (('close',), ('step', 'commit'), ('step', 'push'), ('ask', 'develop', 'v2'), ('ask', 'develop', 'main'),
+                    ('prompt', 'new'), ('prompt', 'stay')):
+            self.assertIn(key, keys)
+        self.assertNotIn(('step', 'pr'), keys)                    # un paso que espera no tiene botón
+
+    def test_un_paso_pide_un_segundo_clic_y_solo_entonces_corre_en_un_hilo(self):
+        isl = self._gitflow_listo()
+        ran = []
+
+        class Now:                                              # el hilo, aquí, corre en el acto
+            def __init__(self, target, daemon=None):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        with mock.patch('elyares.gitflowview.threading.Thread', Now), \
+                mock.patch('elyares.gitflowview.gitflow.act', side_effect=lambda *a: ran.append(a[2:]) or (True, 'listo')):
+            isl.on_hit('gitflow', ('step', 'push'))
+            self.assertEqual(ran, [])                           # el primer clic solo pregunta «¿Seguro?»
+            self.assertEqual(isl.gf_confirm[0], 'push')
+            isl.on_hit('gitflow', ('step', 'push'))
+        self.assertEqual(ran, [('push',)])
+        self.assertTrue(isl.gf_result[1])
+        self.assertIsNone(isl.gf_busy)
+        isl.gf_refresh.assert_called()                          # al acabar vuelve a leer git y gh
+
+    def test_el_paso_commit_sugiere_el_mensaje_y_los_botones_commitean_piden_otro_o_siguen_en_el_chat(self):
+        from elyares import gitsuggest
+        isl = self._gitflow_listo()
+        isl.open_chat, isl.gf_prefill = mock.Mock(), mock.Mock()
+
+        class Now:
+            def __init__(self, target, daemon=None):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        found = gitsuggest.Suggestion('fix: x\n\nPor qué.\n\n' + gitsuggest.TRAILER,
+                                      gitsuggest.Changes(['a.py', 'b.py'], ['.env'], 420))
+        with mock.patch('elyares.gitflowview.threading.Thread', Now), \
+                mock.patch('elyares.gitflowview.gitsuggest.suggest', return_value=found) as suggest, \
+                mock.patch('elyares.gitflowview.gitsuggest.commit', return_value=(True, '')) as commit:
+            isl.on_hit('gitflow', ('step', 'commit'))              # sin segundo clic: sugerir no cambia nada
+            suggest.assert_called_once()
+            self.assertEqual(isl.gf_sug['files'], ['a.py', 'b.py'])
+            self.assertEqual(isl.gf_sug['risky'], ['.env'])
+            self.draw()
+            self.assertTrue(any('pasa del tope' in t or 'riesgosos' in t for t in self.shown))
+            keys = self.hit('gitflow')
+            for key in (('sug', 'use'), ('sug', 'again'), ('sug', 'edit'), ('sug', 'drop')):
+                self.assertIn(key, keys)
+            isl.on_hit('gitflow', ('sug', 'again'))
+            self.assertEqual(suggest.call_count, 2)
+            isl.on_hit('gitflow', ('sug', 'use'))
+            commit.assert_called_once_with('/r', found.text, ['a.py', 'b.py'])
+            self.assertIsNone(isl.gf_sug)
+            self.assertTrue(isl.gf_result[1])
+            isl.on_hit('gitflow', ('step', 'commit'))
+            isl.on_hit('gitflow', ('sug', 'edit'))
+        isl.open_chat.assert_called_with(typing=True, cwd='/r')
+        isl.gf_prefill.assert_called_with('/commit fix: x')       # el asunto va como intención del /commit
+        self.assertFalse(isl.gf_open)
+
+    def test_elegir_la_rama_sustituta_se_recuerda_y_la_pregunta_de_seguir_aqui_se_oculta(self):
+        isl = self._gitflow_listo()
+        with mock.patch('elyares.gitflowview.gitflow.remember') as remember:
+            isl.on_hit('gitflow', ('ask', 'develop', 'main'))
+        remember.assert_called_once_with('/r', 'develop', 'main')
+        isl.gf_refresh.assert_called()
+        self.assertTrue(isl.gf_prompt())
+        isl.on_hit('gitflow', ('prompt', 'stay'))
+        self.assertFalse(isl.gf_prompt())
+
+    def test_el_panel_git_anima_mientras_lee_o_corre_una_orden_y_se_abre_desde_mas(self):
+        isl = self._gitflow_listo()
+        isl.gf_data = None
+        self.assertTrue(isl.gitflow_busy())                      # sin lectura: esqueleto y aro
+        self.draw()
+        self.assertIn('Leyendo git y gh…', self.shown)
+        isl.gf_data = ('', None, [])
+        self.assertFalse(isl.gitflow_busy())
+        isl.gf_busy = 'push'
+        self.assertTrue(isl.gitflow_busy())
+        isl.gf_open = False
+        isl.toggle_more()
+        isl.on_hit('more', 'gitflow')
+        self.assertTrue(isl.gf_open)
+        self.assertFalse(isl.more_open)
+        isl.windowed = True
+        isl.gf_open = False
+        isl.toggle_gitflow()                                     # en la ventana no hay
+        self.assertFalse(isl.gf_open)
+
     def test_el_panel_mas_lleva_a_contenedores(self):
         isl = self._boxes_listos()
         isl.toggle_more()
