@@ -3436,6 +3436,51 @@ class Ventana(Dibujo):
         isl.toggle_spotify()                                 # en la ventana no hay
         self.assertFalse(isl.sp_open)
 
+    def _servidores_listos(self, hosts):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open, isl.more_open = False, False, False, False, False
+        isl.sp_open = False
+        isl.sv_open, isl.sv_hosts, isl.sv_msg = True, tuple(hosts), ''
+        return isl
+
+    def test_el_panel_de_servidores_dibuja_un_clic_por_host_y_el_de_cerrar(self):
+        isl = self._servidores_listos(['ionos-laravel-v2', 'ovh-laravel-1', 'YaresPi'])
+        self.assertEqual(isl.target(), 'servers')
+        self.draw()
+        self.assertEqual(self.hit('servers'), ['close', 'ionos-laravel-v2', 'ovh-laravel-1', 'YaresPi'])
+
+    def test_sin_servidores_el_panel_lo_dice_y_solo_deja_cerrar(self):
+        isl = self._servidores_listos([])
+        self.draw()
+        self.assertEqual(self.hit('servers'), ['close'])
+
+    def test_un_clic_en_un_host_lo_abre_y_uno_que_no_esta_en_la_lista_no_hace_nada(self):
+        isl = self._servidores_listos(['uno'])
+        with mock.patch('elyares.servers.connect', return_value=True) as connect:
+            isl.on_hit('servers', 'uno')
+            connect.assert_called_once_with('uno')
+            self.assertIn('uno', isl.sv_msg)
+            isl.on_hit('servers', 'otro')
+            self.assertEqual(connect.call_count, 1)
+        with mock.patch('elyares.servers.connect', return_value=False):
+            isl.on_hit('servers', 'uno')
+            self.assertIn('No se pudo', isl.sv_msg)
+
+    def test_servidores_se_abre_desde_mas_y_lo_cierra_otro_panel(self):
+        isl = self._servidores_listos([])
+        isl.sv_open = False
+        with mock.patch('elyares.servers.hosts', return_value=['uno']):
+            isl.toggle_more()
+            isl.on_hit('more', 'servers')
+        self.assertTrue(isl.sv_open)
+        self.assertEqual(isl.sv_hosts, ('uno',))
+        isl.toggle_prefs()
+        self.assertFalse(isl.sv_open)
+        isl.windowed, isl.sv_open = True, False
+        isl.toggle_servers()                                 # en la ventana no hay
+        self.assertFalse(isl.sv_open)
+
     def _boxes_listos(self, loaded=True):
         isl = self.isl
         box = lambda n, st: dict(name=n, service=n.split('-')[1], state=st, path='/a')
