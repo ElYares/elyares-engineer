@@ -3477,6 +3477,33 @@ class Ventana(Dibujo):
         isl.box_entry.set_visible.assert_called_with(False)
         isl.boxes_type.assert_called_with(False)
 
+    def test_el_panel_de_temas_los_lista_todos_y_cambia_de_tema_con_un_clic(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open, isl.more_open = False, False, False, False, False
+        isl.boxes_open = False
+        isl.toggle_themes()
+        self.assertEqual(isl.target(), 'themes')
+        self.draw()
+        keys = self.hit('themes')
+        for name in app.themes.THEMES:
+            self.assertIn(name, keys)                       # una fila por cada tema de la ventana
+        self.assertIn('close', keys)
+        with mock.patch.object(isl, 'pick_theme') as pick:
+            isl.on_hit('themes', 'moonfly')
+        pick.assert_called_once_with('moonfly')
+        self.assertTrue(isl.themes_open)                    # sigue abierto para probar otro
+        isl.on_hit('themes', 'close')
+        self.assertFalse(isl.themes_open)
+        isl.toggle_more()
+        isl.on_hit('more', 'themes')                        # desde «Más»
+        self.assertTrue(isl.themes_open)
+        self.assertFalse(isl.more_open)
+        isl.windowed = True
+        isl.themes_open = False
+        isl.toggle_themes()                                 # en la ventana no hay: tiene su vista Ajustes
+        self.assertFalse(isl.themes_open)
+
     def test_el_panel_mas_lleva_a_contenedores(self):
         isl = self._boxes_listos()
         isl.toggle_more()
