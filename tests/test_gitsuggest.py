@@ -41,6 +41,11 @@ class Cambios(Repo):
         self.assertEqual(sorted(found.risky), ['.env', 'id_rsa'])
         self.assertEqual(found.lines, 4)
 
+    def test_un_renombrado_cuenta_con_sus_dos_rutas_para_que_el_commit_no_lo_parta(self):
+        git(self.root, 'mv', 'a.py', 'b.py')
+        found = gitsuggest.changes(self.root)
+        self.assertEqual(sorted(found.files), ['a.py', 'b.py'])
+
     def test_riesgosos_por_nombre(self):
         for name in ('.env', '.env.local', 'a/clave.pem', 'server.key', 'credentials.json', 'my-secret.txt'):
             self.assertTrue(gitsuggest.is_risky(name), name)
