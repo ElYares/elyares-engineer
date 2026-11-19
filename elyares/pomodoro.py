@@ -38,6 +38,43 @@ def parse_tasks(text):
     return tasks
 
 
+# Con todos los estados: «en curso» lleva un espacio. [pomodoros] es «[hechos/estimados]» o «[hechos]».
+ALL_LINE = re.compile(r'^\s*(\d+)\s+(en curso|\S+)\s+\S+\s+(\S+)\s+(.*?)\s+\[(\d+)(?:/(\d+))?\]\s+(.*\S)\s*$')
+# Los estados de una tarea en `coffe`, en un solo sitio: las dos vistas Tareas los leen de aquí.
+LIVE, PARKED, PENDING, DONE = 'en curso', 'refri', 'pendiente', 'hecha'
+OPEN_STATES = (LIVE, PARKED, PENDING)
+ALL_STATES = OPEN_STATES + (DONE,)
+STATE_ORDER = {LIVE: 0, PARKED: 1, PENDING: 2, DONE: 3}
+PRIORITY_ORDER = {'alta': 0, 'media': 1, 'baja': 2}
+MARKS = {'alta': '▲', 'media': '◆', 'baja': '▽'}         # la prioridad, en las dos vistas Tareas
+EMPTY_ALL = 'Sin tareas en coffe. Crea una con: coffe task add "título"'
+
+
+def parse_all(text):
+    """`coffe task list` -> todas, con su estado: [dict(id, state, priority, title, done, estimate, project)].
+    Las apartadas («descartada»…) vienen tal cual: la vista decide si las enseña."""
+    tasks = []
+    for line in text.splitlines():
+        m = ALL_LINE.match(line)
+        if m:
+            tasks.append(dict(id=m.group(1), state=m.group(2), priority=m.group(3), title=m.group(4),
+                              done=int(m.group(5)), estimate=int(m.group(6) or 0), project=m.group(7)))
+    return tasks
+
+
+def by_project(tasks, states=OPEN_STATES, query=''):
+    """Agrupa por proyecto -> [(proyecto, [tareas])]. Dentro, en curso primero y luego por prioridad;
+    los proyectos con algo en curso van arriba y el resto por nombre. `query` filtra por título o proyecto."""
+    query = query.strip().lower()
+    groups = {}
+    for t in tasks:
+        if t['state'] in states and (not query or query in t['title'].lower() or query in t['project'].lower()):
+            groups.setdefault(t['project'], []).append(t)
+    for items in groups.values():
+        items.sort(key=lambda t: (STATE_ORDER.get(t['state'], 9), PRIORITY_ORDER.get(t['priority'], 9), int(t['id'])))
+    return sorted(groups.items(), key=lambda g: (min(STATE_ORDER.get(t['state'], 9) for t in g[1]) > 1, g[0].lower()))
+
+
 def parse_projects(text):
     """La salida de `coffe project list` -> {'personal / apunte': '/ruta/del/repo'}.
     El árbol viene sangrado de dos en dos; la ruta de un nodo es la de sus
@@ -117,7 +154,10 @@ class Watcher:
 
     def __init__(self):
         self.status, self.tasks = None, []
+        self.all_tasks = []             # con todos los estados: la vista Tareas
         self.repos = {}
+        self.tasks_loaded = False       # ya contestó `coffe task list` alguna vez (bien o mal)
+        self.tasks_why = ''             # por qué falló la última vez, o ''
         self.at = self.tasks_at = 0.0
         self.busy = False
 
@@ -129,8 +169,19 @@ class Watcher:
                              daemon=True).start()
         return describe(self.status), [dict(t, repo=self.repos.get(t['project'], '')) for t in self.tasks]
 
+    def read_all(self):
+        """Todas las tareas de `coffe` (cualquier estado), con el repo de su proyecto si lo tiene."""
+        self.read()
+        return [dict(t, repo=self.repos.get(t['project'], '')) for t in self.all_tasks]
+
     def refresh(self):
         self.at = self.tasks_at = 0.0
+
+    def tasks_state(self):
+        """('loading', '') hasta que `coffe` contesta, ('error', por qué) si falló y ('ok', '') si no."""
+        if self.tasks_why:
+            return 'error', self.tasks_why
+        return ('ok', '') if self.tasks_loaded else ('loading', '')
 
     def project_of(self, root):
         """El proyecto de `coffe` de la carpeta `root` (el de repo más hondo que la contiene), o ''."""
@@ -141,11 +192,15 @@ class Watcher:
         try:
             self.status = snapshot()
             if with_tasks:
+                # Los repos antes que las tareas: una vista que lea entre medias ya ve cada tarea con su repo.
+                ok_repos, repos = run('project', 'list')
                 ok, text = run('task', 'list')
+                if ok_repos:
+                    self.repos = parse_projects(repos)
                 if ok:
                     self.tasks, self.tasks_at = parse_tasks(text), time.monotonic()     # todas: cada vista filtra y recorta
-                ok, text = run('project', 'list')
-                if ok:
-                    self.repos = parse_projects(text)
+                    self.all_tasks = parse_all(text)
+                self.tasks_why = '' if ok else (text or 'coffe no contesta')
+                self.tasks_loaded = True
         finally:
             self.busy = False
