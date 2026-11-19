@@ -594,6 +594,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, more
         MUTED_COLOR = MUTED_TIRED if fonts.tired else MUTED_NORMAL
         SEP_COLOR = '#%02x%02x%02x' % tuple(round(c * 255) for c in MUTED_NORMAL[:3])
         paint.ISLAND = look['island']
+        fonts.light = themes.is_light()          # antes del CSS de la ventana: el vidrio de un tema claro va casi opaco
         fonts.TIRED_MUTED, fonts.TIRED_INK = look['tired'], look['ink']
         windowframe.use_theme()
         palette = themes.palette()
@@ -2701,7 +2702,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, more
         self.tip_shadow(cr, shape, top, width, alpha)
         cr.append_path(shape)
         # Con comandos se lee más rato: en vidrio va más opaca que la isla.
-        cr.set_source_rgba(*ISLAND_BG[:3], (min(.97, self.glass_pct() / 100 + TIP_EXTRA) if glass else ISLAND_BG[3]) * alpha)
+        cr.set_source_rgba(*ISLAND_BG[:3], (fonts.glass(min(.97, self.glass_pct() / 100 + TIP_EXTRA)) if glass else ISLAND_BG[3]) * alpha)
         cr.fill_preserve()
         if glass and self.settings['glass_fx']:
             sheen = cairo.LinearGradient(0, y, 0, y + h / 2)
