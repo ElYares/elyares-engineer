@@ -528,7 +528,7 @@ class Tablero(Dibujo):
         self.isl.expanded = True
         with mock.patch.object(state.Member, 'busy', new_callable=mock.PropertyMock, return_value=False):
             self.draw()
-        self.assertEqual(self.shown.count('libre'), 9)
+        self.assertEqual(self.shown.count('libre'), len(state.TEAM) - 1)
         self.assertIn('elyares-auditor', self.shown)     # de lado quedaba en «aud…»: ahora cabe el nombre entero
 
     def test_cambiar_de_tema_repinta_la_isla_y_se_guarda(self):
@@ -652,9 +652,9 @@ class Tablero(Dibujo):
     def test_con_pocos_libres_la_banca_es_una_lista(self):
         self.isl.expanded = True
         self.work('a', 'elyares-architect', 'elyares-auditor', 'elyares-reviewer',
-                  'elyares-designer')
+                  'elyares-designer', 'elyares-mobile')
         self.draw()
-        self.assertEqual(len(self.hit('member')), 5)
+        self.assertEqual(len(self.hit('member')), 6)
         # Cinco en la banca: uno debajo de otro, con su nombre y «libre».
         briefs = [x for kind, _, x, *_ in self.isl.hits if kind == 'brief']
         self.assertEqual((len(briefs), len(set(briefs))), (5, 1))

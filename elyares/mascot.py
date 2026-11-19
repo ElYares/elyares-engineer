@@ -26,6 +26,8 @@ los mismos gestos. Cada uno pone lo suyo en capas: lo que lleva en la cabeza
                 el CV asomando
     analyst     pelo revuelto con un lápiz detrás de la oreja y un bloque de
                 notas adhesivas con sus casillas
+    tester      pelo azul marino con las gafas de seguridad subidas a la
+                frente, y una ventana de navegador con su botón de play
 """
 
 import math
@@ -45,7 +47,7 @@ COLORS = {
 DEFAULT_ACCENT = COLORS['accent']
 
 ROLES = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', 'devops', 'researcher',
-         'coach', 'analyst')
+         'coach', 'analyst', 'tester')
 # El color de cada personaje: la antena mientras trabaja y su punto en la lista.
 # Ni ámbar, ni rojo, ni verde: esos ya dicen permiso, problema y terminado. Con
 # ocho ya no quedan tonos lejos de todos: el lima del devops y el naranja del
@@ -53,9 +55,12 @@ ROLES = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', '
 # y el verde y entre el rojo y el amarillo. El índigo del coach cae entre el
 # azul del tema y el morado del auditor. El arena del analyst es el único tono
 # apagado: el color del papel, lejos del naranja y del ámbar de «pide permiso».
+# El pizarra del tester es el otro: un gris azulado, lejos del azul del tema y
+# del cian del architect.
 ACCENTS = {'architect': '#22c7dd', 'auditor': '#9a6bff', 'reviewer': '#ff6fb5',
            'designer': '#e052f0', 'mobile': '#55b8ab', 'devops': '#a6e84a',
-           'researcher': '#ff8a4c', 'coach': '#7a86ff', 'analyst': '#d9b38c'}
+           'researcher': '#ff8a4c', 'coach': '#7a86ff', 'analyst': '#d9b38c',
+           'tester': '#8da2c0'}
 
 
 def set_accent(color):
@@ -1704,14 +1709,70 @@ def _sticky_notes(cr, t, motion):
     _hands(cr, t, motion * .6, (-40, 40), 116)
 
 
+# ── tester ───────────────────────────────────────────────────────────────────
+
+def _goggles_hair(cr):
+    """Pelo azul marino, con las gafas de seguridad subidas a la frente."""
+    cr.new_path()
+    cr.move_to(-78, 8)
+    cr.curve_to(-92, -62, 92, -62, 78, 8)
+    quad(cr, 0, -10, -78, 8)
+    cr.close_path()
+    g = cairo.LinearGradient(0, -50, 0, 8)
+    g.add_color_stop_rgba(0, *rgba('#3a4d73'))
+    g.add_color_stop_rgba(1, *rgba('#1c2740'))
+    cr.set_source(g)
+    cr.fill_preserve()
+    stroke(cr, 5)
+    cr.move_to(-80, -14)
+    cr.line_to(80, -14)
+    stroke(cr, 7, ACCENTS['tester'])
+    for x in (-26, 26):
+        cr.new_path()
+        cr.arc(x, -22, 15, 0, TAU)
+        cr.set_source_rgba(*rgba('#bfe3ff', .55))
+        cr.fill_preserve()
+        stroke(cr, 3.4, 'line')
+
+
+def _browser_window(cr, t, motion):
+    """Una ventana de navegador con su botón de play y una casilla marcada."""
+    b = math.sin(t * 5) * 2 * motion
+    cr.save()
+    cr.translate(0, 100 + b * .6)
+    cr.new_path()
+    rrect(cr, -40, -20, 80, 40, 4)
+    fill(cr, 'face', preserve=True)
+    stroke(cr, 3)
+    cr.rectangle(-40, -20, 80, 9)
+    fill(cr, ACCENTS['tester'], preserve=True)
+    stroke(cr, 3)
+    for x in (-33, -26, -19):
+        cr.new_path()
+        cr.arc(x, -15.5, 1.8, 0, TAU)
+        fill(cr, 'face')
+    cr.move_to(-20, -4)
+    cr.line_to(-20, 14)
+    cr.line_to(-6, 5)
+    cr.close_path()
+    fill(cr, ACCENTS['tester'], preserve=True)
+    stroke(cr, 2.4)
+    cr.move_to(6, 6)
+    cr.line_to(11, 11)
+    cr.line_to(22, -2)
+    stroke(cr, 3, 'metal')
+    cr.restore()
+    _hands(cr, t, motion * .6, (-44, 44), 116)
+
+
 # ── las capas de cada personaje ──────────────────────────────────────────────
 
 HATS = {'engineer': _cap, 'architect': _hardhat, 'auditor': _front_cap, 'reviewer': _eyeshade,
         'designer': _beret, 'mobile': _beanie, 'devops': _hood, 'researcher': _explorer_hat,
-        'coach': _headset, 'analyst': _messy_hair}
+        'coach': _headset, 'analyst': _messy_hair, 'tester': _goggles_hair}
 PROPS = {'engineer': _laptop, 'architect': _blueprint, 'auditor': _clipboard, 'reviewer': _magnifier,
          'designer': _palette, 'mobile': _phone, 'devops': _terminal, 'researcher': _notebook, 'coach': _envelope,
-         'analyst': _sticky_notes}
+         'analyst': _sticky_notes, 'tester': _browser_window}
 BACK = {'architect': lambda cr: _pencil(cr, 89, 4, 0.24, 'yellow'),
         'auditor': _collar,
         'reviewer': lambda cr: _pencil(cr, -89, 4, -0.24, 'red'),
