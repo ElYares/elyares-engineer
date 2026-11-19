@@ -60,7 +60,7 @@ class PrefsView:
     def draw_prefs(self, cr, x0, w, h, alpha):
         left, width = x0 + PREFS_PAD, w - 2 * PREFS_PAD
         soft = mascot.rgba(self.ink('text', .62))[:3]
-        self.put(cr, 'Ajustes', FONT_PREFS_TITLE, left, 14, (.95, .96, 1), alpha)
+        self.put(cr, 'Ajustes', FONT_PREFS_TITLE, left, 14, mascot.rgba(self.ink('text'))[:3], alpha)
         layout = self._layout(cr, 'Cerrar', 'Sans Semi-Bold 9')
         lw, lh = layout.get_pixel_size()
         x = left + width - lw

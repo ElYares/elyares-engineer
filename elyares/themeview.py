@@ -48,7 +48,7 @@ class ThemesView:
         pad, row = prefsview.PREFS_PAD, prefsview.PREFS_ROW
         left, width = x0 + pad, w - 2 * pad
         soft = mascot.rgba(self.ink('text', .62))[:3]
-        self.put(cr, 'Temas', prefsview.FONT_PREFS_TITLE, left, 14, (.95, .96, 1), alpha)
+        self.put(cr, 'Temas', prefsview.FONT_PREFS_TITLE, left, 14, mascot.rgba(self.ink('text'))[:3], alpha)
         layout = self._layout(cr, 'Cerrar', 'Sans Semi-Bold 9')
         lw, lh = layout.get_pixel_size()
         x = left + width - lw

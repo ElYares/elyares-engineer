@@ -245,7 +245,7 @@ class BoxesView:
         soft = mascot.rgba(self.ink('text', .62))[:3]
         head = mascot.rgba(self.ink('head'))[:3]
         data = self.box_watch.read()
-        self.put(cr, 'Contenedores', FONT_BOXES_TITLE, left, 14, (.95, .96, 1), alpha)
+        self.put(cr, 'Contenedores', FONT_BOXES_TITLE, left, 14, mascot.rgba(self.ink('text'))[:3], alpha)
         if self.boxes_busy():
             self.draw_spinner(cr, left + 126, 22, 5, alpha)       # trabajando: docker contesta o una orden va en camino
         if data:

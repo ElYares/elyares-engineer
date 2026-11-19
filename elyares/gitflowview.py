@@ -145,7 +145,7 @@ class GitFlowView:
         left, width = x0 + pad, w - 2 * pad
         soft = mascot.rgba(self.ink('text', .62))[:3]
         head = mascot.rgba(self.ink('head'))[:3]
-        self.put(cr, 'Git', prefsview.FONT_PREFS_TITLE, left, 14, (.95, .96, 1), alpha)
+        self.put(cr, 'Git', prefsview.FONT_PREFS_TITLE, left, 14, mascot.rgba(self.ink('text'))[:3], alpha)
         if self.gitflow_busy() or self.gf_loading and self.gf_data is None:
             self.gf_spinner(cr, left + 48, 22, 5, alpha)
         layout = self._layout(cr, 'Cerrar', 'Sans Semi-Bold 9')
