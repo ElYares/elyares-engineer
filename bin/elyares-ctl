@@ -16,9 +16,11 @@ Uso: elyares-ctl <orden>
               Con la ventana ya abierta, la enfoca; con `toggle`, la cierra.
               Si elyares-engineer no corre, lo arranca
     projects  abre el panel de proyectos, para empezar a trabajar en uno; otra vez, lo cierra
+    tasks     abre el panel Tareas: las de coffe como un ToDo por proyectos; otra vez, lo cierra
     home      abre el panel Inicio de la isla: el proyecto, los agentes y el contexto del elegido; otra vez, lo cierra
-    habit add <texto> | rm <texto> | list
-              los hábitos de Inicio: una casilla por día con su racha (se marcan en la isla)
+    habit add <texto> | rm <texto> | list | file | edit
+              los hábitos de Inicio: tu lista vive en un .md (`file` dice dónde, `edit` lo abre);
+              se marcan en la isla, una casilla por día con su racha
     prefs     abre el panel de ajustes de la isla (vidrio, compacto, opacidad…); otra vez, lo cierra
     workflows abre el panel de workflows: cadenas de agentes que se guardan y se
               lanzan sobre un proyecto; otra vez, lo cierra
@@ -54,7 +56,7 @@ import subprocess
 import sys
 import time
 
-ORDERS = ('open', 'chat', 'window', 'projects', 'prefs', 'containers', 'home', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
+ORDERS = ('open', 'chat', 'window', 'projects', 'prefs', 'containers', 'home', 'tasks', 'workflows', 'move', 'hide', 'compact', 'pin', 'tab', 'steps', 'theme', 'reload',
           'glass', 'allow', 'deny', 'status', 'sessions', 'toggle')
 REPLIES = ('allow', 'deny', 'status', 'sessions', 'reload')    # las que esperan a que elyares-engineer conteste
 SOURCES = ('devherd', 'coffe', 'github', 'terminal', 'usage')
@@ -111,7 +113,17 @@ def habit(args):
     if what == 'list':
         for h in habits.items():
             print(('[x] ' if h['done_today'] else '[ ] ') + h['name'] + (f' · racha {h["streak"]}' if h['streak'] else ''))
+        if habits.last_error():
+            print(habits.last_error(), file=sys.stderr)
+            return 1
         return 0
+    if what == 'file':
+        print(habits.list_path())
+        return 0
+    if what == 'edit':
+        ok, path = habits.edit()
+        print(path if ok else f'No hay editor que lo abra. Ábrelo a mano: {path}', file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 1
     if what not in ('add', 'rm'):
         print(__doc__.strip(), file=sys.stderr)
         return 2

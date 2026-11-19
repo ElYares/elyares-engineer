@@ -18,7 +18,7 @@ import time
 
 from gi.repository import GLib, Gtk
 
-from . import (containers, containerview, editorpanel, homepanel, fonts, gitpanel, gitview, hypr, mascot, pomodoro, settings, tallerpanel, terminal, terminalpanel,
+from . import (containers, containerview, editorpanel, homepanel, taskpanel, fonts, gitpanel, gitview, hypr, mascot, pomodoro, settings, tallerpanel, terminal, terminalpanel,
                themes, tmuxsessions, windowframe)
 from .state import MAIN_ROLE, elapsed
 
@@ -166,9 +166,11 @@ class WindowView:
         self.overlay.add_overlay(self.frame.taller)
         self.frame.home = homepanel.HomePanel()
         self.overlay.add_overlay(self.frame.home)
+        self.frame.tasks = taskpanel.TasksPanel()
+        self.overlay.add_overlay(self.frame.tasks)
         self.frame.containers = containerview.ContainersPanel()
         self.overlay.add_overlay(self.frame.containers)
-        self.frame.extra += [self.frame.editor, self.frame.terminal, self.frame.taller, self.frame.containers, self.frame.git, self.frame.home]     # `hide_panels` los esconde con los demás
+        self.frame.extra += [self.frame.editor, self.frame.terminal, self.frame.taller, self.frame.containers, self.frame.git, self.frame.home, self.frame.tasks]     # `hide_panels` los esconde con los demás
         self.overlay.add_overlay(self.frame.terminal)
         self.frame.help.connect('clicked', lambda _b: self.window_help())
         return win
@@ -183,7 +185,7 @@ class WindowView:
     def window_view(self, key):
         """Un botón de la barra de título: deja a la vista esa vista."""
         self.sources_open = key == 'sources'
-        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'containers', 'editor', 'terminal', 'taller', 'git', 'home') else ''
+        self.panel_open = key if key in ('alerts', 'settings', 'tmux', 'pomodoro', 'containers', 'editor', 'terminal', 'taller', 'git', 'home', 'tasks') else ''
         if key != 'chat' and self.chat_open:
             self.close_chat()
         if key != 'projects' and self.projects_open:
@@ -493,6 +495,12 @@ class WindowView:
         if self.panel_open == 'git':
             frame.git.set_prs((self.sources.get('github') or {}).get('items') or [], self.source_state('github'),
                               dict(open=self.window_open_url, log=self.window_git_log))
+        frame.tasks.set_visible(self.panel_open == 'tasks')
+        if self.panel_open == 'tasks':
+            frame.tasks.set_tasks(self.pomo_watch.read_all(), dict(act=self.window_pomodoro,
+                                                                   agent=self.window_pomodoro_agent,
+                                                                   retry=self.pomo_watch.refresh),
+                                  self.pomo_watch.tasks_state())
         frame.home.set_visible(self.panel_open == 'home')
         if self.panel_open == 'home':
             self.window_home(frame)

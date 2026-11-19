@@ -12,7 +12,7 @@ from . import fonts, mascot, palette, responsive, themes
 
 # (clave, texto) en el orden de la barra de título.
 VIEWS = (('home', 'Inicio'), ('board', 'Tablero'), ('chat', 'Chat'), ('flows', 'Flujos'),
-         ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'), ('containers', 'Contenedores'),
+         ('projects', 'Proyectos'), ('tmux', 'Sesiones'), ('pomodoro', 'Pomodoro'), ('tasks', 'Tareas'), ('containers', 'Contenedores'),
          ('editor', 'Editor'), ('terminal', 'Terminal'), ('taller', 'Taller'),
          ('git', 'Git'), ('sources', 'Fuentes'), ('settings', 'Ajustes'))
 HIDDEN_VIEWS = ('flows', 'tmux')       # sin botón en la barra por ahora: el código sigue ahí
@@ -111,6 +111,7 @@ def build_css():
   padding: {SPACE[1]}px {SPACE[2]}px; border: 1px solid rgba({GLOW}, 0.06); }}
 .elyares-card:hover {{ background: {SURFACE[2]}; }}
 .elyares-card.raised {{ background: {SURFACE[2]}; }}
+button.elyares-card {{ box-shadow: none; background-image: none; font-weight: normal; }}     /* una tarjeta que se elige con teclado */
 .elyares-btn {{ background: {SURFACE[2]}; color: {INK}; border-radius: 6px;
   padding: {SPACE[1]}px {SPACE[3]}px; border: 1px solid rgba({GLOW}, 0.08); box-shadow: none; }}
 .elyares-btn:disabled {{ opacity: 0.4; }}
@@ -146,6 +147,24 @@ def use_theme():
         _provider.load_from_string(CSS)
     for hook in HOOKS:
         hook()
+
+
+def focused_key(widgets):
+    """La clave del control de `widgets` ({clave: widget}) que tiene el foco del teclado, o None.
+    Se pregunta antes de rehacer una lista: al quitar el widget, el foco se pierde."""
+    for key, widget in widgets.items():
+        root = widget.get_root()
+        focus = root.get_focus() if root is not None else None
+        if focus is not None and (focus == widget or focus.is_ancestor(widget)):
+            return key
+    return None
+
+
+def refocus(widgets, key):
+    """Devuelve el foco al control nuevo con la misma clave que tenía el viejo (si sigue ahí)."""
+    widget = widgets.get(key) if key is not None else None
+    if widget is not None:
+        widget.grab_focus()
 
 
 def load_css():

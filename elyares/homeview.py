@@ -29,7 +29,7 @@ FONT_HOME = 'Sans Medium 9'
 FONT_HOME_TITLE = 'Sans Semi-Bold 11'
 FONT_HOME_NOTE = 'JetBrainsMono Nerd Font 8'
 # (clave, texto, qué es): un panel del contexto («pane») o un atajo a otro panel de la isla («go»).
-HOME_MENU = (('pomodoro', 'Pomodoro', 'pane'), ('tasks', 'Tareas', 'pane'), ('habits', 'Hábitos', 'pane'),
+HOME_MENU = (('pomodoro', 'Pomodoro', 'pane'), ('tasks', 'Tareas', 'go'), ('habits', 'Hábitos', 'pane'),
              ('chat', 'Chat', 'go'), ('projects', 'Proyectos', 'go'), ('boxes', 'Contenedores', 'go'))
 HABIT_ROWS = 4
 POMO_H = 252                               # el Pomodoro ocupa el lugar de las tarjetas: la taza y las tareas
@@ -137,6 +137,7 @@ class HomeView:
     home_all = False
     home_pane = 'agent'        # qué ocupa el contexto: agent, pomodoro, tasks o habits
     home_back = False          # el desglose se abrió desde el panel ⌂: «volver» lo reabre
+    home_habit_note = ''       # por qué no se abrió «Editar lista»
 
     def home_main(self):
         """¿Inicio es lo que sale al abrir la isla a mano? Solo en la isla suelta."""
@@ -151,7 +152,7 @@ class HomeView:
         if self.home_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.prefs_open = self.boxes_open = False
+            self.projects_open = self.prefs_open = self.boxes_open = self.tasks_open = False
         self.ensure_tick()
 
     def home_cards(self):
@@ -198,7 +199,7 @@ class HomeView:
             self.home_picked = first['role']
         root = self.window_editor_root()
         title = (root.rstrip('/').rsplit('/', 1)[-1] if root else '') or 'Sin proyecto'
-        self.put(cr, title.upper(), FONT_HOME_TITLE, x0 + w / 2, 12, (.95, .96, 1), alpha, align=.5)
+        self.put(cr, title.upper(), FONT_HOME_TITLE, x0 + w / 2, 12, themes.tuple_of(themes.get()['ink']), alpha, align=.5)
         layout = self._layout(cr, 'Cerrar', 'Sans Semi-Bold 9')
         lw, lh = layout.get_pixel_size()
         cx = left + width - lw
@@ -320,6 +321,9 @@ class HomeView:
             self.window_pomodoro(key[1])
         elif what == 'habit':
             habits.toggle(key[1])
+        elif what == 'habit_edit':
+            ok, path = habits.edit()
+            self.home_habit_note = '' if ok else f'No hay editor que lo abra: {path}'
         elif what == 'all':
             self.home_all = not self.home_all
         elif what == 'decide':
@@ -333,7 +337,7 @@ class HomeView:
             self.home_open = False
             self.expanded = self.settings['pinned']         # Inicio era la vista de la isla abierta: sin ella, el panel que sigue
             {'chat': lambda: self.open_chat(typing=True), 'projects': self.toggle_projects,
-             'boxes': self.toggle_boxes}[key[1]]()
+             'boxes': self.toggle_boxes, 'tasks': self.toggle_tasks}[key[1]]()
         self.ensure_tick()
 
     def draw_home_buttons(self, cr, buttons, right, y, head, alpha):
@@ -413,11 +417,16 @@ class HomeView:
         """Los hábitos de hoy: una casilla y su racha; un clic la marca."""
         items = habits.items()
         if not items:
-            self.put(cr, 'Sin hábitos. Agrega uno:', FONT_HOME, x, y, soft, alpha)
-            self.put(cr, 'elyares-ctl habit add "Leer 20 min"', FONT_HOME_NOTE, x, y + 22, head, alpha)
+            why = habits.last_error() or self.home_habit_note
+            self.put(cr, why or 'Tu lista de hábitos está vacía.', FONT_HOME, x, y, soft, alpha, width=w)
+            self.put(cr, 'Un hábito por línea, con guion, en tu archivo:', FONT_HOME_NOTE, x, y + 22, soft, alpha)
+            self.put(cr, habits.list_path().replace(os.path.expanduser('~'), '~'), FONT_HOME_NOTE, x, y + 38, head, alpha,
+                     width=w)
+            self.draw_home_buttons(cr, [('Editar lista', ('habit_edit',))], x + w, y + 66, head, alpha)
             return
         done = sum(1 for h in items if h['done_today'])
         self.put(cr, f'HÁBITOS DE HOY · {done}/{len(items)}', FONT_HOME_NOTE, x, y, soft, alpha)
+        self.draw_home_buttons(cr, [('Editar lista', ('habit_edit',))], x + w, y - 3, head, alpha)
         cols = 2
         cw = w / cols
         for i, h in enumerate(items[:HABIT_ROWS * cols]):
@@ -427,11 +436,12 @@ class HomeView:
                 mascot.box(cr, hx - 4, hy - 2, cw - 4, 22, 6)
                 cr.set_source_rgba(*themes.glow(), .08 * alpha)
                 cr.fill()
-            self.put(cr, '☑' if h['done_today'] else '☐', FONT_HOME, hx, hy, mascot.rgba('green' if h['done_today'] else 'metal')[:3], alpha)
+            green = themes.tuple_of(themes.signal()[0])          # aviso legible en claro y en oscuro
+            self.put(cr, '☑' if h['done_today'] else '☐', FONT_HOME, hx, hy, green if h['done_today'] else soft, alpha)
             self.put(cr, h['name'], FONT_HOME, hx + 20, hy, head if not h['done_today'] else soft, alpha, width=cw - 80)
             if h['streak']:
                 self.put(cr, f'🔥{h["streak"]}', FONT_HOME_NOTE, hx + cw - 8, hy + 2, soft, alpha, align=1)
             self.hits.append(('home', ('habit', h['name']), hx - 4, hy - 2, cw - 4, 22))
         if len(items) > HABIT_ROWS * cols:
-            self.put(cr, f'+{len(items) - HABIT_ROWS * cols} más: elyares-ctl habit list', FONT_HOME_NOTE, x,
+            self.put(cr, f'+{len(items) - HABIT_ROWS * cols} más en tu lista', FONT_HOME_NOTE, x,
                      y + 20 + HABIT_ROWS * 22, soft, alpha * .9, width=w)

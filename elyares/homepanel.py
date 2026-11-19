@@ -9,11 +9,11 @@ propio de datos: lo llena la ventana con `set_data`; aquí solo viven lo elegido
 
 from gi.repository import GLib, Gtk, Pango
 
-from . import habits
+from . import habits, windowframe
 from .windowframe import SPACE, load_css
 
-# (clave, texto, qué es): un panel del contexto («pane») o una vista de la ventana («view»). Las tareas viven en la vista Pomodoro.
-MENU = (('pomodoro', 'Pomodoro', 'view'), ('pomodoro', 'Tareas', 'view'), ('habits', 'Hábitos', 'pane'),
+# (clave, texto, qué es): un panel del contexto («pane») o una vista de la ventana («view»). Las tareas tienen su vista.
+MENU = (('pomodoro', 'Pomodoro', 'view'), ('tasks', 'Tareas', 'view'), ('habits', 'Hábitos', 'pane'),
         ('chat', 'Chat', 'view'), ('projects', 'Proyectos', 'view'), ('containers', 'Contenedores', 'view'))
 SHOWN = 5                       # tarjetas a la vista antes de «+ n más»
 COLS, COLS_ALL = 3, 4
@@ -41,7 +41,23 @@ class HomePanel(Gtk.Box):
         self.show_all = False
         self.pane = 'agent'         # qué ocupa el contexto: agent o habits
         self.signature = None
+        self.context_sig = None     # el contexto se rehace solo si cambia lo suyo: no borra lo que escribes
         self.faces = []
+        # El foco vuelve al control con la misma clave al rehacer (`focusables`, abajo).
+        # El campo «Nuevo hábito» vive siempre: rehacer las casillas no borra lo escrito ni le quita el foco.
+        self.habit_row = Gtk.Box(spacing=SPACE[1])
+        self.habit_entry = Gtk.Entry(placeholder_text='Nuevo hábito (Enter para agregar)', max_length=40)
+        self.habit_entry.set_hexpand(True)
+        self.habit_entry.update_property([Gtk.AccessibleProperty.LABEL], ['Nuevo hábito'])
+        self.habit_entry.connect('activate', self._add_habit)
+        edit = Gtk.Button(label='Editar lista')
+        edit.add_css_class('elyares-btn')
+        edit.connect('clicked', self._edit_list)
+        self.habit_row.append(self.habit_entry)
+        self.habit_row.append(edit)
+        self.habit_note = Gtk.Label(xalign=0, wrap=True, selectable=True)
+        self.habit_note.add_css_class('elyares-muted')
+        self.focusables = {('keep', 'entry'): self.habit_entry}
         self.title = Gtk.Label(xalign=.5)
         self.title.add_css_class('elyares-title')
         self.append(self.title)
@@ -75,25 +91,41 @@ class HomePanel(Gtk.Box):
             first = (next((c for c in cards if c['ask']), None) or next((c for c in cards if c['busy']), None)
                      or (cards[0] if cards else None))
             self.picked = first['role'] if first else ''
-        sig = (project, self.picked, self.show_all, self.pane, repr(habits.items()),
-               tuple((c['role'], c['busy'], c['ask'], c['state'], tuple(c['steps'])) for c in cards))
-        if sig == self.signature:
-            return
-        self.signature = sig
-        self.title.set_label(project.upper() if project else 'SIN PROYECTO')
-        self._menu(handlers)
-        self._grid(cards, handlers)
-        self._context(next((c for c in cards if c['role'] == self.picked), None), handlers)
+        picked = next((c for c in cards if c['role'] == self.picked), None)
+        # Dos firmas: la rejilla cambia con cada paso de un agente; el contexto, solo con lo que muestra.
+        # Con Hábitos abierto, lo que hagan los agentes no rehace el campo en el que escribes.
+        sig = (project, self.picked, self.show_all,
+               tuple((c['role'], c['name'], c['color'], c['busy'], c['ask'], c['state'], tuple(c['steps'])) for c in cards))
+        held = windowframe.focused_key(self.focusables)
+        if sig != self.signature:
+            self.signature = sig
+            self.title.set_label(project.upper() if project else 'SIN PROYECTO')
+            self._menu(handlers)
+            self._grid(cards, handlers)
+        if self.pane == 'habits':
+            context = ('habits', repr(habits.items()), habits.last_error())
+        else:
+            context = ('agent', picked and (picked['role'], picked['name'], picked['color'], picked['state'],
+                                            tuple(picked['steps'][-4:]), picked['busy'], picked['ask']))
+        if context != self.context_sig:
+            self.context_sig = context
+            self._context(picked, handlers)
+        windowframe.refocus(self.focusables, held)
+
+    def _forget(self, prefix):
+        self.focusables = {k: w for k, w in self.focusables.items() if k[0] != prefix}
 
     def _menu(self, handlers):
         while (child := self.menu.get_first_child()) is not None:
             self.menu.remove(child)
+        self._forget('menu')
         for key, text, kind in MENU:
             btn = Gtk.Button(label=text)
             btn.add_css_class('elyares-pill')
             btn.set_halign(Gtk.Align.FILL)
             btn.get_child().set_xalign(0)
             btn.connect('clicked', lambda _b, k=key, kd=kind: self._menu_click(k, kd, handlers))
+            self.focusables[('menu', key)] = btn
             self.menu.append(btn)
 
     def _menu_click(self, key, kind, handlers):
@@ -101,12 +133,13 @@ class HomePanel(Gtk.Box):
             handlers['view'](key)
             return
         self.pane = 'agent' if self.pane == key else key
-        self.signature = None
+        self.context_sig = None
         self.set_data_again()
 
     def _grid(self, cards, handlers):
         while (child := self.grid.get_first_child()) is not None:
             self.grid.remove(child)
+        self._forget('card')
         self.faces = []
         head, ranked = ordered(cards, self.picked)
         shown = ranked if self.show_all else head
@@ -122,6 +155,7 @@ class HomePanel(Gtk.Box):
         btn = Gtk.Button(label='Ver menos' if self.show_all else f'+ {more} más')
         btn.add_css_class('elyares-pill')
         btn.connect('clicked', self._toggle_all)
+        self.focusables[('card', '+more')] = btn
         return btn
 
     def _toggle_all(self, _btn):
@@ -137,11 +171,14 @@ class HomePanel(Gtk.Box):
     last = None
 
     def _card(self, card, handlers):
-        box = Gtk.Box(spacing=SPACE[2])
-        box.add_css_class('elyares-card')
-        box.set_size_request(-1, 84)
+        """Una tarjeta es un botón: con el teclado se llega a ella y Enter o Espacio la elige."""
+        tile = Gtk.Button()
+        tile.add_css_class('elyares-card')
+        tile.set_size_request(-1, 84)
         if card['role'] == self.picked:
-            box.add_css_class('raised')
+            tile.add_css_class('raised')
+        box = Gtk.Box(spacing=SPACE[2])
+        tile.set_child(box)
         face = Gtk.DrawingArea()
         face.set_content_width(FACE)
         face.set_content_height(FACE)
@@ -159,40 +196,67 @@ class HomePanel(Gtk.Box):
         text.append(name)
         text.append(state)
         box.append(text)
-        box.update_property([Gtk.AccessibleProperty.LABEL], [f'{card["name"]}, {card["state"]}'])
-        click = Gtk.GestureClick()
-        click.connect('released', lambda *_a, r=card['role']: self._pick(r))
-        box.add_controller(click)
-        return box
+        tile.update_property([Gtk.AccessibleProperty.LABEL], [f'{card["name"]}, {card["state"]}'])
+        tile.connect('clicked', lambda _b, r=card['role']: self._pick(r))
+        self.focusables[('card', card['role'])] = tile
+        return tile
 
     def _pick(self, role):
         self.picked, self.pane = role, 'agent'
-        self.signature = None
+        self.signature = self.context_sig = None
         self.set_data_again()
 
     def _habits(self):
         items = habits.items()
-        if not items:
-            self.context.append(Gtk.Label(label='Sin hábitos. Agrega uno con: elyares-ctl habit add "Leer 20 min"',
-                                          xalign=0, wrap=True))
-            return
-        head = Gtk.Label(label=f'HÁBITOS DE HOY · {sum(1 for h in items if h["done_today"])}/{len(items)}', xalign=0)
+        done = sum(1 for h in items if h['done_today'])
+        head = Gtk.Label(label=f'HÁBITOS DE HOY · {done}/{len(items)}' if items else 'HÁBITOS', xalign=0)
         head.add_css_class('elyares-section')
         self.context.append(head)
+        if not items:
+            note = Gtk.Label(label=habits.last_error() or 'Tu lista está vacía. Escribe un hábito aquí abajo, o edita '
+                                   f'tu archivo (un hábito por línea, con guion): {habits.list_path()}', xalign=0, wrap=True)
+            note.add_css_class('elyares-muted')
+            self.context.append(note)
         for h in items:
             check = Gtk.CheckButton(label=h['name'] + (f'   🔥{h["streak"]}' if h['streak'] else ''))
             check.set_active(h['done_today'])
             check.connect('toggled', lambda _b, n=h['name']: self._toggle_habit(n))
+            self.focusables[('habit', h['name'].casefold())] = check
             self.context.append(check)
+        self.context.append(self.habit_row)              # los mismos de siempre: lo escrito se queda
+        self.context.append(self.habit_note)
+
+    def _say(self, text):
+        """Pone el aviso bajo el campo y, si GTK sabe, se lo dice al lector de pantalla."""
+        self.habit_note.set_label(text)
+        if text and hasattr(self.habit_note, 'announce'):
+            self.habit_note.announce(text, Gtk.AccessibleAnnouncementPriority.MEDIUM)
+
+    def _add_habit(self, entry):
+        ok, said = habits.add(entry.get_text())
+        if ok:
+            entry.set_text('')
+            self._say('')
+            self.context_sig = None
+            self.set_data_again()
+            entry.grab_focus()                               # para agregar otro sin volver a tabular
+        else:
+            self._say(said)
+
+    def _edit_list(self, _btn):
+        ok, path = habits.edit()
+        self._say('' if ok else f'No hay editor que lo abra. Ábrelo a mano: {path}')
 
     def _toggle_habit(self, name):
         habits.toggle(name)
-        self.signature = None
+        self.context_sig = None
         self.set_data_again()
 
     def _context(self, card, handlers):
         while (child := self.context.get_first_child()) is not None:
             self.context.remove(child)
+        self._forget('habit')
+        self._forget('ctx')
         if self.pane == 'habits':
             self._habits()
             return
@@ -210,15 +274,19 @@ class HomePanel(Gtk.Box):
             self.context.append(step)
         if card['ask']:
             row = Gtk.Box(spacing=SPACE[1])
-            for text, allow, tone in (('Permitir', True, 'primary'), ('Denegar', False, 'danger')):
+            # «Denegar» con velo neutro, igual que en la isla: no es la acción peligrosa
+            for text, allow, tone in (('Permitir', True, 'primary'), ('Denegar', False, '')):
                 btn = Gtk.Button(label=text)
                 btn.add_css_class('elyares-btn')
-                btn.add_css_class(tone)
+                if tone:
+                    btn.add_css_class(tone)
                 btn.connect('clicked', lambda _b, a=allow: handlers['decide'](a))
+                self.focusables[('ctx', text)] = btn
                 row.append(btn)
             self.context.append(row)
         chat = Gtk.Button(label=f'Abrir el chat de {card["name"]}')
         chat.add_css_class('elyares-btn')
         chat.set_halign(Gtk.Align.START)
         chat.connect('clicked', lambda _b, r=card['role']: handlers['chat'](r))
+        self.focusables[('ctx', 'chat')] = chat
         self.context.append(chat)
