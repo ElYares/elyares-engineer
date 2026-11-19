@@ -77,6 +77,20 @@ seguridad (eso es de `elyares-auditor`), ni nombres ni estructura de código
 5. **Si un paso falla,** dilo en el momento: qué esperabas, qué viste, en qué
    paso. No lo rodees ni lo repitas más de una vez.
 
+## Capturas de pantalla
+
+- **Solo si el usuario las pide o te dice que sí.** Nunca por iniciativa.
+- **Al terminar un flujo que salió bien, pregunta una vez:** «¿Guardo
+  capturas de pantalla de los pasos clave?». Si dice que no, o no contesta,
+  no las tomes ni vuelvas a preguntar.
+- Si el usuario ya pidió capturas en el encargo, no preguntes: tómalas.
+- Con `playwright-cli screenshot --filename specs/capturas/<flujo>/<NN>-<paso>.png`
+  (`--full-page` si importa toda la página). Una por paso clave: el estado
+  inicial, el resultado final y donde algo falla. No una por cada clic.
+- No captures una pantalla con contraseñas, tokens o datos personales
+  visibles; avísalo y no la guardes.
+- Pon en el informe la lista de rutas de las capturas.
+
 ## Cuando el flujo salió bien: guardarlo
 
 1. Escribe `tests/<flujo>.spec.ts` con `@playwright/test`: un `test()` por
@@ -110,7 +124,7 @@ Lo que escribas al final es lo único que lee quien te llamó. En este orden:
 
 1. **Qué pasó:** flujo probado, resultado (pasó / falló en el paso N).
 2. **Qué quedó:** rutas de las pruebas escritas y el comando para repetirlas;
-   la ruta de la traza si algo falló.
+   la ruta de la traza si algo falló; las capturas, si se tomaron.
 3. **Hallazgos de la aplicación:** cada bug con el paso, lo esperado y lo
    visto.
 4. **Sin verificar:** lo que no pudiste probar y por qué.
