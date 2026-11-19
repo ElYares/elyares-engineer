@@ -19,7 +19,7 @@ try:
 except (ImportError, ValueError):       # sin gi o sin gtk4-layer-shell
     app = None
 
-from elyares import state, windowview
+from elyares import pomodoro, pomodoroview, pomoisland, state, windowview
 from elyares.state import Model
 
 T = 1000.0
@@ -3480,6 +3480,99 @@ class Ventana(Dibujo):
         isl.windowed, isl.sv_open = True, False
         isl.toggle_servers()                                 # en la ventana no hay
         self.assertFalse(isl.sv_open)
+
+    def _pomodoro_listo(self, status, tasks, root='/r/uno'):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open, isl.more_open = False, False, False, False, False
+        isl.sp_open = isl.sv_open = False
+        isl.pomo_watch = mock.Mock(status=status, read=mock.Mock(return_value=(pomodoro.describe(status), tasks)))
+        isl.pm_open, isl.pm_root = True, root
+        return isl
+
+    def test_el_panel_de_pomodoro_solo_ofrece_las_tareas_del_proyecto_abierto(self):
+        tasks = [dict(id='1', title='a', project='p / uno', repo='/r/uno'),
+                 dict(id='2', title='b', project='p / dos', repo='/r/dos')]
+        isl = self._pomodoro_listo(dict(phase='focus', remaining_secs=600, progress=.4, task={'title': 'a'}), tasks)
+        self.assertEqual(isl.target(), 'pomodoro')
+        self.draw()
+        self.assertEqual(self.hit('pomodoro'), ['close', 'island', 'pause', 'void', 'done', 'start:1'])
+
+    def test_un_clic_arranca_una_tarea_que_se_ve_y_no_una_que_no(self):
+        tasks = [dict(id='1', title='a', project='p / uno', repo='/r/uno'),
+                 dict(id='2', title='b', project='p / dos', repo='/r/dos')]
+        isl = self._pomodoro_listo(dict(phase='idle', progress=0), tasks)
+        isl.window_pomodoro = mock.Mock()
+        isl.on_hit('pomodoro', 'start:2')
+        isl.window_pomodoro.assert_not_called()
+        isl.on_hit('pomodoro', 'start:1')
+        isl.window_pomodoro.assert_called_once_with('start', '1')
+        isl.on_hit('pomodoro', 'pause')
+        isl.window_pomodoro.assert_called_with('pause')
+
+    def test_sin_reloj_el_panel_lo_dice_y_solo_deja_cerrar(self):
+        isl = self._pomodoro_listo(None, [])
+        self.draw()
+        self.assertEqual(self.hit('pomodoro'), ['close', 'island'])
+
+    def test_pomodoro_se_abre_desde_mas_y_lo_cierra_otro_panel(self):
+        isl = self._pomodoro_listo(dict(phase='idle', progress=0), [])
+        isl.pm_open = False
+        isl.pomodoro_root = mock.Mock(return_value='/r/uno')
+        isl.toggle_more()
+        isl.on_hit('more', 'pomodoro')
+        self.assertTrue(isl.pm_open)
+        self.assertEqual(isl.pm_root, '/r/uno')
+        isl.toggle_prefs()
+        self.assertFalse(isl.pm_open)
+        isl.windowed, isl.pm_open = True, False
+        isl.toggle_pomodoro()                                # en la ventana no hay
+        self.assertFalse(isl.pm_open)
+
+    def test_la_taza_pide_cuadros_solo_mientras_humea(self):
+        isl = self._pomodoro_listo(dict(phase='focus', progress=.5), [])
+        isl.motion_reduced = mock.Mock(return_value=False)
+        self.assertTrue(isl.pomodoro_busy())
+        isl.motion_reduced.return_value = True
+        self.assertFalse(isl.pomodoro_busy())
+        isl.motion_reduced.return_value = False
+        isl.pomo_watch.status = dict(phase='idle', progress=0)
+        self.assertFalse(isl.pomodoro_busy())
+
+    def test_la_isla_del_pomodoro_se_abre_se_oculta_y_se_acuerda(self):
+        isl = self._pomodoro_listo(dict(phase='idle', progress=0), [])
+        isl.pm_open = False
+        isl.pi_open = isl.pi_collapsed = False
+        isl.pi_show = isl.pi_redraw = mock.Mock()            # sin ventana de verdad
+        with mock.patch('elyares.settings.save') as save:
+            isl.toggle_pomoisland()
+            self.assertTrue(isl.pi_open)
+            self.assertTrue(isl.settings['pomo_island'])
+            isl.on_pomodoro_hit('hide')
+            self.assertTrue(isl.pi_collapsed)
+            self.assertTrue(isl.settings['pomo_collapsed'])
+            isl.toggle_pomoisland()                          # quitarla
+            isl.toggle_pomoisland()                          # y volver a abrirla: sale desplegada
+            self.assertFalse(isl.pi_collapsed)
+            self.assertTrue(save.called)
+
+    def test_el_enlace_del_panel_abre_la_isla_aparte(self):
+        isl = self._pomodoro_listo(dict(phase='idle', progress=0), [])
+        isl.pi_open = False
+        isl.toggle_pomoisland = mock.Mock()
+        isl.on_hit('pomodoro', 'island')
+        isl.toggle_pomoisland.assert_called_once_with()
+
+    def test_la_isla_del_pomodoro_mide_segun_este_a_la_vista_en_pastilla_o_abierta(self):
+        isl = self._pomodoro_listo(dict(phase='idle', progress=0), [])
+        isl.pi_open, isl.pi_collapsed = False, False
+        self.assertEqual(isl.pi_goal()[1], 0)
+        isl.pi_open, isl.pi_collapsed = True, True
+        self.assertEqual(isl.pi_goal(), (pomoisland.PI_PILL_W, pomoisland.PI_PILL_H))
+        isl.pi_collapsed = False
+        self.assertEqual(isl.pi_goal()[0], pomodoroview.PM_W)
+        isl.windowed = True                                  # en la ventana no hay
+        self.assertEqual(isl.pi_goal()[1], 0)
 
     def _boxes_listos(self, loaded=True):
         isl = self.isl

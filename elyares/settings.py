@@ -21,6 +21,7 @@ import os
 # `tech_style`: estilo técnico: esquinas rectas, bordes de 1 px y toda la letra monoespaciada.
 # `tired_scale`: cuánto agranda la vista cansada, en %: 125, 150 o 200.
 # `adhd`: las respuestas del chat siguen `rules/estilo/respuesta-adhd.md`.
+# `pomo_island`: la isla del Pomodoro, al lado de la de siempre, está a la vista; `pomo_collapsed`: está en su pastilla.
 # `files_collapsed`: la lista de archivos del Editor y del Taller, plegada (nvim ocupa todo el ancho).
 # `glass_alpha`: opacidad del fondo de la isla en modo vidrio, de 50 a 100 %.
 # `term_font`: tamaño del texto de la Terminal, el Editor y el Taller (Ctrl+− / Ctrl++ / Ctrl+0).
@@ -28,7 +29,7 @@ import os
 DEFAULTS = {'compact': True, 'glass': False, 'glass_fx': True, 'glass_alpha': 50, 'pinned': False, 'pinned_monitor': '', 'position': 50, 'position_y': 0, 'window': False, 'window_size': [], 'font': 'Sans', 'theme': 'omarchy', 'chat_tech': False, 'tired_eyes': False, 'tech_style': False, 'reduce_motion': False, 'tired_scale': 125, 'adhd': True,
             'chat_model': '',
             'chat_effort': '', 'devherd': True,
-            'flows_collapsed': False, 'files_collapsed': False, 'term_font': 11,
+            'flows_collapsed': False, 'pomo_island': False, 'pomo_collapsed': False, 'files_collapsed': False, 'term_font': 11,
             'coffe': True, 'github': True, 'terminal': True, 'usage': True, 'github_accounts': []}
 
 
