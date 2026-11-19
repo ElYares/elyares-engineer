@@ -1153,10 +1153,12 @@ class SettingsPanel(Gtk.ScrolledWindow):
         self.position = None
         self.set_visible(False)
 
-    def set_rows(self, rows, position, handlers, family=fonts.SYSTEM, theme_key=themes.DEFAULT, tired_scale=125):
+    def set_rows(self, rows, position, handlers, family=fonts.SYSTEM, theme_key=themes.DEFAULT, tired_scale=125,
+                 glass_alpha=85):
         """`rows`: [(clave, texto, activo, nota)]; `position`: 0..100 o None.
-        `handlers`: toggle(clave), move(valor), theme(), font(familia), pick_theme(clave), tired_scale(%)."""
-        sig = repr((rows, position, family, theme_key, tired_scale))
+        `handlers`: toggle(clave), move(valor), theme(), font(familia), pick_theme(clave), tired_scale(%),
+        glass_alpha(%)."""
+        sig = repr((rows, position, family, theme_key, tired_scale, glass_alpha))
         if sig == self.signature:
             return
         self.signature = sig
@@ -1187,6 +1189,13 @@ class SettingsPanel(Gtk.ScrolledWindow):
             scale.update_property([Gtk.AccessibleProperty.LABEL], ['Posición de la isla, de 0 a 100'])
             scale.connect('value-changed', lambda sc: sc.get_value() != position and handlers['move'](sc.get_value()))
             self.page.append(scale)
+        self.page.append(Gtk.Label(label='Opacidad del vidrio de la isla', xalign=0))
+        opacity = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 50, 100, 5)
+        opacity.set_value(glass_alpha)
+        opacity.set_draw_value(True)
+        opacity.update_property([Gtk.AccessibleProperty.LABEL], ['Opacidad del vidrio de la isla, de 50 a 100 por ciento'])
+        opacity.connect('value-changed', lambda sc: sc.get_value() != glass_alpha and handlers['glass_alpha'](sc.get_value()))
+        self.page.append(opacity)
         self.page.append(Gtk.Label(label='Tamaño de la vista cansada', xalign=0))
         sizes = Gtk.DropDown.new_from_strings([f'{pct} %' for pct in fonts.TIRED_SCALES])
         sizes.set_halign(Gtk.Align.START)
