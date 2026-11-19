@@ -322,8 +322,7 @@ class Consulta(IslandCase):
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
         keys = [key for key, *_ in self.isl.pills]
         self.assertEqual(keys, [key for key, _ in sources.SOURCES]
-                         + [app.prefsview.PREFS_PILL, app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
-                            commands.HELP])
+                         + [app.moreview.MORE_PILL, app.CHAT_PILL, commands.HELP])
         for (_, x, _, w, _), (_, nx, *_) in zip(self.isl.pills, self.isl.pills[1:]):
             self.assertLessEqual(x + w, nx)
         self.assertLessEqual(self.isl.pills[-1][1] + self.isl.pills[-1][3], 100 + width - 18)
@@ -517,7 +516,7 @@ class Tablero(Dibujo):
         self.assertEqual(self.isl.target(), 'board')
         self.isl.hover, self.isl.expanded = False, True
         self.assertEqual(self.isl.target(), 'board')
-        self.assertEqual(self.isl.goal()[0], app.BOARD_W)
+        self.assertEqual(self.isl.goal()[0], max(app.BOARD_W, self.isl.pills_need()))
 
     def test_cambiar_de_tema_repinta_la_isla_y_se_guarda(self):
         self.isl.expanded = True
@@ -2169,9 +2168,12 @@ class Proyectos(Dibujo):
     def test_la_pastilla_mas_abre_el_panel(self):
         self.isl.expanded = True
         self.draw()
-        key, x, y, w, h = next(p for p in self.isl.pills if p[0] == app.projectview.PROJECTS_PILL)
+        key, x, y, w, h = next(p for p in self.isl.pills if p[0] == app.moreview.MORE_PILL)
         self.isl.on_click(None, 1, x + w / 2, y + h / 2)
+        self.assertTrue(self.isl.more_open)
+        self.isl.on_hit('more', 'projects')
         self.assertTrue(self.isl.projects_open)
+        self.assertFalse(self.isl.more_open)
 
     def test_la_lista_se_refresca_sola_sin_frenar_la_isla(self):
         self.isl.refresh = mock.Mock()
@@ -2885,8 +2887,9 @@ class FlujosDibujo(FlujosBase):
         isl.tip_pop, isl.tip_at, isl.tip_cx = 0.0, 0.0, None
         isl.sources = {key: {'ok': True, 'note': '', 'tip': [], 'since': 0, 'polled': 0} for key in sources.LABELS}
         isl.draw_pills(self.cr, 100, 560, 50, 1.0)
-        _, x, y, w, h = next(pill for pill in isl.pills if pill[0] == app.workflowview.WF_PILL)
+        _, x, y, w, h = next(pill for pill in isl.pills if pill[0] == app.moreview.MORE_PILL)
         isl.on_click(None, 1, x + w / 2, y + h / 2)
+        isl.on_hit('more', 'flows')
         self.assertTrue(isl.wf_open)
         self.assertEqual(isl.target(), before)                          # la isla de siempre sigue igual
         self.assertEqual(isl.flows_goal(), (app.workflowview.WF_W, isl.workflows_goal()[1]))
@@ -3322,6 +3325,43 @@ class Ventana(Dibujo):
         isl.windowed = True
         isl.toggle_prefs()                                   # en la ventana tiene su vista Ajustes
         self.assertFalse(isl.prefs_open)
+
+    def test_la_isla_se_ensancha_lo_que_piden_las_pastillas_del_pie(self):
+        isl = self.isl
+        isl.windowed, isl.expanded, isl.hover = False, True, True
+        isl.chat_open = isl.projects_open = isl.prefs_open = False
+        need = isl.pills_need()
+        self.assertGreater(need, 0)
+        self.assertGreaterEqual(isl.goal()[0], need)
+        isl.settings['tech_style'] = True                   # la letra monoespaciada es más ancha
+        isl.set_techno(True)
+        try:
+            self.assertGreater(isl.pills_need(), need)
+            self.assertGreaterEqual(isl.goal()[0], isl.pills_need())
+        finally:
+            isl.set_techno(False)
+
+    def test_el_panel_mas_lleva_a_flujos_proyectos_y_ajustes_y_se_dibuja_con_un_clic_por_renglon(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open = False, False, False, False
+        isl.toggle_more()
+        self.assertEqual(isl.target(), 'more')
+        self.draw()
+        keys = self.hit('more')
+        for key, *_ in __import__('elyares').moreview.MORE_ROWS:
+            self.assertIn(key, keys)
+        self.assertIn('close', keys)
+        isl.on_hit('more', 'prefs')
+        self.assertFalse(isl.more_open)
+        self.assertEqual(isl.target(), 'prefs')
+        isl.prefs_open = False
+        isl.toggle_more()
+        isl.on_hit('more', 'close')
+        self.assertFalse(isl.more_open)
+        isl.windowed = True
+        isl.toggle_more()                                    # en la ventana no hay: tiene sus vistas
+        self.assertFalse(isl.more_open)
 
     def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
         isl = self.isl

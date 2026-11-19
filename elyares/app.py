@@ -84,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
+               moreview, preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
@@ -185,7 +185,7 @@ BOARD_MAX = (TABS_H + max(BOARD_H + PREVIEW_MAX, FOCUS_H + chatview.MINI_H) + BO
              + ALERT_ROWS * ROW_H + LIST_PAD)
 WIN_H = max(HEAD_MAX, BOARD_MAX) + PILLS_H + 8 + TIP_ROOM
 SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
-         'open': (630, OPEN_H), 'ask': (560, 108)}
+         'open': (560, OPEN_H), 'ask': (560, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
@@ -259,7 +259,9 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
+    _pills_need = (None, 0)             # (con qué letra se midió, ancho): lo que pide el pie de pastillas
+
     def __init__(self, app):
         self.gtk_app = app              # la ventana de los flujos se crea con ella, la primera vez que se abre
         self.model = Model()
@@ -782,6 +784,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             self.toggle_projects()
         elif order == 'prefs':
             self.toggle_prefs()
+        elif order == 'more':
+            self.toggle_more()
         elif order == 'workflows':
             self.toggle_workflows()
         elif order == 'move':
@@ -1183,6 +1187,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             return 'chat'
         if self.projects_open:
             return 'projects'
+        if self.more_open and not self.windowed:
+            return 'more'
         if self.prefs_open and not self.windowed:
             return 'prefs'
         mode = self.view.mode
@@ -1274,7 +1280,28 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
         by_hand = self.expanded or self.hover
         return PILLS_H if by_hand and mode in ('open', 'list', 'board') else 0
 
+    def pills_need(self):
+        """El ancho que piden juntas las pastillas del pie (fuentes y atajos, con los márgenes de
+        la isla) con la letra de ahora: la monoespaciada del estilo técnico las ensancha."""
+        key = (PILL_PAD, PILL_GAP, fonts.tired, self.settings.get('font'), self.settings.get('tech_style'))
+        if self._pills_need[0] != key:
+            cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1))
+            width = lambda text: self._layout(cr, text, FONT_PILL).get_pixel_size()[0]
+            sources_w = sum(width(label) + PILL_PAD + PILL_GAP for _, label in sources.SOURCES)
+            # «?», Chat y Más: el relleno de cada una es el de draw_pills.
+            tools_w = sum(width(text) + pad + PILL_GAP for text, pad in (('?', 16), ('Chat', 20), ('Más', 16)))
+            self._pills_need = (key, int(sources_w + tools_w + 36))
+        return self._pills_need[1]
+
     def goal(self):
+        """Tamaño al que va la isla: el de `base_goal`, y nunca más angosta de lo que piden las
+        pastillas del pie (si no, se empalman)."""
+        w, h = self.base_goal()
+        if self.pills_h(self.target()):
+            w = max(w, self.pills_need())
+        return w, h
+
+    def base_goal(self):
         """Tamaño al que va la isla: el del modo, más el detalle entero, las
         filas y las fuentes."""
         if self.windowed and self.wf_open:
@@ -1286,6 +1313,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             return chatview.CHAT_W, chatview.CHAT_H
         if mode == 'projects':
             return self.projects_goal()
+        if mode == 'more':
+            return self.more_goal()
         if mode == 'prefs':
             return self.prefs_goal()
         prev = self.preview_h(mode)
@@ -1732,8 +1761,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
                 cr.stroke()
             self.chat_place(h)
             return
-        if mode == 'prefs':
-            self.draw_prefs(cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
+        if mode in ('more', 'prefs'):
+            (self.draw_more if mode == 'more' else self.draw_prefs)(cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
                 cr.append_path(edge)
@@ -2565,45 +2594,19 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             cr.move_to(cx + (cpw - cw) / 2, y + (PILL_H - ch) / 2)
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, chat)
-            # Y, antes, la de los proyectos, para empezar en cualquiera.
-            plus = self._layout(cr, '+', FONT_PILL)
-            qw, qh = plus.get_pixel_size()
-            qpw = qw + 16
-            qx = cx - PILL_GAP - qpw
-            over_plus = qx <= px <= qx + qpw and y <= py <= y + PILL_H
-            mascot.box(cr, qx, y, qpw, PILL_H, PILL_H / 2)
-            cr.set_source_rgba(*themes.glow(), (.13 if over_plus else .07) * alpha)
+            # Y, antes, la de «Más»: Flujos, Proyectos y Ajustes, que no caben en el pie.
+            more = self._layout(cr, 'Más', FONT_PILL)
+            mw, mh = more.get_pixel_size()
+            mpw = mw + 16
+            mx = cx - PILL_GAP - mpw
+            over_more = mx <= px <= mx + mpw and y <= py <= y + PILL_H
+            mascot.box(cr, mx, y, mpw, PILL_H, PILL_H / 2)
+            cr.set_source_rgba(*themes.glow(), (.13 if over_more else .07) * alpha)
             cr.fill()
-            cr.move_to(qx + (qpw - qw) / 2, y + (PILL_H - qh) / 2)
+            cr.move_to(mx + (mpw - mw) / 2, y + (PILL_H - mh) / 2)
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-            PangoCairo.show_layout(cr, plus)
-            self.pills.append((projectview.PROJECTS_PILL, qx, y, qpw, PILL_H))
-            # Y la de los workflows: sus cadenas de agentes.
-            flows = self._layout(cr, 'Flujos', FONT_PILL)
-            fw, fh = flows.get_pixel_size()
-            fpw = fw + 16
-            fx = qx - PILL_GAP - fpw
-            over_flows = fx <= px <= fx + fpw and y <= py <= y + PILL_H
-            mascot.box(cr, fx, y, fpw, PILL_H, PILL_H / 2)
-            cr.set_source_rgba(*themes.glow(), (.13 if over_flows else .07) * alpha)
-            cr.fill()
-            cr.move_to(fx + (fpw - fw) / 2, y + (PILL_H - fh) / 2)
-            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-            PangoCairo.show_layout(cr, flows)
-            self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
-            # Y la de los ajustes de la isla.
-            prefs = self._layout(cr, 'Ajustes', FONT_PILL)
-            aw, ah = prefs.get_pixel_size()
-            apw = aw + 16
-            ax = fx - PILL_GAP - apw
-            over_prefs = ax <= px <= ax + apw and y <= py <= y + PILL_H
-            mascot.box(cr, ax, y, apw, PILL_H, PILL_H / 2)
-            cr.set_source_rgba(*themes.glow(), (.13 if over_prefs else .07) * alpha)
-            cr.fill()
-            cr.move_to(ax + (apw - aw) / 2, y + (PILL_H - ah) / 2)
-            cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
-            PangoCairo.show_layout(cr, prefs)
-            self.pills.insert(len(self.pills) - 2, (prefsview.PREFS_PILL, ax, y, apw, PILL_H))
+            PangoCairo.show_layout(cr, more)
+            self.pills.append((moreview.MORE_PILL, mx, y, mpw, PILL_H))
             self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
@@ -3021,12 +3024,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
                     self.toggle_source(key)
                 elif key == CHAT_PILL:
                     self.open_chat(typing=True)
-                elif key == projectview.PROJECTS_PILL:
-                    self.toggle_projects()
-                elif key == prefsview.PREFS_PILL:
-                    self.toggle_prefs()
-                elif key == workflowview.WF_PILL:
-                    self.toggle_workflows()
+                elif key == moreview.MORE_PILL:
+                    self.toggle_more()
                 return
         for s, ry, rh in self.rows:
             if ry <= y < ry + rh:
@@ -3043,7 +3042,7 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'more') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3059,6 +3058,9 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, wo
             return
         if kind == 'prefs':
             self.on_prefs_hit(key)
+            return
+        if kind == 'more':
+            self.on_more_hit(key)
             return
         if kind == 'chat':
             self.on_chat_hit(key)
