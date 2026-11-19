@@ -44,7 +44,7 @@ class BoxesView:
         if self.boxes_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.prefs_open = self.home_open = False
+            self.projects_open = self.prefs_open = self.home_open = self.tasks_open = False
             self.box_unfolded, self.box_pending = set(), {}
             self.box_watch.refresh()
         self.ensure_tick()
@@ -68,7 +68,7 @@ class BoxesView:
         soft = mascot.rgba(self.ink('text', .62))[:3]
         head = mascot.rgba(self.ink('head'))[:3]
         data = self.box_watch.read()
-        self.put(cr, 'Contenedores', FONT_BOXES_TITLE, left, 14, (.95, .96, 1), alpha)
+        self.put(cr, 'Contenedores', FONT_BOXES_TITLE, left, 14, themes.tuple_of(themes.get()['ink']), alpha)
         if data:
             tot = data['totals']
             self.put(cr, f'{tot["up"]}/{tot["total"]} arriba · CPU {tot["cpu"]:.0f} % · {containers.fmt_bytes(tot["mem"])}',

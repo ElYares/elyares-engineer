@@ -84,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, boxview, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
-               homeview, preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
+               homeview, preview, prefsview, tasksview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
@@ -259,7 +259,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, boxview.BoxesView, homeview.HomeView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, boxview.BoxesView, homeview.HomeView, tasksview.TasksView, workflowview.WorkflowView, windowview.WindowView):
     def __init__(self, app):
         self.gtk_app = app              # la ventana de los flujos se crea con ella, la primera vez que se abre
         self.model = Model()
@@ -786,6 +786,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             self.toggle_boxes()
         elif order == 'home':
             self.toggle_home()
+        elif order == 'tasks':
+            self.toggle_tasks()
         elif order == 'workflows':
             self.toggle_workflows()
         elif order == 'move':
@@ -1193,6 +1195,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             return 'boxes'
         if self.home_open and not self.windowed:
             return 'home'
+        if self.tasks_open and not self.windowed:
+            return 'tasks'
         mode = self.view.mode
         if self.expanded or self.windowed:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
@@ -1300,6 +1304,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             return self.boxes_goal()
         if mode == 'home':
             return self.home_goal()
+        if mode == 'tasks':
+            return self.tasks_goal()
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
@@ -1744,8 +1750,8 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
                 cr.stroke()
             self.chat_place(h)
             return
-        if mode in ('prefs', 'boxes', 'home'):
-            {'prefs': self.draw_prefs, 'boxes': self.draw_boxes, 'home': self.draw_home}[mode](
+        if mode in ('prefs', 'boxes', 'home', 'tasks'):
+            {'prefs': self.draw_prefs, 'boxes': self.draw_boxes, 'home': self.draw_home, 'tasks': self.draw_tasks}[mode](
                 cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
@@ -3075,7 +3081,7 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'boxes', 'home') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'boxes', 'home', 'tasks') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3097,6 +3103,9 @@ class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, bo
             return
         if kind == 'home':
             self.on_home_hit(key)
+            return
+        if kind == 'tasks':
+            self.on_tasks_hit(key)
             return
         if kind == 'chat':
             self.on_chat_hit(key)

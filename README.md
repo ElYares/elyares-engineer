@@ -556,6 +556,26 @@ pero a veces el cambio es intencional y lo decide la persona.
   y `config-protection`); el código es propio. Sus casos están en
   `tests/test_guard.py`.
 
+### Hábitos
+
+En **Inicio → Hábitos** (isla y ventana) ves tu lista de hoy: una casilla por hábito y su
+racha de días seguidos (🔥). **La lista es tuya y vive en un `.md`**, por defecto
+`~/.config/elyares-engineer/habitos.md` (o la ruta del ajuste `habits_file` de
+`settings.json`, por ejemplo una nota de tu vault de Obsidian). Un hábito por línea:
+
+```markdown
+- Leer 20 min
+- [ ] Caminar
+1. Estirar
+```
+
+Títulos, texto y comentarios se ignoran; máximo 20. Se lee solo: lo que edites en el
+archivo se ve en la isla sin reiniciar nada. Quitar una línea oculta el hábito y **conserva
+su historial** (los días hechos van aparte, en `~/.local/share/elyares-engineer/habits.json`).
+Para agregar: **Editar lista** en el panel (abre el `.md` en tu editor), el campo «Nuevo
+hábito» de la ventana, o `elyares-ctl habit add "Leer 20 min"`. También `habit rm`, `list`,
+`file` (dice dónde está el archivo) y `edit`.
+
 ### Ajustes y Contenedores en la isla
 
 Sin abrir la ventana de la app, la isla suelta tiene dos paneles chicos (en la

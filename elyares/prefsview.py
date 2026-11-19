@@ -52,7 +52,7 @@ class PrefsView:
         if self.prefs_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.boxes_open = self.home_open = False
+            self.projects_open = self.boxes_open = self.home_open = self.tasks_open = False
         self.ensure_tick()
 
     def prefs_goal(self):
@@ -61,7 +61,7 @@ class PrefsView:
     def draw_prefs(self, cr, x0, w, h, alpha):
         left, width = x0 + PREFS_PAD, w - 2 * PREFS_PAD
         soft = mascot.rgba(self.ink('text', .62))[:3]
-        self.put(cr, 'Ajustes', FONT_PREFS_TITLE, left, 14, (.95, .96, 1), alpha)
+        self.put(cr, 'Ajustes', FONT_PREFS_TITLE, left, 14, themes.tuple_of(themes.get()['ink']), alpha)
         layout = self._layout(cr, 'Cerrar', 'Sans Semi-Bold 9')
         lw, lh = layout.get_pixel_size()
         x = left + width - lw
