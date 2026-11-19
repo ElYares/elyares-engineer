@@ -173,7 +173,7 @@ class BoxesView:
         if self.boxes_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.prefs_open = self.more_open = self.themes_open = self.gf_open = self.sp_open = False
+            self.projects_open = self.prefs_open = self.more_open = self.themes_open = self.gf_open = self.sp_open = self.sv_open = False
             self.box_unfolded, self.box_pending = set(), {}
             self.box_scroll, self.box_filter = 0, ''
             if self.box_entry is not None:

@@ -51,7 +51,7 @@ class PrefsView:
         if self.prefs_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.more_open = self.boxes_open = self.themes_open = self.gf_open = self.sp_open = False
+            self.projects_open = self.more_open = self.boxes_open = self.themes_open = self.gf_open = self.sp_open = self.sv_open = False
         self.ensure_tick()
 
     def prefs_goal(self):
