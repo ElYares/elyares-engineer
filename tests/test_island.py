@@ -3363,6 +3363,114 @@ class Ventana(Dibujo):
         isl.toggle_more()                                    # en la ventana no hay: tiene sus vistas
         self.assertFalse(isl.more_open)
 
+    def _boxes_listos(self, loaded=True):
+        isl = self.isl
+        box = lambda n, st: dict(name=n, service=n.split('-')[1], state=st, path='/a')
+        data = dict(projects=[dict(name='uno', path='/a', running=1, total=2, cpu=3.0, mem=1e8,
+                                   containers=[box('a-web', 'running'), box('a-db', 'exited')]),
+                              dict(name='dos', path='/b', running=0, total=0, cpu=0, mem=0, containers=[])],
+                    totals=dict(up=1, total=2, cpu=3.0, mem=1e8, host_mem=8e9))
+        isl.box_watch = mock.Mock(loaded=loaded, read=lambda: data if loaded else None)
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open, isl.more_open = False, False, False, False, False
+        isl.ensure_tick, isl.window_containers = mock.Mock(), mock.Mock()
+        return isl
+
+    def test_el_panel_de_contenedores_despliega_un_proyecto_y_manda_las_ordenes_a_docker(self):
+        isl = self._boxes_listos()
+        isl.toggle_boxes()
+        self.assertEqual(isl.target(), 'boxes')
+        self.assertEqual(len(isl.box_rows()), 2)
+        isl.on_hit('boxes', ('fold', '/a'))
+        self.assertEqual(len(isl.box_rows()), 4)
+        self.draw()
+        keys = self.hit('boxes')
+        self.assertEqual(len(keys), 7)                      # cerrar; de cada proyecto, abrirlo y su botón; el botón de cada contenedor
+        self.assertIn(('act', 'stop-project', '/a'), keys)
+        self.assertIn(('act', 'up', '/b'), keys)
+        self.assertIn(('act', 'start', 'a-db'), keys)
+        isl.on_hit('boxes', ('act', 'stop', 'a-web'))
+        isl.window_containers.assert_called_with('stop', 'a-web')
+        self.assertTrue(isl.box_pending_for(('stop', 'a-web')))
+        isl.on_hit('boxes', ('close',))
+        self.assertFalse(isl.boxes_open)
+        isl.windowed = True
+        isl.toggle_boxes()                                  # en la ventana tiene su vista Contenedores
+        self.assertFalse(isl.boxes_open)
+
+    def test_contenedores_muestra_que_trabaja_mientras_docker_contesta_y_mientras_va_una_orden(self):
+        isl = self._boxes_listos(loaded=False)
+        isl.toggle_boxes()
+        self.assertTrue(isl.boxes_busy())                   # docker aún no contesta: la isla sigue a todo cuadro
+        self.assertEqual(isl.boxes_goal()[1], app.boxview.BOXES_ROWS_Y + app.boxview.SKELETON_ROWS * app.boxview.BOXES_ROW
+                         + app.boxview.BOXES_FOOT)          # el esqueleto mide lo mismo que unas filas
+        self.draw()
+        self.assertIn('Preguntando a docker…', self.shown)
+        self.assertEqual(self.hit('boxes'), [('close',)])   # el esqueleto no se puede pulsar
+        isl.box_watch.loaded = True
+        self.assertFalse(isl.boxes_busy())
+        isl.on_hit('boxes', ('act', 'up', '/b'))
+        self.assertTrue(isl.boxes_busy())                   # la orden sale y el aro gira hasta que docker conteste
+        isl.box_pending[('up', '/b')] -= app.boxview.PENDING_SECS + 1
+        self.assertFalse(isl.boxes_busy())
+        isl.boxes_open = False
+        self.assertFalse(isl.boxes_busy())
+
+    def test_contenedores_corre_con_la_rueda_y_filtra_con_el_buscador(self):
+        isl = self._boxes_listos()
+        many = [dict(name=f'p{n:02d}', path=f'/p{n}', running=0, total=1, cpu=0, mem=0,
+                     containers=[dict(name=f'p{n}-web', service='web' if n != 7 else 'redis', state='exited', path=f'/p{n}')])
+                for n in range(25)]
+        data = dict(projects=many, totals=dict(up=0, total=25, cpu=0, mem=0, host_mem=8e9))
+        isl.box_watch = mock.Mock(loaded=True, read=lambda: data)
+        isl.toggle_boxes()
+        self.assertEqual(len(isl.box_rows()), 25)
+        self.assertEqual(isl.boxes_goal()[1], app.boxview.BOXES_ROWS_Y + app.boxview.BOXES_MAX * app.boxview.BOXES_ROW
+                         + app.boxview.BOXES_FOOT)                  # nunca crece más de BOXES_MAX filas
+        self.assertEqual(isl.box_max_scroll(), 25 - app.boxview.BOXES_MAX)
+        isl.on_boxes_scroll(None, 0, 1)
+        isl.on_boxes_scroll(None, 0, 1)
+        self.assertEqual(isl.box_scroll, 2)
+        self.draw()
+        keys = [k for k in self.hit('boxes') if k[0] == 'fold']
+        self.assertEqual(keys[0], ('fold', '/p2'))                   # la primera fila a la vista ya es la tercera
+        for _ in range(40):
+            isl.on_boxes_scroll(None, 0, 1)
+        self.assertEqual(isl.box_scroll, isl.box_max_scroll())      # no pasa del final
+        for _ in range(40):
+            isl.on_boxes_scroll(None, 0, -1)
+        self.assertEqual(isl.box_scroll, 0)
+        isl.on_box_search(mock.Mock(get_text=lambda: ' P1 '))      # por nombre de proyecto
+        self.assertEqual([p['name'] for _, p in isl.box_rows()], ['p01', 'p1-web'] + [f'p1{n}' for n in range(10)])   # p01 coincide por su contenedor
+        isl.on_box_search(mock.Mock(get_text=lambda: 'redis'))     # por servicio: sale el proyecto abierto con ese contenedor
+        self.assertEqual([k for k, _ in isl.box_rows()], ['project', 'box'])
+        isl.on_box_search(mock.Mock(get_text=lambda: 'zzz'))
+        self.draw()
+        self.assertIn('Nada coincide con «zzz».', self.shown)
+        isl.toggle_boxes()
+        isl.toggle_boxes()
+        self.assertEqual((isl.box_filter, isl.box_scroll), ('', 0))   # al reabrir, sin filtro
+
+    def test_el_buscador_de_contenedores_se_esconde_y_suelta_el_teclado_al_salir_del_panel(self):
+        isl = self._boxes_listos()
+        isl.toggle_boxes()
+        isl.box_entry = mock.Mock(**{'get_visible.return_value': True})
+        isl.box_typing = True
+        isl.boxes_type = mock.Mock()
+        isl.boxes_away()
+        isl.box_entry.set_visible.assert_not_called()          # en el panel de contenedores, se queda
+        isl.toggle_more()                                      # pasa a «Más»: el buscador no puede quedarse
+        self.assertEqual(isl.target(), 'more')
+        isl.boxes_away()
+        isl.box_entry.set_visible.assert_called_with(False)
+        isl.boxes_type.assert_called_with(False)
+
+    def test_el_panel_mas_lleva_a_contenedores(self):
+        isl = self._boxes_listos()
+        isl.toggle_more()
+        isl.on_hit('more', 'boxes')
+        self.assertTrue(isl.boxes_open)
+        self.assertFalse(isl.more_open)
+
     def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
         isl = self.isl
         isl.frame, isl.windowed, isl.focus = mock.Mock(), True, None

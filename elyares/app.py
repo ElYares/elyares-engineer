@@ -83,7 +83,7 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import (actions, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
+from . import (actions, boxview, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
                moreview, preview, prefsview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
@@ -259,7 +259,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, moreview.MoreView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
     _pills_need = (None, 0)             # (con qué letra se midió, ancho): lo que pide el pie de pastillas
 
     def __init__(self, app):
@@ -401,6 +401,7 @@ class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, pref
         self.overlay = overlay
         self.da = da
         self.chat_widgets(overlay)
+        self.boxes_widgets(overlay)
 
         css = Gtk.CssProvider()
         css.load_from_string('window, window.background { background: transparent; }')
@@ -511,6 +512,7 @@ class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, pref
     def on_second(self):
         self.seconds += 1
         self.chat_tick(time.monotonic())
+        self.boxes_tick(time.monotonic())
         self.projects_tick(self.seconds)
         self.workflows_tick()
         if self.seconds % REAP_SECS == 0:
@@ -786,6 +788,8 @@ class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, pref
             self.toggle_prefs()
         elif order == 'more':
             self.toggle_more()
+        elif order == 'containers':
+            self.toggle_boxes()
         elif order == 'workflows':
             self.toggle_workflows()
         elif order == 'move':
@@ -1189,6 +1193,8 @@ class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, pref
             return 'projects'
         if self.more_open and not self.windowed:
             return 'more'
+        if self.boxes_open and not self.windowed:
+            return 'boxes'
         if self.prefs_open and not self.windowed:
             return 'prefs'
         mode = self.view.mode
@@ -1315,6 +1321,8 @@ class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, pref
             return self.projects_goal()
         if mode == 'more':
             return self.more_goal()
+        if mode == 'boxes':
+            return self.boxes_goal()
         if mode == 'prefs':
             return self.prefs_goal()
         prev = self.preview_h(mode)
@@ -1597,7 +1605,7 @@ class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, pref
 
         widget.queue_draw()
         # Una burbuja a medio irse sigue pidiendo cuadros hasta que termina.
-        if settled and not self.hover and not self.override and not self.tip_pop:
+        if settled and not self.hover and not self.override and not self.tip_pop and not self.boxes_busy():
             # Quieta: escondida no dibuja nada y asomada basta con IDLE_FPS. El
             # reloj de GTK despierta al proceso 60 veces por segundo aunque no
             # haya nada que redibujar.
@@ -1726,6 +1734,7 @@ class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, pref
             self.tip = self.card_span = self.chat_box = None
             return                      # lo tapa un panel de widgets: nada de lo de debajo se ve
 
+        self.boxes_away()               # el buscador de Contenedores no se queda en otro panel
         x0, w, h = self.island_rect(width)
         if h < 0.5 or w < 1:
             self.tip_pop = 0.0
@@ -1761,8 +1770,8 @@ class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, pref
                 cr.stroke()
             self.chat_place(h)
             return
-        if mode in ('more', 'prefs'):
-            (self.draw_more if mode == 'more' else self.draw_prefs)(cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
+        if mode in ('more', 'prefs', 'boxes'):
+            {'more': self.draw_more, 'prefs': self.draw_prefs, 'boxes': self.draw_boxes}[mode](cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
                 cr.append_path(edge)
@@ -3042,7 +3051,7 @@ class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, pref
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'more') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'more', 'boxes') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3061,6 +3070,9 @@ class Island(chatview.ChatView, projectview.ProjectView, moreview.MoreView, pref
             return
         if kind == 'more':
             self.on_more_hit(key)
+            return
+        if kind == 'boxes':
+            self.on_boxes_hit(key)
             return
         if kind == 'chat':
             self.on_chat_hit(key)
