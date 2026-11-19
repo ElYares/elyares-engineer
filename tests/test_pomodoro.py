@@ -41,6 +41,27 @@ class Datos(unittest.TestCase):
         self.assertFalse(pomodoro.describe({'phase': 'idle'})['running'])
         self.assertIsNone(pomodoro.describe(None))
 
+    def test_el_descanso_de_coffe_se_lee_como_descanso(self):
+        self.assertEqual(pomodoro.describe({'phase': 'short_break'})['text'], 'Descanso')
+        self.assertEqual(pomodoro.describe({'phase': 'long_break'})['text'], 'Descanso largo')
+
+    def test_la_taza_se_vacia_en_foco_y_se_llena_en_el_descanso(self):
+        state = lambda **over: pomodoro.describe({'phase': 'idle', **over})
+        self.assertEqual(pomodoro.cup(state(phase='focus', progress=.25)), ('vaciando', .75))
+        self.assertEqual(pomodoro.cup(state(phase='short_break', progress=.25)), ('llenando', .25))
+        self.assertEqual(pomodoro.cup(state(parked={'id': 1})), ('refri', .55))
+        self.assertEqual(pomodoro.cup(state()), ('vacia', 0.0))
+        self.assertEqual(pomodoro.cup(None)[0], 'fria')
+
+    def test_las_tareas_de_un_proyecto_son_las_de_su_repo_o_uno_que_lo_contiene(self):
+        tasks = [dict(id='1', repo='/r/app'), dict(id='2', repo='/r/app-2'), dict(id='3', repo='')]
+        self.assertEqual([t['id'] for t in pomodoro.of_project(tasks, '/r/app/')], ['1'])
+        self.assertEqual([t['id'] for t in pomodoro.of_project(tasks, '/r/app/web')], ['1'])
+        w = pomodoro.Watcher()
+        w.repos = {'personal': '/r', 'personal / app': '/r/app'}
+        self.assertEqual(w.project_of('/r/app/web'), 'personal / app')     # el más hondo
+        self.assertEqual(w.project_of('/otra'), '')
+
 
 @unittest.skipUnless(HAVE_DISPLAY, 'sin gi o sin pantalla')
 class Panel(unittest.TestCase):

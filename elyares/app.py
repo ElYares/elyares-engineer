@@ -83,8 +83,8 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import (actions, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
-               preview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
+from . import (actions, boxview, chatview, coffe, commands, devherd, fonts, github, hypr, ipc, mascot, paint,  # noqa: E402
+               homeview, preview, prefsview, tasksview, projectview, remote, settings, sources, state, store, terminal, testrun, theme, themes, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
@@ -95,7 +95,7 @@ DETAIL_LINES = 4      # líneas del detalle cuando se muestra entero
 MAX_EXTRA = 54        # alto de más que puede pedir el detalle entero
 PILLS_H = 34          # la franja de pastillas de las fuentes
 PILL_H, PILL_GAP = 20, 4
-PILL_PAD = 20         # lo que mide una pastilla además de su texto: el punto y los bordes
+SOURCE_W, SOURCE_GAP = 28, 4    # la pastilla de una fuente: solo su punto
 PREVIEW_W = 600       # con vista previa la isla se ensancha: el código pide ancho
 CODE_LINE_H, PREVIEW_HEAD, PREVIEW_PAD = 15, 24, 8
 PREVIEW_MAX = PREVIEW_HEAD + (preview.MAX_LINES + 1) * CODE_LINE_H + 2 * PREVIEW_PAD
@@ -185,7 +185,7 @@ BOARD_MAX = (TABS_H + max(BOARD_H + PREVIEW_MAX, FOCUS_H + chatview.MINI_H) + BO
              + ALERT_ROWS * ROW_H + LIST_PAD)
 WIN_H = max(HEAD_MAX, BOARD_MAX) + PILLS_H + 8 + TIP_ROOM
 SIZES = {'off': (120, 0), 'hidden': (120, 6), 'petit': (56, 34), 'peek': (92, 80),
-         'open': (560, OPEN_H), 'ask': (560, 108)}
+         'open': (600, OPEN_H), 'ask': (560, 108)}
 HOVER_STRIP = 10     # alto de la franja que detecta el ratón cuando está escondida
 PET = 72             # lado del cuadro de la mascota
 PET_SCALE = PET / 260
@@ -259,7 +259,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, prefsview.PrefsView, boxview.BoxesView, homeview.HomeView, tasksview.TasksView, workflowview.WorkflowView, windowview.WindowView):
     def __init__(self, app):
         self.gtk_app = app              # la ventana de los flujos se crea con ella, la primera vez que se abre
         self.model = Model()
@@ -566,10 +566,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
     @staticmethod
     def set_tired(on):
         """Vista cansada: letra más grande y grises más claros, en la isla y la ventana."""
-        global MUTED_COLOR, PILL_PAD, PILL_GAP
+        global MUTED_COLOR, PILL_GAP
         on = fonts.use_tired(on)
         MUTED_COLOR = MUTED_TIRED if on else MUTED_NORMAL
-        PILL_PAD, PILL_GAP = (18, 3) if on else (22, 5)
+        PILL_GAP = 3 if on else 5
 
     @staticmethod
     def set_techno(on):
@@ -780,6 +780,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 req.reply(answer)
         elif order == 'projects':
             self.toggle_projects()
+        elif order == 'prefs':
+            self.toggle_prefs()
+        elif order == 'containers':
+            self.toggle_boxes()
+        elif order == 'home':
+            self.toggle_home()
+        elif order == 'tasks':
+            self.toggle_tasks()
         elif order == 'workflows':
             self.toggle_workflows()
         elif order == 'move':
@@ -1133,7 +1141,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         self.expanded = self.settings['pinned'] or self.windowed
         if not self.expanded:
             self.tab_manual = False     # al cerrarse, la próxima vez vuelve a seguir lo que pasa
-            self.focus = None           # al volver a abrirla, el tablero y no un desglose
+            self.focus, self.home_back = None, False     # al volver a abrirla, el tablero y no un desglose
         if self.pin:
             self.pin = ''
             self.refresh()
@@ -1181,12 +1189,20 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return 'chat'
         if self.projects_open:
             return 'projects'
+        if self.prefs_open and not self.windowed:
+            return 'prefs'
+        if self.boxes_open and not self.windowed:
+            return 'boxes'
+        if self.home_open and not self.windowed:
+            return 'home'
+        if self.tasks_open and not self.windowed:
+            return 'tasks'
         mode = self.view.mode
         if self.expanded or self.windowed:
             # Abierta a mano: el tablero. Sin ninguna sesión se abre igual, con
             # la cabecera de siempre: es donde están las fuentes.
             if self.claude():
-                return 'board'
+                return 'home' if self.home_main() and not self.focused() else 'board'     # un desglose abierto desde Inicio
             return 'list' if self.view.others else 'open'
         if mode == 'open' and self.view.ask:
             return 'ask'
@@ -1282,6 +1298,14 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return chatview.CHAT_W, chatview.CHAT_H
         if mode == 'projects':
             return self.projects_goal()
+        if mode == 'prefs':
+            return self.prefs_goal()
+        if mode == 'boxes':
+            return self.boxes_goal()
+        if mode == 'home':
+            return self.home_goal()
+        if mode == 'tasks':
+            return self.tasks_goal()
         prev = self.preview_h(mode)
         card = self.card_h(mode)
         more = self.extra(mode) + prev + card + self.pills_h(mode)
@@ -1726,6 +1750,17 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                 cr.stroke()
             self.chat_place(h)
             return
+        if mode in ('prefs', 'boxes', 'home', 'tasks'):
+            {'prefs': self.draw_prefs, 'boxes': self.draw_boxes, 'home': self.draw_home, 'tasks': self.draw_tasks}[mode](
+                cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
+            cr.restore()
+            if edge:
+                cr.append_path(edge)
+                cr.set_source_rgba(*themes.glow(), GLASS_EDGE)
+                cr.set_line_width(1)
+                cr.stroke()
+            self.chat_place(h)
+            return
         if mode == 'board':
             full_h = h
             text_alpha = clamp((w - 420) / 120) * clamp((h - 110) / 60)
@@ -2084,6 +2119,9 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             size, fx, fy = 42, x + 27, y + ch / 2 + 2
             tx, ty, tw = x + 46, y + 9, cw - 52
             sx, sw = tx, tw
+            if cw < 130:
+                size, fx, tx, tw = 32, x + 20, x + 38, cw - 42     # muy estrecho: más chica aún
+                sx, sw = tx, tw
         elif quad:
             size, fx, fy = 54, x + 38, y + ch / 2 + 2
             tx, ty, tw = x + 74, y + 9, cw - 86
@@ -2105,33 +2143,35 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                   now - s.changed)
         name_color = rgb(mascot.accent(role)) if busy else MUTED_COLOR
         # Si el nombre entero no cabe (y todos empiezan igual), va el del personaje.
-        fits = self._layout(cr, member.name, FONT_ROW).get_pixel_size()[0] <= (tw if column else tw - 22)
+        dot = 0 if quad and cw < 130 else 14        # sin el punto del estado, que el nombre entero valga más
+        fits = self._layout(cr, member.name, FONT_ROW).get_pixel_size()[0] <= (tw if column else tw - dot - 8)
         name = member.name if fits else role
         if column:
             self.put(cr, name, FONT_ROW, x + cw / 2, ty, name_color, alpha, tw, .5)
         else:
-            cr.new_sub_path()
-            cr.arc(tx + 4, ty + 8, 3.5, 0, 2 * math.pi)
-            cr.set_source_rgba(*mascot.rgba(tint if busy else 'metal', alpha * (1 if busy else .6)))
-            cr.fill()
+            if dot:
+                cr.new_sub_path()
+                cr.arc(tx + 4, ty + 8, 3.5, 0, 2 * math.pi)
+                cr.set_source_rgba(*mascot.rgba(tint if busy else 'metal', alpha * (1 if busy else .6)))
+                cr.fill()
             took = elapsed(now - member.since) if member.state == 'working' and member.since else ''
             if wide or quad:
                 # Cuánto lleva, a la derecha del nombre; a medias no cabe y va
                 # debajo. En un cuadro estrecho, si se comería el nombre, no va.
-                room = tw - 22 - (self._layout(cr, took, FONT_DETAIL).get_pixel_size()[0] if took else 0)
+                room = tw - dot - 8 - (self._layout(cr, took, FONT_DETAIL).get_pixel_size()[0] if took else 0)
                 if took and room < self._layout(cr, name, FONT_ROW).get_pixel_size()[0]:
                     took = ''
                 took_w = self.put(cr, took, FONT_DETAIL, tx + tw, ty + 1, MUTED_COLOR, alpha, align=1) \
                     if took else 0
-                self.put(cr, name, FONT_ROW, tx + 14, ty, name_color, alpha, tw - 22 - took_w)
+                self.put(cr, name, FONT_ROW, tx + dot, ty, name_color, alpha, tw - dot - 8 - took_w)
             else:
-                self.put(cr, name, FONT_ROW, tx + 14, ty, name_color, alpha, tw - 14)
+                self.put(cr, name, FONT_ROW, tx + dot, ty, name_color, alpha, tw - dot)
                 if took:
                     self.put(cr, took, FONT_DETAIL, tx + 14, ty + 19, MUTED_COLOR, alpha, tw - 14)
         if not busy:
             note = (('esperando' if s.delegating else 'en reposo') if role == MAIN_ROLE
                     else 'encargar ›' if over else 'libre')
-            self.put(cr, note, FONT_DETAIL, x + cw / 2 if column else tx + 14, ty + 20, MUTED_COLOR,
+            self.put(cr, note, FONT_DETAIL, x + cw / 2 if column else tx + dot, ty + 20, MUTED_COLOR,
                      alpha * .8, tw, .5 if column else 0)
             return
         if member.state == 'permission':
@@ -2492,6 +2532,23 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             self.draw_button(cr, key, label, x, y, n == 0 and key != 'dismiss', alpha, bw)
             x -= BUTTON_GAP
 
+    def _glyph_pill(self, cr, glyph, right_of, y, alpha, px, py, key, at=2):
+        """Una pastilla de un solo glifo a la izquierda de `right_of`; entra en `self.pills` `at` lugares
+        antes del final (en su orden, de izquierda a derecha). Devuelve su x."""
+        layout = self._layout(cr, glyph, FONT_PILL)
+        gw, gh = layout.get_pixel_size()
+        pw = gw + 16
+        x = right_of - PILL_GAP - pw
+        over = x <= px <= x + pw and y <= py <= y + PILL_H
+        mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
+        cr.set_source_rgba(*themes.glow(), (.13 if over else .07) * alpha)
+        cr.fill()
+        cr.move_to(x + (pw - gw) / 2, y + (PILL_H - gh) / 2)
+        cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
+        PangoCairo.show_layout(cr, layout)
+        self.pills.insert(len(self.pills) - at, (key, x, y, pw, PILL_H))
+        return x
+
     def draw_pills(self, cr, x0, w, bottom, alpha):
         """Una pastilla por fuente, pegadas al borde de abajo, y al final la
         de los atajos de elyares-engineer."""
@@ -2502,34 +2559,36 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         cr.fill()
         px, py = self.pointer or (-1, -1)
         x, y = left, top + (PILLS_H - PILL_H) / 2 + 1
+        # Las fuentes van a la izquierda como puntos (el nombre sale en la burbuja), y luego,
+        # tras una rayita, las acciones: así nada se aprieta ni se pisa.
         for key, label in sources.SOURCES:
             state = self.source_state(key)
-            layout = self._layout(cr, label, FONT_PILL)
-            lw, lh = layout.get_pixel_size()
-            pw = lw + PILL_PAD
-            over = x <= px <= x + pw and y <= py <= y + PILL_H
-            mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
+            over = x <= px <= x + SOURCE_W and top <= py <= top + PILLS_H
+            mascot.box(cr, x, y, SOURCE_W, PILL_H, PILL_H / 2)
             cr.set_source_rgba(*themes.glow(), (.13 if over else .07) * alpha)
             cr.fill()
+            cx, cy = x + SOURCE_W / 2, y + PILL_H / 2
             cr.new_sub_path()
             if state == 'off':
                 # Apagada va hueca, como una sesión en reposo.
-                cr.arc(x + 10, y + PILL_H / 2, 2.5, 0, 2 * math.pi)
-                cr.set_source_rgba(*mascot.rgba('metal', .6 * alpha))
-                cr.set_line_width(1.3)
+                cr.arc(cx, cy, 3.5, 0, 2 * math.pi)
+                cr.set_source_rgba(*mascot.rgba('metal', .7 * alpha))
+                cr.set_line_width(1.5)
                 cr.stroke()
             else:
                 color = {'on': 'green', 'bad': 'red'}.get(state, 'metal')
-                cr.arc(x + 10, y + PILL_H / 2, 3, 0, 2 * math.pi)
+                cr.arc(cx, cy, 5 if state == 'bad' else 4, 0, 2 * math.pi)
                 cr.set_source_rgba(*mascot.rgba(color, alpha))
                 cr.fill()
-            cr.move_to(x + 17, y + (PILL_H - lh) / 2)
-            cr.set_source_rgba(*(MUTED_COLOR if state == 'off' else TITLE_COLOR)[:3], alpha)
-            PangoCairo.show_layout(cr, layout)
-            self.pills.append((key, x, y, pw, PILL_H))
+                if state == 'bad':
+                    self.put(cr, '!', 'Sans Bold 7', cx, cy - 5, (1, 1, 1), alpha, align=.5)
+            self.pills.append((key, x, top, SOURCE_W, PILLS_H))
             if over:
-                self.tip = (key, x + pw / 2, alpha)
-            x += pw + PILL_GAP
+                self.tip = (key, cx, alpha)
+            x += SOURCE_W + SOURCE_GAP
+        cr.set_source_rgba(*themes.glow(), .14 * alpha)
+        cr.rectangle(x + 3, y + 3, 1, PILL_H - 6)
+        cr.fill()
         # La de los atajos no es una fuente: va sin punto, al otro extremo, y
         # a su lado la del chat.
         layout = self._layout(cr, '?', FONT_PILL)
@@ -2575,6 +2634,10 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             cr.set_source_rgba(*TITLE_COLOR[:3], alpha)
             PangoCairo.show_layout(cr, flows)
             self.pills.insert(len(self.pills) - 1, (workflowview.WF_PILL, fx, y, fpw, PILL_H))    # en su orden, de izquierda a derecha
+            # Y las de los ajustes y los contenedores de la isla: un glifo cada una, que la franja no da para más texto.
+            ax = self._glyph_pill(cr, '⚙', fx, y, alpha, px, py, prefsview.PREFS_PILL)
+            bx = self._glyph_pill(cr, '▣', ax, y, alpha, px, py, boxview.BOXES_PILL, 3)
+            self._glyph_pill(cr, '⌂', bx, y, alpha, px, py, homeview.HOME_PILL, 4)
             self.pills.append((CHAT_PILL, cx, y, cpw, PILL_H))
         over = x <= px <= x + pw and y <= py <= y + PILL_H
         mascot.box(cr, x, y, pw, PILL_H, PILL_H / 2)
@@ -2994,6 +3057,12 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
                     self.open_chat(typing=True)
                 elif key == projectview.PROJECTS_PILL:
                     self.toggle_projects()
+                elif key == prefsview.PREFS_PILL:
+                    self.toggle_prefs()
+                elif key == boxview.BOXES_PILL:
+                    self.toggle_boxes()
+                elif key == homeview.HOME_PILL:
+                    self.toggle_home()
                 elif key == workflowview.WF_PILL:
                     self.toggle_workflows()
                 return
@@ -3012,7 +3081,7 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'boxes', 'home', 'tasks') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3025,6 +3094,18 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
         de proyectos y sus atajos para empezar en uno."""
         if kind in ('project', 'projects', 'start'):
             self.on_project_hit(kind, key)
+            return
+        if kind == 'prefs':
+            self.on_prefs_hit(key)
+            return
+        if kind == 'boxes':
+            self.on_boxes_hit(key)
+            return
+        if kind == 'home':
+            self.on_home_hit(key)
+            return
+        if kind == 'tasks':
+            self.on_tasks_hit(key)
             return
         if kind == 'chat':
             self.on_chat_hit(key)
@@ -3052,6 +3133,8 @@ class Island(chatview.ChatView, projectview.ProjectView, workflowview.WorkflowVi
             return
         elif kind == 'back':
             self.focus = None
+            if self.home_back:
+                self.home_open, self.home_back = True, False
         elif kind == 'jump':
             s = self.model.sessions.get(key)
             if s is not None:

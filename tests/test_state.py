@@ -490,6 +490,18 @@ class Permisos(ModelCase):
         self.send('tool-done', tool_name='Read')
         self.assertEqual(req.answers, [])
 
+    def test_el_permiso_de_un_chat_no_lo_suelta_un_hook(self):
+        # Otro Bash del mismo turno termina en paralelo: el chat sigue esperando su respuesta.
+        req = FakeReq()
+        req.sticky = True
+        self.send('ask', req=req, tool_name='Bash', tool_input={'command': 'git push'})
+        for event, tool in (('tool-done', 'Bash'), ('tool', 'Read'), ('tool-fail', 'Bash')):
+            self.send(event, tool_name=tool, tool_input={'file_path': '/x/proj/a.py'})
+        s = self.m.sessions['a']
+        self.assertEqual(req.answers, [])
+        self.assertIs(s.ask, req)
+        self.assertEqual((s.state, s.last_tool), ('permission', 'Ejecutando git push'))
+
     def test_el_hook_se_fue_sin_respuesta(self):
         req = self.ask()
         self.m.gone(req, now=T)

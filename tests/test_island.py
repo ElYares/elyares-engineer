@@ -83,6 +83,7 @@ class IslandCase(unittest.TestCase):
         self.saved = saver.start()
         self.addCleanup(saver.stop)
         isl.ensure_tick = isl.collapse = lambda: None
+        isl.settings['home_main'] = False        # las pruebas del tablero lo miran a él; Inicio tiene las suyas
         isl.refresh()
         self.isl = isl
 
@@ -322,7 +323,7 @@ class Consulta(IslandCase):
         self.isl.draw_pills(self.cr, 100, width, 50, 1.0)
         keys = [key for key, *_ in self.isl.pills]
         self.assertEqual(keys, [key for key, _ in sources.SOURCES]
-                         + [app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
+                         + [app.homeview.HOME_PILL, app.boxview.BOXES_PILL, app.prefsview.PREFS_PILL, app.workflowview.WF_PILL, app.projectview.PROJECTS_PILL, app.CHAT_PILL,
                             commands.HELP])
         for (_, x, _, w, _), (_, nx, *_) in zip(self.isl.pills, self.isl.pills[1:]):
             self.assertLessEqual(x + w, nx)
@@ -1328,6 +1329,81 @@ class Chat(Dibujo):
         x, y, w, h = self.isl.buttons['allow']
         self.isl.on_click(None, 1, x + w / 2, y + h / 2)
         c.answer.assert_called_once_with(True)
+
+    def chat_asks(self, *rids):
+        """Una conversación con el panel cerrado que pide permiso para un Bash por cada id."""
+        c = self.conversation()
+        self.isl.chat_open = False
+        c.session, c.busy = 's-chat', True
+        for rid in rids:
+            self.isl.on_chat({'type': 'control_request', 'request_id': rid, 'request': {
+                'subtype': 'can_use_tool', 'tool_name': 'Bash', 'input': {'command': f'echo {rid}'}}})
+        return c, self.isl.model.sessions['s-chat']
+
+    def test_dos_permisos_del_chat_salen_uno_tras_otro_en_el_tablero(self):
+        c, s = self.chat_asks('r1', 'r2')
+        self.assertEqual((s.state, s.last_tool), ('permission', 'Ejecutando echo r1'))
+        later = []
+        with mock.patch.object(app.chatview.GLib, 'idle_add', lambda f, *a: later.append((f, a))):
+            self.isl.model.decide(s, True)
+        for f, a in later:
+            f(*a)
+        self.assertEqual(c.asking['id'], 'r2')
+        self.assertEqual((s.state, s.last_tool), ('permission', 'Ejecutando echo r2'))
+        self.assertIsInstance(s.ask, app.chatview.ChatAsk)
+        self.assertFalse(s.ask.done)
+
+    def test_otro_bash_que_acaba_no_quita_la_tarjeta_del_chat(self):
+        c, s = self.chat_asks('r1')
+        self.send('tool-done', 's-chat', tool_name='Bash')
+        self.assertEqual(s.state, 'permission')
+        self.assertIsInstance(s.ask, app.chatview.ChatAsk)
+
+    def test_al_detener_la_tarjeta_se_va_y_la_pestana_no_sigue_trabajando(self):
+        c, s = self.chat_asks('r1')
+        self.isl.on_chat_hit('stop')
+        self.assertIsNone(s.ask)
+        self.isl.on_chat({'type': 'result', 'subtype': 'error_during_execution', 'is_error': True})
+        self.assertEqual((s.state, s.detail), ('waiting', 'Turno cortado'))
+
+    def test_al_acabar_el_turno_la_pestana_queda_lista(self):
+        c = self.conversation()
+        c.session, c.busy = 's-chat', True
+        self.send('start', 's-chat', cwd='/x/proj')
+        s = self.isl.model.sessions['s-chat']
+        self.assertEqual(s.state, 'working')
+        self.isl.on_chat({'type': 'result', 'subtype': 'success', 'duration_ms': 1000})
+        self.assertEqual((s.state, s.detail), ('done', 'Listo'))
+
+    def test_tras_un_turno_fallido_no_dice_listo(self):
+        c = self.conversation()
+        c.proc = mock.Mock()
+        c.entries += [app.chatview.chat.Entry('error', 'API overloaded'), app.chatview.chat.Entry('foot', 'x')]
+        self.assertEqual(self.isl.chat_status(), ('Falló el último turno', 'bad'))
+
+    def test_lo_escrito_en_un_mini_chat_no_contesta_la_pregunta_del_chat(self):
+        box = self.caja()
+        c = self.ask_questions({'question': '¿Qué base?', 'options': [{'label': 'Postgres'}, {'label': 'SQLite'}]})
+        self.isl.chat_open = False
+        c.send = mock.Mock(return_value=False)
+        box['t'] = 'revisa el login'
+        self.isl.on_chat_enter()
+        c.answer_questions.assert_not_called()
+        self.assertEqual(box['t'], 'revisa el login')
+
+    def test_el_aviso_de_choque_usa_el_ambar_legible_del_tema(self):
+        put = self.isl.put = mock.Mock(return_value=0)
+        with mock.patch.object(app.chatview.themes, 'signal', lambda: ('#00ff00', '#7a4f00', '#ff0000')):
+            self.isl.draw_chat_clash(self.cr, 0, 0, 300, 1.0, ['elyares-mobile'])
+        self.assertEqual(put.call_args[0][5], app.chatview.themes.tuple_of('#7a4f00'))
+
+    def test_la_respuesta_que_se_escribe_no_acumula_layouts(self):
+        self.conversation()
+        entry = app.chatview.chat.Entry('claude', '')
+        for word in ('Hola', ' mundo', ', ¿qué', ' tal?'):
+            entry.text += word
+            self.isl.chat_layout(self.cr, 3, entry, 300)
+        self.assertEqual([k[2] for k in self.isl.chat_cache if k[0] == 3], ['Hola mundo, ¿qué tal?'])
 
     def test_una_pregunta_del_chat_abre_el_chat_y_no_va_al_tablero(self):
         c = self.conversation()
@@ -3289,6 +3365,285 @@ class Ventana(Dibujo):
         self.assertEqual(save.call_count, 3)
         isl.settings['glass_alpha'] = 'basura'                      # un settings.json mal escrito
         self.assertEqual(isl.glass_pct(), 85)
+
+    def test_el_panel_de_ajustes_de_la_isla_cambia_lo_mismo_que_la_ventana(self):
+        isl = self.isl
+        isl.ensure_tick = mock.Mock()
+        isl.windowed = False
+        isl.chat_open = isl.projects_open = False
+        isl.toggle_prefs()
+        self.assertEqual(isl.target(), 'prefs')
+        with mock.patch('elyares.settings.save'):
+            was = isl.settings['glass_fx']
+            isl.on_hit('prefs', 'glass_fx')
+            self.assertEqual(isl.settings['glass_fx'], not was)
+            isl.on_hit('prefs', 'alpha-')
+            self.assertEqual(isl.glass_pct(), 80)
+            isl.on_hit('prefs', 'alpha+')
+            isl.on_hit('prefs', 'alpha+')
+            self.assertEqual(isl.glass_pct(), 90)
+        isl.on_hit('prefs', 'close')
+        self.assertFalse(isl.prefs_open)
+
+    def test_el_panel_de_ajustes_se_dibuja_con_un_clic_por_renglon_y_no_abre_en_la_ventana(self):
+        isl = self.isl
+        isl.windowed, isl.chat_open, isl.projects_open = False, False, False
+        isl.prefs_open = True
+        self.draw()
+        keys = self.hit('prefs')
+        for key, *_ in __import__('elyares').prefsview.PREFS_ROWS:
+            self.assertIn(key, keys)
+        self.assertTrue({'close', 'alpha+', 'alpha-'} <= set(keys))
+        isl.prefs_open = False
+        isl.windowed = True
+        isl.toggle_prefs()                                   # en la ventana tiene su vista Ajustes
+        self.assertFalse(isl.prefs_open)
+
+    def test_el_panel_de_contenedores_despliega_un_proyecto_y_manda_las_ordenes_a_docker(self):
+        isl = self.isl
+        box = lambda n, st: dict(name=n, service=n.split('-')[1], state=st, path='/a')
+        data = dict(projects=[dict(name='uno', path='/a', running=1, total=2, cpu=3.0, mem=1e8,
+                                   containers=[box('a-web', 'running'), box('a-db', 'exited')]),
+                              dict(name='dos', path='/b', running=0, total=0, cpu=0, mem=0, containers=[])],
+                    totals=dict(up=1, total=2, cpu=3.0, mem=1e8, host_mem=8e9))
+        isl.box_watch = mock.Mock(loaded=True, read=lambda: data)
+        isl.windowed, isl.chat_open, isl.projects_open, isl.prefs_open = False, False, False, False
+        isl.ensure_tick, isl.window_containers = mock.Mock(), mock.Mock()
+        isl.toggle_boxes()
+        self.assertEqual(isl.target(), 'boxes')
+        self.assertEqual(len(isl.box_rows()), 2)
+        isl.on_hit('boxes', ('fold', '/a'))
+        self.assertEqual(len(isl.box_rows()), 4)
+        self.draw()
+        keys = self.hit('boxes')
+        self.assertEqual(len(keys), 7)                      # cerrar; de cada proyecto, abrirlo y su botón; el botón de cada contenedor
+        self.assertIn(('act', 'stop-project', '/a'), keys)
+        self.assertIn(('act', 'up', '/b'), keys)
+        self.assertIn(('act', 'start', 'a-db'), keys)
+        isl.on_hit('boxes', ('act', 'stop', 'a-web'))
+        isl.window_containers.assert_called_with('stop', 'a-web')
+        self.assertTrue(isl.box_pending_for(('stop', 'a-web')))
+        isl.on_hit('boxes', ('close',))
+        self.assertFalse(isl.boxes_open)
+        isl.windowed = True
+        isl.toggle_boxes()                                  # en la ventana tiene su vista Contenedores
+        self.assertFalse(isl.boxes_open)
+
+    def test_el_panel_inicio_de_la_isla_elige_agentes_decide_y_lleva_a_los_atajos(self):
+        isl = self.isl
+        roles = ('engineer', 'architect', 'auditor', 'reviewer', 'designer', 'mobile', 'devops')
+        cards = [dict(role=r, name=r, color='#ffffff', state='libre', steps=[], busy=False, ask=False, pet='idle')
+                 for r in roles]
+        cards[6].update(busy=True, ask=True, state='Pide permiso', steps=['Bash: git push'])
+        isl.home_cards = lambda: cards
+        isl.window_editor_root = lambda: '/x/elyares-engineer'
+        isl.tab_session = lambda: mock.Mock(sid='x')
+        isl.focused = lambda: None                                  # sin pasos que leer: elegir no abre el desglose
+        isl.windowed = isl.chat_open = isl.projects_open = isl.prefs_open = isl.boxes_open = False
+        isl.ensure_tick, isl.window_decide, isl.toggle_boxes = mock.Mock(), mock.Mock(), mock.Mock()
+        isl.toggle_home()
+        self.assertEqual(isl.target(), 'home')
+        self.draw()
+        self.assertEqual(isl.home_picked, 'devops')                 # quien pide permiso queda elegido
+        keys = self.hit('home')
+        self.assertIn(('all',), keys)                               # 7 agentes: cinco y «+ 2 más»
+        self.assertIn(('decide', True), keys)
+        isl.on_hit('home', ('decide', True))
+        isl.window_decide.assert_called_with(True)
+        isl.on_hit('home', ('pick', 'mobile'))
+        self.assertEqual(isl.home_picked, 'mobile')
+        isl.on_hit('home', ('all',))
+        self.assertGreater(isl.home_goal()[1], 0)
+        isl.on_hit('home', ('go', 'boxes'))
+        isl.toggle_boxes.assert_called_once()
+        self.assertFalse(isl.home_open)
+        isl.windowed = True
+        isl.toggle_home()                                           # en la ventana tiene su vista Inicio
+        self.assertFalse(isl.home_open)
+
+    def test_inicio_es_la_vista_al_abrir_la_isla_y_sus_paneles_hacen_lo_suyo(self):
+        isl = self.isl
+        import os, tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for attr, name in (('PATH', 'habits.json'), ('LIST_PATH', 'habitos.md'), ('SETTINGS', 'settings.json')):
+            patch = mock.patch.object(app.homeview.habits, attr, os.path.join(tmp.name, name))      # nada toca lo del usuario
+            patch.start()
+            self.addCleanup(patch.stop)
+        app.homeview.habits.add('Agua')
+        isl.home_cards = lambda: [dict(role='engineer', name='engineer', color='#ffffff', state='libre', steps=[],
+                                       busy=False, ask=False, pet='idle')]
+        isl.window_editor_root = lambda: '/x/p'
+        isl.tab_session = lambda: object()
+        isl.claude = lambda: [object()]
+        isl.windowed, isl.expanded = False, True
+        isl.settings['home_main'] = True
+        self.assertEqual(isl.target(), 'home')                      # abierta a mano: Inicio, no el tablero
+        isl.settings['home_main'] = False
+        self.assertEqual(isl.target(), 'board')
+        isl.settings['home_main'] = True
+        isl.pomo_watch = mock.Mock(read=lambda: (None, [dict(id='7', title='Escribir', project='p', repo='/x/p'),
+                                                        dict(id='8', title='Otra', project='q', repo='/x/q')]),
+                                   project_of=lambda root: 'p')
+        isl.window_pomodoro = mock.Mock()
+        isl.on_hit('home', ('pane', 'tasks'))
+        self.draw()
+        self.assertEqual([k for k in self.hit('home') if k[0] == 'start'], [('start', '7')])    # solo las de su proyecto
+        isl.on_hit('home', ('start', '7'))
+        isl.window_pomodoro.assert_called_with('start', '7')
+        isl.on_hit('home', ('pane', 'habits'))
+        self.draw()
+        self.assertIn(('habit', 'Agua'), self.hit('home'))
+        isl.on_hit('home', ('habit', 'Agua'))
+        self.assertTrue(app.homeview.habits.items()[0]['done_today'])
+        isl.on_hit('home', ('pane', 'habits'))                      # otra vez, vuelve al agente
+        self.assertEqual(isl.home_pane, 'agent')
+
+    def test_en_inicio_un_agente_con_pasos_abre_su_desglose_y_volver_regresa_a_inicio(self):
+        isl = self.isl
+        self.work('a', 'devops')
+        isl.windowed, isl.expanded, isl.chat_open = False, True, False
+        isl.settings['home_main'] = True
+        self.assertEqual(isl.target(), 'home')
+        isl.on_hit('home', ('pick', 'devops'))
+        self.assertEqual(isl.target(), 'board')                     # el desglose de siempre
+        self.assertEqual(isl.focused()[1].role, 'devops')
+        isl.on_hit('back', None)
+        self.assertEqual(isl.target(), 'home')
+        isl.home_open = True                                        # abierto con ⌂: «volver» lo reabre
+        isl.on_hit('home', ('pick', 'devops'))
+        self.assertFalse(isl.home_open)
+        isl.on_hit('back', None)
+        self.assertTrue(isl.home_open)
+
+    def test_el_pomodoro_de_inicio_quita_las_tarjetas_y_pone_la_taza_con_las_tareas_del_proyecto(self):
+        isl = self.isl
+        isl.home_cards = lambda: [dict(role='engineer', name='engineer', color='#ffffff', state='libre', steps=[],
+                                       busy=False, ask=False, pet='idle')]
+        isl.window_editor_root = lambda: '/x/p'
+        isl.tab_session = lambda: object()
+        isl.windowed, isl.home_open = False, True
+        status = app.homeview.pomodoro.describe({'phase': 'focus', 'remaining_secs': 600, 'progress': .4, 'task': {'title': 'HU-1'}})
+        tasks = [dict(id='7', title='Escribir', project='p', repo='/x/p'), dict(id='8', title='Otra', project='q', repo='/x/q')]
+        isl.pomo_watch = mock.Mock(read=lambda: (status, tasks), project_of=lambda root: 'p' if root == '/x/p' else '')
+        isl.on_hit('home', ('pane', 'pomodoro'))
+        self.draw()
+        keys = self.hit('home')
+        self.assertFalse([k for k in keys if k[0] == 'pick'])           # sin tarjetas de agentes
+        self.assertEqual([k for k in keys if k[0] == 'start'], [('start', '7')])
+        self.assertIn(('pomo', 'done'), keys)
+        self.assertIn('10:00', self.shown)
+        isl.window_editor_root = lambda: '/x/nuevo'                     # una carpeta que coffe no conoce
+        self.draw()
+        self.assertIn('coffe project add nuevo --repo /x/nuevo', self.shown)      # fuera de ~, la ruta entera
+
+    def test_el_panel_de_tareas_agrupa_por_proyecto_y_manda_las_ordenes_a_coffe(self):
+        isl = self.isl
+        tasks = [dict(id='1', state='pendiente', priority='alta', title='A', done=0, estimate=3, project='p / uno', repo=''),
+                 dict(id='2', state='en curso', priority='media', title='B', done=1, estimate=0, project='p / dos', repo=''),
+                 dict(id='3', state='hecha', priority='baja', title='C', done=0, estimate=0, project='p / uno', repo='')]
+        isl.pomo_watch = mock.Mock(read=lambda: None, read_all=lambda: tasks, refresh=mock.Mock(), project_of=lambda r: 'p / uno',
+                                   tasks_state=lambda: ('ok', ''))
+        isl.window_editor_root = lambda: '/x/uno'
+        isl.window_pomodoro = mock.Mock()
+        isl.windowed = isl.chat_open = isl.projects_open = isl.prefs_open = isl.boxes_open = isl.home_open = False
+        isl.ensure_tick, isl.da = mock.Mock(), mock.Mock()
+        isl.toggle_tasks()
+        self.assertEqual(isl.target(), 'tasks')
+        rows = isl.tasks_rows()
+        self.assertEqual([r[0] for r in rows], ['head', 'task', 'head', 'task'])           # abiertos: el de la carpeta y el que corre
+        self.assertEqual(rows[0][1], 'p / dos')                                          # lo que corre, primero
+        self.draw()
+        keys = self.hit('tasks')
+        self.assertIn(('start', '1'), keys)
+        self.assertNotIn(('start', '2'), keys)                                           # la que ya corre no se vuelve a empezar
+        isl.on_hit('tasks', ('start', '1'))
+        isl.window_pomodoro.assert_called_with('start', '1')
+        isl.on_hit('tasks', ('check', '1', False))
+        isl.window_pomodoro.assert_called_with('task', 'done', '1')
+        isl.on_hit('tasks', ('mode', 'done'))
+        self.assertEqual([r[0] for r in isl.tasks_rows()], ['head', 'task'])             # abierta por el proyecto de la carpeta
+        isl.on_hit('tasks', ('mode', 'here'))
+        self.assertEqual([r[1] for r in isl.tasks_rows() if r[0] == 'head'], ['p / uno'])
+        isl.on_hit('tasks', ('close',))
+        self.assertFalse(isl.tasks_open)
+        isl.windowed = True
+        isl.toggle_tasks()                                                               # en la ventana tiene su vista Tareas
+        self.assertFalse(isl.tasks_open)
+
+    def open_tasks(self, load, tasks=()):
+        isl = self.isl
+        isl.pomo_watch = mock.Mock(read=lambda: None, read_all=lambda: list(tasks), refresh=mock.Mock(),
+                                   project_of=lambda r: '', tasks_state=lambda: load)
+        isl.window_editor_root = lambda: ''
+        isl.windowed = isl.chat_open = isl.projects_open = isl.prefs_open = isl.boxes_open = isl.home_open = False
+        isl.ensure_tick, isl.da = mock.Mock(), mock.Mock()
+        isl.toggle_tasks()
+        isl.pomo_watch.refresh.reset_mock()
+
+    def test_tareas_dice_que_pregunta_a_coffe_mientras_no_contesta(self):
+        self.open_tasks(('loading', ''))
+        self.draw()
+        self.assertIn('Preguntando a coffe…', self.shown)
+        self.assertNotIn('Nada pendiente.', self.shown)                                 # no miente con «vacío»
+
+    def test_si_coffe_falla_tareas_lo_dice_y_reintentar_vuelve_a_preguntar(self):
+        self.open_tasks(('error', 'connection refused'))
+        self.draw()
+        self.assertTrue(any('coffe no contesta' in t for t in self.shown))
+        self.assertIn(('retry',), self.hit('tasks'))
+        self.isl.on_hit('tasks', ('retry',))
+        self.isl.pomo_watch.refresh.assert_called_once()
+
+    def test_este_proyecto_sin_carpeta_activa_lo_dice(self):
+        self.open_tasks(('ok', ''))
+        self.isl.on_hit('tasks', ('mode', 'here'))
+        self.draw()
+        self.assertIn('No hay proyecto activo: abre un chat o elige una sesión.', self.shown)
+
+    def test_los_titulos_de_los_paneles_siguen_al_tema_claro(self):
+        """En `papel` el título blanco fijo no se veía (1.05:1): ahora lleva la tinta del tema."""
+        isl = self.isl
+        painted, put = [], isl.put
+        isl.put = lambda cr, text, font, x, y, color, *a, **kw: painted.append((text, tuple(color[:3]))) or put(
+            cr, text, font, x, y, color, *a, **kw)
+        patch = mock.patch.object(app.themes, 'current', 'papel')
+        patch.start()
+        self.addCleanup(patch.stop)
+        ink = app.themes.tuple_of(app.themes.get()['ink'])
+        green, amber, _red = (app.themes.tuple_of(c) for c in app.themes.signal())
+        tasks = [dict(id='1', state='en curso', priority='alta', title='A', done=0, estimate=0, project='p', repo=''),
+                 dict(id='2', state='refri', priority='alta', title='B', done=0, estimate=0, project='p', repo='')]
+        self.open_tasks(('ok', ''), tasks)
+        self.isl.tasks_shut['p'] = True
+        self.draw()
+        self.assertIn(('Tareas', ink), painted)
+        self.assertIn(('● en curso', green), painted)                                    # aviso legible en claro
+        self.assertIn(('❄ refri', amber), painted)
+        isl.tasks_open, isl.prefs_open = False, True
+        painted.clear()
+        self.draw()
+        self.assertIn(('Ajustes', ink), painted)
+
+    def test_una_lista_de_habitos_que_no_se_puede_leer_no_deja_la_isla_en_blanco(self):
+        import tempfile
+        isl = self.isl
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        settings_file = os.path.join(tmp.name, 'settings.json')
+        with open(settings_file, 'w') as fh:
+            json.dump({'habits_file': tmp.name}, fh)                                     # una carpeta, no un .md
+        for attr, name in (('PATH', 'habits.json'), ('SETTINGS', 'settings.json')):
+            patch = mock.patch.object(app.homeview.habits, attr, os.path.join(tmp.name, name))
+            patch.start()
+            self.addCleanup(patch.stop)
+        isl.home_cards = lambda: [dict(role='engineer', name='engineer', color='#ffffff', state='libre', steps=[],
+                                       busy=False, ask=False, pet='idle')]
+        isl.window_editor_root = lambda: ''
+        isl.tab_session = lambda: object()
+        isl.windowed, isl.home_open, isl.home_pane = False, True, 'habits'
+        self.draw()                                                                       # antes: IsADirectoryError en draw
+        self.assertTrue(any('No se pudo leer' in t for t in self.shown))
 
     def test_con_flujos_abiertos_ni_el_tablero_ni_la_cabecera_del_chat_van_encima(self):
         isl = self.isl

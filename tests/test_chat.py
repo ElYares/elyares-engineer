@@ -339,6 +339,118 @@ class Permisos(ChatCase):
         self.assertEqual(cmd[cmd.index('--permission-mode') + 1], 'plan')
 
 
+class Fallos(ChatCase):
+    """Lo que no debe dejar a Claude esperando ni al chat ocupado para siempre."""
+
+    def ask(self, rid, tool='Edit'):
+        self.c.feed({'type': 'control_request', 'request_id': rid, 'request': {
+            'subtype': 'can_use_tool', 'tool_name': tool, 'input': {'file_path': f'/x/proj/{rid}'}}})
+
+    def answered(self):
+        return [m['response']['request_id'] for m in self.procs[0].sent() if m.get('type') == 'control_response']
+
+    def test_dos_permisos_a_la_vez_se_contestan_los_dos_en_orden(self):
+        self.c.send('edita')
+        self.ask('r1')
+        self.ask('r2')
+        self.assertEqual(self.c.asking['id'], 'r1')
+        self.c.answer(True)
+        self.assertEqual(self.c.asking['id'], 'r2')        # el segundo pasa a la vista
+        self.c.answer(False)
+        self.assertIsNone(self.c.asking)
+        self.assertEqual(self.answered(), ['r1', 'r2'])
+
+    def test_cortar_deniega_tambien_los_de_la_cola(self):
+        self.c.send('edita')
+        self.ask('r1')
+        self.ask('r2')
+        self.c.interrupt()
+        self.assertEqual(self.answered(), ['r1', 'r2'])
+
+    def test_una_peticion_desconocida_se_contesta_con_error(self):
+        self.c.send('hola')
+        self.c.feed({'type': 'control_request', 'request_id': 'e1', 'request': {'subtype': 'elicitation'}})
+        last = self.procs[0].sent()[-1]
+        self.assertEqual((last['type'], last['response']['subtype'], last['response']['request_id']),
+                         ('control_response', 'error', 'e1'))
+
+    def test_una_conversacion_que_claude_ya_no_tiene_empieza_otra(self):
+        self.c.session = 's-vieja'
+        self.c.send('hola')
+        self.assertIn('--resume', self.procs[0].args[0])
+        self.c.feed({'type': 'result', 'subtype': 'error_during_execution', 'is_error': True, 'result': None,
+                     'errors': ['No conversation found with session ID: s-vieja']})
+        self.assertEqual(self.c.session, '')
+        self.assertEqual(self.c.entries[-1].kind, 'error')
+        self.assertIn('ya no existe', self.c.entries[-1].text)
+        self.procs[0].alive = False
+        self.c.send('otra vez')
+        self.assertNotIn('--resume', self.procs[1].args[0])
+
+    def test_el_error_de_un_turno_dice_por_que(self):
+        self.c.send('hola')
+        self.c.feed({'type': 'result', 'subtype': 'error_during_execution', 'is_error': True,
+                     'errors': ['API overloaded']})
+        self.assertEqual([e.text for e in self.c.entries if e.kind == 'error'], ['API overloaded'])
+
+    def test_una_carpeta_que_ya_no_existe_no_rompe_el_envio(self):
+        def spawn(*args, **kwargs):
+            raise FileNotFoundError(2, 'No such file or directory', '/x/borrada')
+
+        self.c.spawn = spawn
+        self.assertFalse(self.c.send('hola'))
+        self.assertFalse(self.c.busy)
+        self.assertEqual(self.c.entries[-1].kind, 'error')
+        self.assertIn('No such file or directory', self.c.entries[-1].text)
+
+    def test_si_la_lectura_falla_el_chat_se_entera_de_que_claude_se_fue(self):
+        class Broken(FakeProc):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.stdout = self
+
+            def __iter__(self):
+                raise UnicodeDecodeError('utf-8', b'\xff', 0, 1, 'invalid start byte')
+
+        proc = Broken()
+        with self.assertRaises(UnicodeDecodeError):
+            self.c._read(proc)
+        self.assertEqual(self.events, [{'type': 'exit', 'proc': proc}])
+
+    def test_la_respuesta_es_la_del_ultimo_turno(self):
+        self.c.send('uno')
+        self.c.feed({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'RESPUESTA 1'}]}})
+        self.c.feed({'type': 'result', 'duration_ms': 1000})
+        self.c.send('dos')
+        self.c.feed({'type': 'result', 'is_error': True, 'subtype': 'error_during_execution'})
+        self.assertEqual(self.c.reply(), '')               # este turno no dijo nada: no la del anterior
+
+    def test_con_un_mensaje_en_cola_sigue_ocupado(self):
+        self.c.send('uno')
+        self.c.send('dos, en cola')
+        self.c.feed({'type': 'result', 'duration_ms': 1000})
+        self.c.feed({'type': 'stream_event', 'event': {'type': 'content_block_start',
+                                                       'content_block': {'type': 'text'}}})
+        self.assertTrue(self.c.busy)
+        self.assertTrue(self.c.interrupt())
+
+    def test_mandar_mientras_se_corta_no_borra_el_corte(self):
+        self.c.send('uno')
+        self.c.interrupt()
+        self.c.send('ya, otra cosa')
+        self.c.feed({'type': 'result', 'is_error': True, 'subtype': 'error_during_execution'})
+        self.assertEqual([(e.kind, e.text) for e in self.c.entries if e.kind in ('note', 'error')],
+                         [('note', 'Turno cortado')])
+
+    def test_uno_que_se_cierra_no_cuenta_como_vivo(self):
+        self.c.send('uno')
+        self.c.closing = True                  # cerrándose: aún no salió, pero ya no lee
+        self.assertFalse(self.c.alive)
+        self.c.send('dos')
+        self.assertEqual(len(self.procs), 2)
+        self.assertFalse(self.c.closing)
+
+
 class Contexto(ChatCase):
     """Cuánto lleva lleno el contexto de la conversación."""
 
