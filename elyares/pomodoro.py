@@ -6,8 +6,10 @@ El reloj lo manda el daemon de `coffe`; aquí solo se le pregunta
 """
 
 import json
+import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import threading
 import time
@@ -15,6 +17,9 @@ import time
 EVERY = 1.0               # cada cuánto se le pregunta al reloj mientras la vista está a la vista
 TASKS_EVERY = 10.0        # la lista de tareas cambia menos
 MAX_TASKS = 12
+DB = os.path.expanduser('~/.local/share/coffe/coffe.db')          # la base de coffe: aquí solo se LEE
+VAULT = os.path.expanduser('~/develop/docs/obsidean-vault-personal')   # de donde cuelgan los `vault_note` de las tareas
+DESC_MAX = 2000                   # lo que se guarda de una descripción
 FOCUS_PHASES = ('focus', 'overlearning')
 PHASES = {'idle': 'Parado', 'focus': 'En foco', 'overlearning': 'En foco',
           'break': 'Descanso', 'break-long': 'Descanso largo'}
@@ -60,14 +65,69 @@ def describe(status):
     phase = status.get('phase') or 'idle'
     task = status.get('task')
     title = task.get('title') if isinstance(task, dict) else task
+    task_id = task.get('id') if isinstance(task, dict) else None
     parked = status.get('parked')
     return dict(phase=phase, text=PHASES.get(phase, phase), clock=clock(status.get('remaining_secs')),
                 progress=float(status.get('progress') or 0.0),
-                task=str(title) if title else '',
+                task=str(title) if title else '', task_id=str(task_id) if task_id is not None else '',
                 parked=bool(parked), today=int(status.get('pomodoros_hoy') or 0),
                 cycle=int(status.get('completed_since_long_break') or 0),
                 cycle_of=int(status.get('long_break_every') or 4),
                 running=phase != 'idle')
+
+
+def _db_rows(sql, args=()):
+    """Lee la base de coffe en solo lectura. Sin base o con un error, no hay filas."""
+    try:
+        con = sqlite3.connect(f'file:{DB}?mode=ro', uri=True, timeout=1)
+        try:
+            return con.execute(sql, args).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return []
+
+
+def read_titles():
+    """{id: título completo} de las tareas: `coffe task list` los corta a ~28 letras."""
+    return {str(i): t for i, t in _db_rows('SELECT id, title FROM tasks WHERE state != ?', ('archived',))}
+
+
+def vault_story(rel):
+    """La «Historia» de una nota del vault (lo que sigue a `## Historia`, en una línea), o ''."""
+    try:
+        with open(os.path.join(VAULT, rel), encoding='utf-8') as f:
+            text = f.read()
+    except (OSError, ValueError):
+        return ''
+    body, found = [], False
+    for line in text.splitlines():
+        if line.startswith('## '):
+            if found:
+                break
+            found = line.strip().lower() == '## historia'
+        elif found and line.strip():
+            body.append(line.strip().replace('**', ''))
+    return ' '.join(body)[:DESC_MAX]
+
+
+def format_description(text):
+    """Una descripción con cada paso en su línea: lo que ya viene en líneas se queda, y un «1) … 2) …» corrido
+    se parte en renglones. Sin pasos numerados, el texto no cambia."""
+    text = re.sub(r'[ \t]+(?=\d+[).]\s)', '\n', text.strip()) if '\n' not in text.strip() else text.strip()
+    return '\n'.join(line.strip() for line in text.splitlines() if line.strip())
+
+
+def task_info(task_id):
+    """Lo que dice la burbuja de una tarea: título completo, proyecto, estimación y descripción (sus
+    notas en coffe; sin ellas, la «Historia» de su nota del vault). None si la tarea no existe."""
+    rows = _db_rows('SELECT t.title, t.notes, t.estimate_pomodoros, t.vault_note, p.name FROM tasks t '
+                    'JOIN projects p ON p.id = t.project_id WHERE t.id = ?', (task_id,))
+    if not rows:
+        return None
+    title, notes, estimate, vault_note, project = rows[0]
+    text = format_description((notes or '').strip()[:DESC_MAX] or (vault_story(vault_note) if vault_note else ''))
+    return dict(id=str(task_id), title=title, project=project or '', estimate=estimate or 0, text=text)
 
 
 def run(*args):
@@ -92,22 +152,25 @@ def snapshot():
 
 class Watcher:
     """Pregunta a `coffe` en un hilo: el dibujo nunca espera a un subproceso.
-    `read()` devuelve (estado, tareas) con lo último que se supo; el estado es
+    `read()` devuelve (estado, tareas) con lo último que se supo (`limit` corta la lista: la ventana
+    muestra las primeras 12; la isla pide todas y filtra por proyecto, o las del suyo no saldrían); el estado es
     None si el reloj no responde."""
 
     def __init__(self):
         self.status, self.tasks = None, []
+        self.titles = {}
         self.repos = {}
         self.at = self.tasks_at = 0.0
         self.busy = False
 
-    def read(self):
+    def read(self, limit=MAX_TASKS):
         now = time.monotonic()
         if not self.busy and now - self.at >= EVERY:
             self.busy, self.at = True, now
             threading.Thread(target=self._fetch, args=(now - self.tasks_at >= TASKS_EVERY,),
                              daemon=True).start()
-        return describe(self.status), [dict(t, repo=self.repos.get(t['project'], '')) for t in self.tasks]
+        return describe(self.status), [dict(t, title=self.titles.get(t['id'], t['title']), repo=self.repos.get(t['project'], ''))
+                                       for t in self.tasks[:limit]]
 
     def refresh(self):
         self.at = self.tasks_at = 0.0
@@ -118,7 +181,8 @@ class Watcher:
             if with_tasks:
                 ok, text = run('task', 'list')
                 if ok:
-                    self.tasks, self.tasks_at = parse_tasks(text)[:MAX_TASKS], time.monotonic()
+                    self.tasks, self.tasks_at = parse_tasks(text), time.monotonic()
+                    self.titles = read_titles()
                 ok, text = run('project', 'list')
                 if ok:
                     self.repos = parse_projects(text)
