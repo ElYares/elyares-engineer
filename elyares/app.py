@@ -84,7 +84,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import (actions, boxview, chatview, coffe, commands, devherd, fonts, github, gitflowview, hypr, ipc, mascot, paint,  # noqa: E402
-               moreview, pomodoroview, pomoisland, preview, prefsview, projectview, remote, settings, serversview, sources, spotifyview, state, store, terminal, testrun, theme, themes, themeview, windowframe, windowview,
+               moreview, pomodoroview, pomoisland, preview, prefsview, projectview, remote, settings, serversview, sources, spotifyview, state, store, terminal, testrun, theme, themes, themeview, usage, usageview, windowframe, windowview,
                workflowview)
 from .state import MAIN_ROLE, Member, Model, elapsed  # noqa: E402
 
@@ -259,7 +259,7 @@ def rgb(color):
     return mascot.rgba(color)[:3]
 
 
-class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitflowview.GitFlowView, themeview.ThemesView, spotifyview.SpotifyView, serversview.ServersView, pomodoroview.PomodoroView, pomoisland.PomoIslandView, moreview.MoreView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
+class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitflowview.GitFlowView, themeview.ThemesView, spotifyview.SpotifyView, serversview.ServersView, usageview.UsageView, pomodoroview.PomodoroView, pomoisland.PomoIslandView, moreview.MoreView, prefsview.PrefsView, workflowview.WorkflowView, windowview.WindowView):
     _pills_need = (None, 0)             # (con qué letra se midió, ancho): lo que pide el pie de pastillas
 
     def __init__(self, app):
@@ -431,6 +431,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
         GLib.timeout_add_seconds(3, self.poll_dnd)
         GLib.timeout_add_seconds(terminal.SAVE_EVERY, self.on_terminal_save)
         # "Terminó" y "esperando" caducan solos aunque no lleguen más eventos.
+        GLib.timeout_add_seconds(usage.SAMPLE_EVERY, usage.sample_in_background)
         GLib.timeout_add_seconds(1, self.on_second)
         if self.model.sessions:
             # Sesiones del daemon anterior: algún pane pudo cerrarse entre tanto.
@@ -803,6 +804,8 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             self.toggle_spotify()
         elif order == 'servers':
             self.toggle_servers()
+        elif order == 'usage':
+            self.toggle_usage()
         elif order == 'pomodoro':
             self.toggle_pomodoro()
         elif order == 'pomoisland':
@@ -1212,6 +1215,8 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             return 'more'
         if self.sv_open and not self.windowed:
             return 'servers'
+        if self.us_open and not self.windowed:
+            return 'usage'
         if self.pm_open and not self.windowed:
             return 'pomodoro'
         if self.sp_open and not self.windowed:
@@ -1358,6 +1363,8 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             return self.spotify_goal()
         if mode == 'servers':
             return self.servers_goal()
+        if mode == 'usage':
+            return self.usage_goal()
         if mode == 'pomodoro':
             return self.pomodoro_goal()
         if mode == 'prefs':
@@ -1643,7 +1650,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
 
         widget.queue_draw()
         # Una burbuja a medio irse sigue pidiendo cuadros hasta que termina.
-        if settled and not self.hover and not self.override and not self.tip_pop and not self.boxes_busy() and not self.gitflow_busy() and not self.spotify_busy() and not self.pomodoro_busy():
+        if settled and not self.hover and not self.override and not self.tip_pop and not self.boxes_busy() and not self.gitflow_busy() and not self.spotify_busy() and not self.usage_busy() and not self.pomodoro_busy():
             # Quieta: escondida no dibuja nada y asomada basta con IDLE_FPS. El
             # reloj de GTK despierta al proceso 60 veces por segundo aunque no
             # haya nada que redibujar.
@@ -1808,9 +1815,9 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
                 cr.stroke()
             self.chat_place(h)
             return
-        if mode in ('more', 'prefs', 'boxes', 'themes', 'gitflow', 'spotify', 'servers', 'pomodoro'):
+        if mode in ('more', 'prefs', 'boxes', 'themes', 'gitflow', 'spotify', 'servers', 'usage', 'pomodoro'):
             {'more': self.draw_more, 'prefs': self.draw_prefs, 'boxes': self.draw_boxes, 'themes': self.draw_themes,
-             'gitflow': self.draw_gitflow, 'spotify': self.draw_spotify, 'servers': self.draw_servers, 'pomodoro': self.draw_pomodoro}[mode](cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
+             'gitflow': self.draw_gitflow, 'spotify': self.draw_spotify, 'servers': self.draw_servers, 'usage': self.draw_usage, 'pomodoro': self.draw_pomodoro}[mode](cr, x0, w, h, clamp((w - 380) / 80) * clamp((h - 90) / 60))
             cr.restore()
             if edge:
                 cr.append_path(edge)
@@ -3113,7 +3120,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 self.on_hit(kind, key)
                 return
-        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'more', 'boxes', 'themes', 'gitflow', 'spotify', 'servers', 'pomodoro') or (self.rows and y > self.rows[0][1]):
+        if self.windowed or self.target() in ('board', 'chat', 'projects', 'prefs', 'more', 'boxes', 'themes', 'gitflow', 'spotify', 'servers', 'usage', 'pomodoro') or (self.rows and y > self.rows[0][1]):
             return                      # en la ventana, un clic en el vacío no hace nada
         if x < x0 + 12 + PET + 4:
             self.poke()
@@ -3147,6 +3154,9 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
             return
         if kind == 'servers':
             self.on_servers_hit(key)
+            return
+        if kind == 'usage':
+            self.on_usage_hit(key)
             return
         if kind == 'pomodoro':
             self.on_pomodoro_hit(key)

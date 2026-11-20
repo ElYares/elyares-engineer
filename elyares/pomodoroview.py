@@ -133,7 +133,7 @@ class PomodoroView:
             if self.chat_open:
                 self.close_chat()
             self.projects_open = self.prefs_open = self.more_open = self.boxes_open = False
-            self.themes_open = self.gf_open = self.sp_open = self.sv_open = False
+            self.themes_open = self.gf_open = self.sp_open = self.sv_open = self.us_open = False
             self.pm_root = self.pomodoro_root()
             self.pm_detail = None
             self.pomo_watch.refresh()

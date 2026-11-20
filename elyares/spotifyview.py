@@ -62,7 +62,7 @@ class SpotifyView:
             if self.chat_open:
                 self.close_chat()
             self.projects_open = self.prefs_open = self.more_open = self.boxes_open = False
-            self.themes_open = self.gf_open = self.sv_open = self.pm_open = False
+            self.themes_open = self.gf_open = self.sv_open = self.us_open = self.pm_open = False
             if self.sp_watch is None:
                 self.sp_watch = spotify.Watcher()
             self.sp_watch.refresh()
