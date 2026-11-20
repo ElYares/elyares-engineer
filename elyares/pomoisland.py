@@ -21,13 +21,13 @@ from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import cup, mascot, pomodoro, pomodoroview, settings, themes  # noqa: E402
 
-PI_PILL_W, PI_PILL_H = 150, 36          # colapsada
-PI_WIN_H = 420                          # alto de su ventana: lo más alto que llega el panel
+PI_PILL_W, PI_PILL_H = 112, 38          # colapsada
+PI_WIN_H = 720                          # alto de su ventana: lo más alto que llega el panel
 PI_GAP = 6                              # entre ella y la isla de siempre
 PI_SPRING_K, PI_SPRING_C = 220.0, 22.0  # los de la isla: rebota un poquito
 PI_GLASS_EDGE = .16                     # el filo claro del vidrio (`app.GLASS_EDGE`)
-PI_CUP_MINI = 26                        # la tacita de la pastilla
-FONT_PI_PILL = 'Sans Semi-Bold 10'
+PI_CUP_MINI = 30                        # la tacita de la pastilla
+FONT_PI_PILL = 'Sans Bold 12'
 
 
 def clamp(x, lo=0.0, hi=1.0):
@@ -122,6 +122,9 @@ class PomoIslandView:
         click = Gtk.GestureClick()
         click.connect('pressed', self.on_pi_click)
         da.add_controller(click)
+        wheel = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
+        wheel.connect('scroll', lambda _c, _dx, dy: self.on_pomodoro_scroll(dy, self.pi_pointer, True))
+        da.add_controller(wheel)
         win.set_child(da)
         self.pi_win, self.pi_da = win, da
         return win
@@ -253,20 +256,18 @@ class PomoIslandView:
             cr.stroke()
 
     def draw_pi_pill(self, cr, x0, w, h, alpha):
-        """Colapsada: la tacita con su café y el reloj (o «Pomodoro» si está parado). Un clic la abre."""
-        status = pomodoro.describe(self.pomo_watch.status)
+        """Colapsada: la tacita, que sigue llenándose o vaciándose, y el cronómetro (en el color de
+        la fase: verde en foco, ámbar en descanso). Un clic la abre."""
+        status, _tasks = self.pomo_watch.read()          # `read` es lo que pregunta a coffe: sin él, la taza se congela (ya viene descrito)
         if self.over(x0, 0, w, h):
             cr.rectangle(x0, 0, w, h)
             cr.set_source_rgba(*themes.glow(), .06 * alpha)
             cr.fill()
-        cup.draw(cr, x0 + 8, (PI_PILL_H - PI_CUP_MINI) / 2, PI_CUP_MINI, cup.state_of(status), cup.level_of(status),
-                 time.monotonic(), alpha)
-        text = status['clock'] if status and status['running'] else 'Pomodoro'
-        self.put(cr, text, FONT_PI_PILL, x0 + 8 + PI_CUP_MINI + 8, PI_PILL_H / 2 - 8,
-                      mascot.rgba(self.ink('head'))[:3], alpha, width=w - 70)
-        opens = '‹' if self.pi_side == 'left' else '›'
-        self.put(cr, opens, 'Sans Semi-Bold 12', x0 + w - 12, PI_PILL_H / 2 - 9,
-                 mascot.rgba(self.ink('text', .62))[:3], alpha, align=1.0)
+        cup.draw(cr, x0 + 8, (PI_PILL_H - PI_CUP_MINI) / 2, PI_CUP_MINI, cup.state_of(status),
+                 self.pomodoro_level(status), time.monotonic(), alpha)
+        text = status['clock'] if status else '--:--'
+        tone = self.pomodoro_tone(status)
+        self.put(cr, text, FONT_PI_PILL, x0 + 8 + PI_CUP_MINI + 10, PI_PILL_H / 2 - 9, mascot.rgba(tone)[:3], alpha)
 
     # ── el ratón ────────────────────────────────────────────────────────────
 

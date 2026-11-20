@@ -403,6 +403,7 @@ class Island(chatview.ChatView, projectview.ProjectView, boxview.BoxesView, gitf
         self.da = da
         self.chat_widgets(overlay)
         self.boxes_widgets(overlay)
+        self.pomodoro_widgets()
 
         css = Gtk.CssProvider()
         css.load_from_string('window, window.background { background: transparent; }')

@@ -3496,7 +3496,7 @@ class Ventana(Dibujo):
         isl = self._pomodoro_listo(dict(phase='focus', remaining_secs=600, progress=.4, task={'title': 'a'}), tasks)
         self.assertEqual(isl.target(), 'pomodoro')
         self.draw()
-        self.assertEqual(self.hit('pomodoro'), ['close', 'island', 'pause', 'void', 'done', 'start:1'])
+        self.assertEqual(self.hit('pomodoro'), ['close', 'island', 'pause', 'void', 'done', 'start:1', 'info:1'])
 
     def test_un_clic_arranca_una_tarea_que_se_ve_y_no_una_que_no(self):
         tasks = [dict(id='1', title='a', project='p / uno', repo='/r/uno'),
@@ -3562,6 +3562,77 @@ class Ventana(Dibujo):
         isl.toggle_pomoisland = mock.Mock()
         isl.on_hit('pomodoro', 'island')
         isl.toggle_pomoisland.assert_called_once_with()
+
+    def test_la_pastilla_del_pomodoro_pregunta_al_reloj_y_dibuja_sin_error(self):
+        isl = self._pomodoro_listo(dict(phase='focus', remaining_secs=600, progress=.4), [])
+        isl.pi_open, isl.pi_collapsed = True, True
+        isl.pw, isl.ph = pomoisland.PI_PILL_W, pomoisland.PI_PILL_H
+        isl.pi_rect = mock.Mock(return_value=(0, pomoisland.PI_PILL_W, pomoisland.PI_PILL_H))
+        isl.pi_draw(None, self.cr, 600, 100)
+        isl.pomo_watch.read.assert_called()                  # sin preguntar, la taza oculta se congelaría
+
+    def test_el_nivel_de_la_taza_se_suaviza_y_un_cambio_grande_salta(self):
+        isl = self._pomodoro_listo(None, [])
+        isl.pm_shown = (None, 0.0)
+        focus = lambda p: dict(phase='focus', progress=p, running=True, parked=False, task='')
+        first = isl.pomodoro_level(focus(.50))
+        self.assertAlmostEqual(first, .5)
+        near = isl.pomodoro_level(focus(.52))                # un segundo después: baja de corrido
+        self.assertTrue(.48 <= near <= .5)
+        self.assertAlmostEqual(isl.pomodoro_level(focus(.95)), .05)       # otra fase: de una vez
+
+    def test_clic_en_el_texto_de_la_tarea_abre_la_burbuja_y_otro_clic_la_cierra(self):
+        status = dict(phase='focus', remaining_secs=600, progress=.4, task={'id': 7, 'title': 'Una tarea larguisima'})
+        isl = self._pomodoro_listo(status, [dict(id='1', title='a', project='p / uno', repo='/r/uno')])
+        self.draw()
+        self.assertIn('info:7', self.hit('pomodoro'))
+        info = dict(id='7', title='Una tarea larguisima', project='uno', estimate=2, text='Hay que hacer esto.')
+        with mock.patch('elyares.pomodoro.task_info', return_value=info):
+            isl.on_hit('pomodoro', 'info:7')
+            self.assertEqual(isl.pm_detail, info)
+            self.draw()
+            self.assertIn('info-close', self.hit('pomodoro'))
+            self.assertNotIn('start:1', self.hit('pomodoro'))       # la burbuja ocupa el sitio de la lista
+            isl.on_hit('pomodoro', 'info:7')                        # el mismo texto: la cierra
+            self.assertIsNone(isl.pm_detail)
+            isl.on_hit('pomodoro', 'info:7')
+            isl.on_hit('pomodoro', 'info-close')
+            self.assertIsNone(isl.pm_detail)
+
+    def test_la_i_de_una_fila_abre_su_burbuja_sin_arrancar_el_pomodoro(self):
+        isl = self._pomodoro_listo(dict(phase='idle', progress=0), [dict(id='1', title='a', project='p', repo='/r/uno')])
+        isl.window_pomodoro = mock.Mock()
+        with mock.patch('elyares.pomodoro.task_info', return_value=dict(id='1', title='a', project='p', estimate=0, text='')):
+            isl.on_hit('pomodoro', 'info:1')
+        isl.window_pomodoro.assert_not_called()
+        self.assertEqual(isl.pm_detail['id'], '1')
+        self.draw()                                                  # sin descripción también se dibuja
+
+    def test_la_rueda_corre_la_descripcion_larga_solo_con_el_puntero_sobre_la_burbuja(self):
+        isl = self._pomodoro_listo(dict(phase='idle', progress=0), [])
+        isl.screen_h = 520                                   # poca pantalla: la descripción no cabe entera
+        isl.pm_detail = dict(id='9', title='t', project='p', estimate=1, text='\n'.join(f'{i}) paso numero {i}' for i in range(40)))
+        isl.pm_scroll = 0.0
+        self.draw()
+        x, y, w, h = isl.pm_rects[False]
+        self.assertLess(h, 40 * pomodoroview.DETAIL_LINE)    # la burbuja se acotó
+        self.assertFalse(isl.on_pomodoro_scroll(1, (x - 50, y), False))        # fuera de ella, no la atiende
+        self.assertTrue(isl.on_pomodoro_scroll(1, (x + 5, y + 5), False))
+        self.assertEqual(isl.pm_scroll, pomodoroview.SCROLL_STEP)
+        isl.on_pomodoro_scroll(-1, (x + 5, y + 5), False)
+        isl.on_pomodoro_scroll(-1, (x + 5, y + 5), False)
+        self.assertEqual(isl.pm_scroll, 0.0)                 # no baja de cero
+        for _ in range(200):
+            isl.on_pomodoro_scroll(1, (x + 5, y + 5), False)
+        self.draw()
+        self.assertLessEqual(isl.pm_scroll, isl.pm_text[1])  # el dibujo la recorta al final
+        self.assertLess(isl.pm_scroll, 200 * pomodoroview.SCROLL_STEP)
+
+    def test_cerrar_el_panel_cierra_la_burbuja(self):
+        isl = self._pomodoro_listo(dict(phase='idle', progress=0), [])
+        isl.pm_detail = dict(id='1', title='a', project='p', estimate=0, text='')
+        isl.on_hit('pomodoro', 'close')
+        self.assertIsNone(isl.pm_detail)
 
     def test_la_isla_del_pomodoro_mide_segun_este_a_la_vista_en_pastilla_o_abierta(self):
         isl = self._pomodoro_listo(dict(phase='idle', progress=0), [])
