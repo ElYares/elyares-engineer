@@ -208,7 +208,7 @@ class Equipo(ModelCase):
         self.assertEqual([m.name for m in self.m.sessions['a'].team()],
                          ['elyares-engineer', 'elyares-architect', 'elyares-auditor', 'elyares-reviewer',
                           'elyares-designer', 'elyares-mobile', 'elyares-devops', 'elyares-researcher',
-                          'elyares-coach', 'elyares-analyst'])
+                          'elyares-coach', 'elyares-analyst', 'elyares-tester'])
         self.assertEqual(self.states(), self.rest_idle('working', 'idle', 'idle', 'idle'))
 
     def test_los_pasos_del_engineer_son_los_del_turno(self):

@@ -13,6 +13,9 @@ Uso, con el payload del hook por stdin (install.sh lo copia como `elyares-guard`
   elyares-guard solo-docs      el Edit y el Write de un agente que solo documenta
                                (el architect, el researcher, el coach, el analyst): nada que no sea
                                documentación
+  elyares-guard pruebas        el Bash y el Edit/Write del tester: como solo-lectura,
+                               y además corre Playwright (no instala nada) y
+                               escribe solo en tests/, specs/ y *.spec.*
   elyares-guard config         el Edit y el Write de cualquier sesión: pregunta
                                antes de tocar la configuración de un linter, un
                                analizador, un formateador o el CI que ya existe
@@ -230,6 +233,16 @@ def after_options(args, value_flags=()):
 # PR. Lo prende `main`; no va como argumento porque `check` y `simple` se
 # llaman una a otra por una docena de sitios.
 DELIVERS = False
+# Modo `pruebas`: como solo-lectura, y Playwright corre pero no se instala ni
+# ejecuta código suelto en la página.
+PRUEBAS = False
+PLAYWRIGHT = {'playwright', 'playwright-cli'}
+PLAYWRIGHT_NO = {'install', 'install-deps', 'uninstall', 'init-agents', 'mcp', 'run-code',
+                 'run-test-mcp-server'}
+NPX_FETCH = {'-y', '--yes', '-p', '--package'}              # bajan paquetes a ciegas
+SPEC_FILE = re.compile(r'\.(spec|test)\.[cm]?[jt]sx?$')
+TEST_DIRS = {'tests', 'specs'}
+PLAYWRIGHT_CONFIG = re.compile(r'^playwright[\w.-]*\.config\.[cm]?[jt]s$')
 GIT_ADD_ALL = {'-A', '--all', '-u', '--update', '.'}        # lo que barre con todo: se prepara por ruta
 GIT_COMMIT_NO = {'--amend', '--no-verify', '-n', '-a', '--all'}
 GIT_PUSH_NO = {'-f', '--force', '--force-with-lease', '--force-if-includes', '-d', '--delete', '--mirror',
@@ -347,6 +360,18 @@ def scp(args, scratch):
     return None
 
 
+def playwright(name, rest, sub):
+    """Lo de Playwright que el tester no puede: instalar, abrir el MCP o correr
+    código suelto en la página."""
+    if name == 'npx' and NPX_FETCH & set(rest):
+        return '`npx -y` baja paquetes sin preguntar'
+    tool = (sub[0] if name == 'npx' and sub else name).split('@')[0]
+    verb = after_options(sub[1:] if name == 'npx' else rest)[:1]
+    if tool in PLAYWRIGHT and verb and verb[0] in PLAYWRIGHT_NO:
+        return f'`{tool} {verb[0]}` instala o ejecuta código fuera de las pruebas'
+    return None
+
+
 def simple(segment, scratch, depth=0):
     """El motivo por el que un comando simple no es de solo lectura, o None."""
     reason = redirect(segment, scratch)
@@ -436,6 +461,10 @@ def simple(segment, scratch, depth=0):
         return '`npm audit fix` cambia dependencias'
     if name == 'go' and sub[:2] == ['mod', 'tidy']:
         return '`go mod tidy` reescribe go.mod'
+    if PRUEBAS:
+        reason = playwright(name, rest, sub)
+        if reason:
+            return reason
     if name == 'npx' and sub:
         return simple(sub, scratch, depth + 1)
     if name in ('flutter', 'dart'):
@@ -521,6 +550,17 @@ def docs_only(path):
     return None if ext in DOCS else f'`{os.path.basename(path)}` no es documentación ({", ".join(sorted(DOCS))})'
 
 
+def tests_only(path):
+    """El motivo por el que el tester no puede escribir ese archivo, o None."""
+    path = os.path.normpath(path)
+    if path.startswith(SCRATCH):
+        return None
+    base = os.path.basename(path)
+    if SPEC_FILE.search(base) or TEST_DIRS & set(path.split(os.sep)[:-1]):
+        return None
+    return f'`{base}` no está en tests/ ni en specs/ y no es un *.spec.*'
+
+
 def protected(path):
     """Si es la configuración, ya existente, de algo que revisa el código."""
     if not (CHECKS.match(os.path.basename(path)) or WORKFLOW.search(path)):
@@ -538,13 +578,29 @@ def main(argv=None, stdin=None, out=None, err=None):
     mode = argv[0] if argv else ''
     tool_input = payload.get('tool_input') or {}
     path = tool_input.get('file_path') or ''
-    if mode in ('solo-lectura', 'entrega'):
-        global DELIVERS
+    if mode == 'pruebas' and path:
+        if PLAYWRIGHT_CONFIG.match(os.path.basename(path)):
+            json.dump({'hookSpecificOutput': {
+                'hookEventName': 'PreToolUse', 'permissionDecision': 'ask',
+                'permissionDecisionReason':
+                    'La configuración de Playwright (tiempos, navegadores, reintentos) '
+                    'cambia cómo pasan todas las pruebas: confirma solo si es intencional.'}}, out)
+            return 0
+        reason = tests_only(path)
+        if reason:
+            print(f'elyares-guard: este agente solo escribe pruebas: {reason}. Lo que haya '
+                  'que cambiar en la aplicación va en tu informe.', file=err)
+            return 2
+        return 0
+    if mode in ('solo-lectura', 'entrega', 'pruebas'):
+        global DELIVERS, PRUEBAS
         DELIVERS = mode == 'entrega'
+        PRUEBAS = mode == 'pruebas'
         scratch = SCRATCH + tuple(d.rstrip('/') + '/' for d in [payload.get('scratchpad_dir')] if d)
         reason = check(tool_input.get('command') or '', scratch)
         if reason:
-            does = 'lee y entrega (commit, push y PR)' if DELIVERS else 'solo lee'
+            does = ('lee y entrega (commit, push y PR)' if DELIVERS
+                    else 'lee y corre pruebas' if PRUEBAS else 'solo lee')
             print(f'elyares-guard: este agente {does}, y el comando no pasó: {reason}. No lo '
                   'rodees: si de verdad hace falta, dilo en tu informe para que lo haga el '
                   'engineer. Para un archivo temporal usa /tmp.', file=err)

@@ -41,6 +41,30 @@ class Contrast(unittest.TestCase):
             self.assertGreaterEqual(themes.contrast(look['surface'][0], look['accent']), MIN, (name, 'Permitir'))
 
 
+class LightGlass(unittest.TestCase):
+    def test_un_tema_claro_en_vidrio_va_casi_opaco_y_uno_oscuro_conserva_su_transparencia(self):
+        from elyares import fonts
+        old = fonts.light, fonts.tired
+        try:
+            fonts.light, fonts.tired = False, False
+            self.assertEqual(fonts.glass(.5), .5)                       # oscuro: como lo pidió el usuario
+            fonts.light = True
+            self.assertEqual(fonts.glass(.5), fonts.LIGHT_GLASS)        # claro: el texto oscuro necesita fondo
+            self.assertEqual(fonts.glass(.97), .97)                     # lo que ya es más opaco no se toca
+        finally:
+            fonts.light, fonts.tired = old
+
+    def test_cambiar_de_tema_claro_a_oscuro_actualiza_la_bandera(self):
+        from elyares import fonts
+        for name in themes.THEMES:
+            old = themes.current
+            try:
+                themes.use(name)
+                self.assertEqual(themes.is_light(), name in ('papel', 'hueso', 'perla', 'niebla', 'salvia', 'arena'))
+            finally:
+                themes.use(old)
+
+
 class TiredView(unittest.TestCase):
     def test_scale_goes_once_at_the_root(self):
         from elyares import fonts

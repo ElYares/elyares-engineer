@@ -185,6 +185,50 @@ class Hook(unittest.TestCase):
             self.assertIn(os.path.basename(path), said)
 
 
+class Pruebas(unittest.TestCase):
+    PASA = ['npx playwright test', 'npx playwright test tests/login.spec.ts --headed',
+            'npx playwright show-report', 'npx playwright merge-reports --reporter html ./all',
+            'playwright-cli open http://localhost:3000 --headed', 'playwright-cli snapshot',
+            'playwright-cli click e12', 'git status', 'ls tests', 'npx playwright test -g install']
+    SE_FRENA = ['npx playwright install', 'npx playwright@latest install chromium',
+                'npx playwright install-deps', 'playwright-cli install --skills',
+                'playwright-cli run-code "document.cookie"', 'npx playwright init-agents --loop=claude',
+                'npx playwright mcp', 'npx -y cowsay hola', 'npm i -D @playwright/test',
+                'git commit -m x', 'git push', 'rm tests/a.spec.ts']
+
+    def command(self, command):
+        return run('pruebas', {'tool_input': {'command': command}})[0]
+
+    def write(self, path):
+        return run('pruebas', {'tool_input': {'file_path': path}})
+
+    def test_corre_playwright_y_lee(self):
+        for command in self.PASA:
+            with self.subTest(command):
+                self.assertEqual(self.command(command), 0)
+
+    def test_no_instala_ni_ejecuta_codigo_suelto(self):
+        for command in self.SE_FRENA:
+            with self.subTest(command):
+                self.assertEqual(self.command(command), 2)
+
+    def test_solo_escribe_pruebas(self):
+        for path in ('/app/tests/login.spec.ts', '/app/specs/login.md', '/app/e2e/a.spec.ts',
+                     '/app/src/login.test.ts', '/tmp/informe.md'):
+            with self.subTest(path):
+                self.assertEqual(self.write(path), (0, ''))
+        for path in ('/app/src/login.ts', '/app/package.json', '/app/tests/../src/a.ts'):
+            with self.subTest(path):
+                self.assertEqual(self.write(path)[0], 2)
+
+    def test_pregunta_antes_de_tocar_la_configuracion_de_playwright(self):
+        for path in ('/app/playwright.config.ts', '/app/playwright.ci.config.js'):
+            with self.subTest(path):
+                code, said = self.write(path)
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(said)['hookSpecificOutput']['permissionDecision'], 'ask')
+
+
 class Configuracion(unittest.TestCase):
     def ask(self, path):
         code, said = run('config', {'tool_input': {'file_path': path}})
