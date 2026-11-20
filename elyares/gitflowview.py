@@ -60,7 +60,7 @@ class GitFlowView:
         if self.gf_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.prefs_open = self.more_open = self.boxes_open = self.themes_open = self.sp_open = self.sv_open = self.pm_open = False
+            self.projects_open = self.prefs_open = self.more_open = self.boxes_open = self.themes_open = self.sp_open = self.sv_open = self.us_open = self.pm_open = False
             self.gf_data, self.gf_confirm, self.gf_result, self.gf_seen, self.gf_sug = None, None, None, set(), None
             self.gf_refresh()
         self.ensure_tick()

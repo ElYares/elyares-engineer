@@ -18,6 +18,7 @@ MORE_ROWS = (
     ('gitflow', 'Git', 'Ramas del proyecto: subir, PR y merge paso a paso.'),
     ('spotify', 'Spotify', 'Qué suena, la portada y pausa, siguiente y anterior.'),
     ('pomodoro', 'Pomodoro', 'La taza de café, el reloj y las tareas del proyecto abierto; también como isla aparte.'),
+    ('usage', 'Consumo', 'Tu sesión de 5 h y la semana en gráfica, y cuándo se reinician.'),
     ('servers', 'Servidores', 'Tus hosts de ssh: un clic y se abre en Ghostty.'),
     ('themes', 'Temas', 'Cambia los colores de la isla y de la ventana.'),
     ('prefs', 'Ajustes', 'Vidrio, brillo, estilo y vista cansada.'),
@@ -38,7 +39,7 @@ class MoreView:
         if self.more_open:
             if self.chat_open:
                 self.close_chat()
-            self.projects_open = self.prefs_open = self.boxes_open = self.themes_open = self.gf_open = self.sp_open = self.sv_open = self.pm_open = False
+            self.projects_open = self.prefs_open = self.boxes_open = self.themes_open = self.gf_open = self.sp_open = self.sv_open = self.us_open = self.pm_open = False
         self.ensure_tick()
 
     def more_goal(self):
@@ -88,6 +89,8 @@ class MoreView:
             self.toggle_spotify()
         elif key == 'servers':
             self.toggle_servers()
+        elif key == 'usage':
+            self.toggle_usage()
         elif key == 'pomodoro':
             self.toggle_pomodoro()
         elif key == 'themes':

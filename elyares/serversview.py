@@ -28,7 +28,7 @@ class ServersView:
             if self.chat_open:
                 self.close_chat()
             self.projects_open = self.prefs_open = self.more_open = self.boxes_open = False
-            self.themes_open = self.gf_open = self.sp_open = self.pm_open = False
+            self.themes_open = self.gf_open = self.sp_open = self.us_open = self.pm_open = False
             self.sv_hosts, self.sv_msg = tuple(servers.hosts()[:servers.MAX]), ''
         self.ensure_tick()
 
